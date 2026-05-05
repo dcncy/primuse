@@ -12,7 +12,8 @@ import PrimuseKit
 /// into the vertical center of the window and look untethered.
 struct MacSettingsView: View {
     private enum Tab: String, Hashable {
-        case general, equalizer, effects, library, sources, widgets, sync, recentlyDeleted, security, about
+        case general, equalizer, effects, library, lyricsTranslation, sources, playlistImport
+        case duplicates, scrobble, widgets, sync, recentlyDeleted, security, about
     }
 
     @State private var tab: Tab = .general
@@ -36,9 +37,25 @@ struct MacSettingsView: View {
                 .tabItem { Label("metadata_scraping", systemImage: "wand.and.stars") }
                 .tag(Tab.library)
 
+            LyricsTranslationSettingsView().tabPaneSize()
+                .tabItem { Label("lyrics_translation_title", systemImage: "character.bubble") }
+                .tag(Tab.lyricsTranslation)
+
             MacSourcesView().tabPaneSize()
                 .tabItem { Label("manage_sources", systemImage: "externaldrive.connected.to.line.below") }
                 .tag(Tab.sources)
+
+            PlaylistImportView().tabPaneSize()
+                .tabItem { Label("playlist_import_title", systemImage: "tray.and.arrow.down") }
+                .tag(Tab.playlistImport)
+
+            DuplicateSongsView().tabPaneSize()
+                .tabItem { Label("dup_title", systemImage: "square.stack.3d.up.badge.automatic") }
+                .tag(Tab.duplicates)
+
+            ScrobbleSettingsView().tabPaneSize()
+                .tabItem { Label("scrobble_title", systemImage: "music.note.list") }
+                .tag(Tab.scrobble)
 
             MacWidgetSyncSettingsView().tabPaneSize()
                 .tabItem { Label("desktop_widgets", systemImage: "rectangle.grid.2x2") }

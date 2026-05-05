@@ -148,35 +148,47 @@ struct DesktopLyricsView: View {
 
     @ViewBuilder
     private func content(in size: CGSize) -> some View {
-        let active = activeLine
-        let next = nextLine
+        let active = activeLyricLine
+        let next = nextLyricLine
         let placeholder = player.currentSong?.title
             ?? String(localized: "desktop_lyrics_no_song")
 
         switch layout {
         case .single:
-            Text(active ?? placeholder)
-                .font(.system(size: activeFontSize(in: size), weight: .semibold))
-                .foregroundStyle(lyricsColor)
-                .shadow(color: .black.opacity(0.6), radius: 6, y: 2)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-        case .dual:
-            VStack(spacing: 6) {
-                Text(active ?? placeholder)
+            if let active {
+                desktopLyricLine(active, size: activeFontSize(in: size), color: lyricsColor)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Text(placeholder)
                     .font(.system(size: activeFontSize(in: size), weight: .semibold))
                     .foregroundStyle(lyricsColor)
                     .shadow(color: .black.opacity(0.6), radius: 6, y: 2)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+        case .dual:
+            VStack(spacing: 6) {
+                if let active {
+                    desktopLyricLine(active, size: activeFontSize(in: size), color: lyricsColor)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text(placeholder)
+                        .font(.system(size: activeFontSize(in: size), weight: .semibold))
+                        .foregroundStyle(lyricsColor)
+                        .shadow(color: .black.opacity(0.6), radius: 6, y: 2)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
 
                 if let next {
                     // 下一行只是提示,保持默认白 — 用户调的颜色只染当前行,
                     // 否则两行同色会让"哪句正在唱"的视觉重点丢失。
-                    Text(next)
+                    Text(next.text)
                         .font(.system(size: nextFontSize(in: size), weight: .medium))
                         .foregroundStyle(.white.opacity(0.6))
                         .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
@@ -190,7 +202,7 @@ struct DesktopLyricsView: View {
             // 纵向排版 —— 左为当前行 (用户色),右为下一行 (白色提示)。
             // 字号根据行字数 + panel 高度自动收缩,避免超出 panel 高度
             // 顶到工具按钮区域。
-            let activeText = active ?? placeholder
+            let activeText = active?.text ?? placeholder
             HStack(alignment: .top, spacing: 14) {
                 verticalColumn(activeText,
                                fontSize: fittedFontSize(text: activeText,
@@ -199,8 +211,8 @@ struct DesktopLyricsView: View {
                                weight: .semibold,
                                color: lyricsColor)
                 if let next {
-                    verticalColumn(next,
-                                   fontSize: fittedFontSize(text: next,
+                    verticalColumn(next.text,
+                                   fontSize: fittedFontSize(text: next.text,
                                                             in: size,
                                                             base: nextFontSize(in: size)),
                                    weight: .medium,
@@ -208,6 +220,27 @@ struct DesktopLyricsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func desktopLyricLine(_ line: LyricLine, size: CGFloat, color: Color) -> some View {
+        if line.isWordLevel {
+            KaraokeLineView(
+                line: line,
+                fontSize: size,
+                weight: .semibold,
+                activeColor: color,
+                inactiveColor: .white.opacity(0.35),
+                timeAt: { date in player.interpolatedTime(at: date) }
+            )
+            .shadow(color: .black.opacity(0.6), radius: 6, y: 2)
+        } else {
+            Text(line.text)
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(color)
+                .shadow(color: .black.opacity(0.6), radius: 6, y: 2)
+                .lineLimit(2)
         }
     }
 
@@ -390,15 +423,15 @@ struct DesktopLyricsView: View {
 
     // MARK: - Lyrics state
 
-    private var activeLine: String? {
+    private var activeLyricLine: LyricLine? {
         guard !lyrics.isEmpty, currentIndex < lyrics.count else { return nil }
-        return lyrics[currentIndex].text
+        return lyrics[currentIndex]
     }
 
-    private var nextLine: String? {
+    private var nextLyricLine: LyricLine? {
         let next = currentIndex + 1
         guard !lyrics.isEmpty, next < lyrics.count else { return nil }
-        return lyrics[next].text
+        return lyrics[next]
     }
 
     private func reloadLyrics() async {

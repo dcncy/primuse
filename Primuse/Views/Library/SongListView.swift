@@ -32,6 +32,14 @@ struct SongListView: View {
     }
 
     var body: some View {
+        content
+            .onAppear { recomputeSorted() }
+            .onChange(of: sortOrder) { _, _ in recomputeSorted() }
+            .onChange(of: songs) { _, _ in updateSortedSongsIfNeeded() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if songs.isEmpty {
             ContentUnavailableView(
                 "no_songs",
@@ -39,46 +47,118 @@ struct SongListView: View {
                 description: Text("no_songs_desc")
             )
         } else {
-            List {
-                ForEach(filteredSongs) { song in
-                    Button {
-                        playSong(song)
-                    } label: {
-                        SongRowView(
-                            song: song,
-                            isPlaying: player.currentSong?.id == song.id,
-                            context: SongRowView.context(
-                                for: song,
-                                sourcesStore: sourcesStore,
-                                backfill: backfill
-                            )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
+            #if os(macOS)
+            macSongList
+            #else
+            iosSongList
+            #endif
+        }
+    }
+
+    private var iosSongList: some View {
+        List {
+            ForEach(filteredSongs) { song in
+                songButton(song)
             }
-            .listStyle(.plain)
-            .searchable(text: $searchText,
-                        placement: .toolbar,
-                        prompt: Text("search_songs_prompt"))
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("sort_by", selection: $sortOrder) {
-                            ForEach(SongSortOrder.allCases, id: \.self) { order in
-                                Text(order.label).tag(order)
+        }
+        .listStyle(.plain)
+        .searchable(text: $searchText,
+                    placement: .toolbar,
+                    prompt: Text("search_songs_prompt"))
+        .toolbar { sortToolbarItem }
+    }
+
+    #if os(macOS)
+    private var macSongList: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                macSummaryHeader
+
+                if filteredSongs.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                        .padding(.top, 48)
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(filteredSongs.enumerated()), id: \.element.id) { index, song in
+                            songButton(song)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                            if index != filteredSongs.count - 1 {
+                                Divider().padding(.leading, 68)
                             }
                         }
-                        .pickerStyle(.inline)
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
                     }
+                    .background(.background.secondary, in: .rect(cornerRadius: 8))
                 }
             }
-            .onAppear { recomputeSorted() }
-            .onChange(of: sortOrder) { _, _ in recomputeSorted() }
-            .onChange(of: songs) { _, _ in updateSortedSongsIfNeeded() }
+            .padding(.horizontal, 24)
+            .padding(.top, 16)
+            .padding(.bottom, 112)
+            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .searchable(text: $searchText,
+                    placement: .toolbar,
+                    prompt: Text("search_songs_prompt"))
+        .toolbar { sortToolbarItem }
+    }
+
+    private var macSummaryHeader: some View {
+        let playableCount = songs.filter(\.isPlayable).count
+        return HStack(spacing: 14) {
+            Image(systemName: "music.note")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 52, height: 52)
+                .background(.tint.opacity(0.14), in: .rect(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("tab_songs")
+                    .font(.title3.weight(.semibold))
+                Text("\(songs.count) \(String(localized: "songs_count")) · \(playableCount) \(String(localized: "home_playable")) · \(totalDuration.formattedShort)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: .rect(cornerRadius: 8))
+    }
+    #endif
+
+    private var sortToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Picker("sort_by", selection: $sortOrder) {
+                    ForEach(SongSortOrder.allCases, id: \.self) { order in
+                        Text(order.label).tag(order)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+            }
+        }
+    }
+
+    private func songButton(_ song: Song) -> some View {
+        Button {
+            playSong(song)
+        } label: {
+            SongRowView(
+                song: song,
+                isPlaying: player.currentSong?.id == song.id,
+                context: SongRowView.context(
+                    for: song,
+                    sourcesStore: sourcesStore,
+                    backfill: backfill
+                )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// 当前用搜索过滤后的歌曲列表;空字符串时返回完整 cachedSortedSongs。
@@ -153,6 +233,10 @@ struct SongListView: View {
             cachedSortedSongs = songs.sorted { $0.fileFormat.displayName < $1.fileFormat.displayName }
         }
         lastSortedIDSet = Set(cachedSortedSongs.map(\.id))
+    }
+
+    private var totalDuration: TimeInterval {
+        songs.reduce(0) { $0 + $1.duration.sanitizedDuration }
     }
 
     private func playSong(_ song: Song) {

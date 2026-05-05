@@ -26,6 +26,7 @@ struct MacBottomBar: View {
     @State private var airPlayShown = false
     /// 封面点击弹出的「迷你播放程序 / 全屏幕」选项菜单。
     @State private var coverMenuShown = false
+    @State private var isBarHovering = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -39,13 +40,17 @@ struct MacBottomBar: View {
             secondarySection
                 .layoutPriority(1)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
         .glassEffect(.regular, in: .capsule)
+        .shadow(color: .black.opacity(isBarHovering ? 0.22 : 0.14), radius: isBarHovering ? 22 : 14, y: 8)
         .padding(.horizontal, 18)
         .padding(.bottom, 10)
         // 整个 bar 范围统一吃点击事件,避免空白处穿透到下层歌单 row。
         .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.18)) { isBarHovering = hovering }
+        }
         .onTapGesture { /* sink */ }
     }
 
@@ -94,6 +99,9 @@ struct MacBottomBar: View {
                 cycleRepeat()
             }
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.primary.opacity(0.05), in: Capsule())
     }
 
     private var repeatIconName: String {
@@ -134,20 +142,41 @@ struct MacBottomBar: View {
             // 直接展开 NowPlaying。
             coverHoverButton
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(player.currentSong?.title ?? "")
-                    .font(.callout).fontWeight(.semibold)
-                    .lineLimit(1)
-                Text(metaLine)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                MiniProgressBar(
-                    value: player.currentTime,
-                    total: max(player.duration, 0.01),
-                    onSeek: { player.seek(to: $0) }
-                )
-                .frame(height: 4)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(player.currentSong?.title ?? String(localized: "player_empty_title"))
+                            .font(.callout)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(player.currentSong == nil ? .secondary : .primary)
+                            .lineLimit(1)
+                        Text(metaLine.isEmpty ? String(localized: "player_empty_message") : metaLine)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    if player.currentSong != nil {
+                        Text("-\(max(0, player.duration - player.currentTime).formattedDuration)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Text(player.currentSong == nil ? "--:--" : player.currentTime.formattedDuration)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 38, alignment: .leading)
+                    MiniProgressBar(
+                        value: player.currentTime,
+                        total: max(player.duration, 0.01),
+                        onSeek: { player.seek(to: $0) }
+                    )
+                    .frame(height: 4)
+                    .opacity(player.currentSong == nil ? 0.35 : 1)
+                }
             }
             // 文字/进度条这一块点击 → 展开 NowPlaying。
             .contentShape(Rectangle())
@@ -155,7 +184,17 @@ struct MacBottomBar: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
+        .padding(.leading, 8)
+        .padding(.trailing, 12)
+        .padding(.vertical, 5)
+        .background {
+            Capsule()
+                .fill(.primary.opacity(player.currentSong == nil ? 0.035 : 0.065))
+        }
+        .overlay {
+            Capsule()
+                .stroke(.primary.opacity(0.08), lineWidth: 1)
+        }
     }
 
     @State private var isCoverHovering = false
@@ -252,7 +291,7 @@ struct MacBottomBar: View {
                 )
             } else {
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(.quaternary)
+                    .fill(.primary.opacity(0.07))
                     .frame(width: 40, height: 40)
                     .overlay {
                         Image(systemName: "music.note").foregroundStyle(.tertiary)
@@ -316,6 +355,9 @@ struct MacBottomBar: View {
                 .frame(minWidth: 60, idealWidth: 80, maxWidth: 90)
             }
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.primary.opacity(0.05), in: Capsule())
     }
 
     private var volumeSymbol: String {

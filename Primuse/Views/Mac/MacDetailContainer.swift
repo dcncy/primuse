@@ -29,6 +29,9 @@ struct MacDetailContainer: View {
             MacHomeView()
         case .stats:
             ListeningStatsView()
+        case .sources:
+            MacSourcesView()
+                .navigationTitle("sources_title")
         case .playlistImport:
             PlaylistImportView()
                 .navigationTitle("playlist_import_title")

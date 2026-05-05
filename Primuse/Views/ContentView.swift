@@ -15,7 +15,7 @@ struct ContentView: View {
     @ViewBuilder
     private var tabRoot: some View {
         TabView(selection: $selectedTab) {
-            HomeView(switchToSettingsTab: { selectedTab = 3 })
+            HomeView(switchToSourcesTab: { selectedTab = 2 })
                 .tabItem { Label(String(localized: "home_title"), systemImage: "house.fill") }
                 .tag(0)
 
@@ -23,13 +23,17 @@ struct ContentView: View {
                 .tabItem { Label(String(localized: "library_title"), systemImage: "books.vertical") }
                 .tag(1)
 
+            SourcesView()
+                .tabItem { Label(String(localized: "sources_title"), systemImage: "externaldrive.connected.to.line.below") }
+                .tag(2)
+
             SearchView(searchText: $searchText)
                 .tabItem { Label(String(localized: "search_title"), systemImage: "magnifyingglass") }
-                .tag(2)
+                .tag(3)
 
             SettingsView()
                 .tabItem { Label(String(localized: "settings_title"), systemImage: "gearshape") }
-                .tag(3)
+                .tag(4)
         }
     }
 
@@ -251,12 +255,19 @@ struct NowPlayingAccessory: View {
                 )
                 .padding(.trailing, isInline ? 10 : 10)
 
-                // Flexible middle: song title fills remaining space
-                Text(player.currentSong?.title ?? "")
-                    .font(isInline ? .caption : .caption)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: isInline ? 1 : 4) {
+                    Text(player.currentSong?.title ?? String(localized: "player_empty_title"))
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !isInline {
+                        ProgressView(value: player.currentTime, total: max(player.duration, 0.01))
+                            .progressViewStyle(.linear)
+                            .tint(.primary.opacity(0.72))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Fixed right: transport controls
                 HStack(spacing: isInline ? 0 : 4) {
@@ -288,6 +299,12 @@ struct NowPlayingAccessory: View {
             }
             .padding(.horizontal, isInline ? 12 : 8)
             .padding(.vertical, isInline ? 2 : 4)
+            .background {
+                if !isInline {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.primary.opacity(0.05))
+                }
+            }
         }
     }
 }

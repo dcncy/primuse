@@ -12,7 +12,7 @@ import PrimuseKit
 /// into the vertical center of the window and look untethered.
 struct MacSettingsView: View {
     private enum Tab: String, Hashable {
-        case general, equalizer, effects, library, lyricsTranslation, sources
+        case general, equalizer, effects, library, lyricsTranslation
         case widgets, sync, recentlyDeleted, security, about
     }
 
@@ -40,10 +40,6 @@ struct MacSettingsView: View {
             LyricsTranslationSettingsView().tabPaneSize()
                 .tabItem { Label("lyrics_translation_title", systemImage: "character.bubble") }
                 .tag(Tab.lyricsTranslation)
-
-            MacSourcesView().tabPaneSize()
-                .tabItem { Label("manage_sources", systemImage: "externaldrive.connected.to.line.below") }
-                .tag(Tab.sources)
 
             MacWidgetSyncSettingsView().tabPaneSize()
                 .tabItem { Label("desktop_widgets", systemImage: "rectangle.grid.2x2") }

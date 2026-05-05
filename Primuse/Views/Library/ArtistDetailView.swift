@@ -2,6 +2,7 @@ import SwiftUI
 import PrimuseKit
 
 struct ArtistDetailView: View {
+    @Environment(AudioPlayerService.self) private var player
     @Environment(MusicLibrary.self) private var library
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
@@ -17,6 +18,10 @@ struct ArtistDetailView: View {
         library.songs(forArtist: artist.id)
     }
 
+    private var playableSongs: [Song] {
+        songs.filteredPlayable()
+    }
+
     private var visibleSongCount: Int {
         songs.count
     }
@@ -26,8 +31,25 @@ struct ArtistDetailView: View {
     ]
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
+        Group {
+            #if os(macOS)
+            ScrollView(.vertical, showsIndicators: false) {
+                detailContent
+                    .frame(maxWidth: 980, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.bottom, 112)
+            }
+            #else
+            ScrollView {
+                detailContent
+            }
+            #endif
+        }
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var detailContent: some View {
+        VStack(spacing: 24) {
                 #if os(macOS)
                 macHeader
                 #else
@@ -41,6 +63,20 @@ struct ArtistDetailView: View {
                         description: Text("no_songs_desc")
                     )
                     .padding(.top, 24)
+                }
+
+                if songs.isEmpty == false {
+                    MediaDetailActionBar(
+                        canPlay: playableSongs.isEmpty == false,
+                        canShuffle: playableSongs.count > 1,
+                        playAction: playAll,
+                        shuffleAction: shuffleAll
+                    )
+                    #if os(macOS)
+                    .padding(.horizontal, 24)
+                    #else
+                    .padding(.bottom, 2)
+                    #endif
                 }
 
                 // Albums
@@ -84,30 +120,41 @@ struct ArtistDetailView: View {
                             #endif
 
                         LazyVStack(spacing: 0) {
-                            ForEach(songs) { song in
+                            ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                                 SongRowView(
                                     song: song,
+                                    isPlaying: player.currentSong?.id == song.id,
                                     context: SongRowView.context(for: song, sourcesStore: sourcesStore, backfill: backfill)
                                 )
                                 #if os(macOS)
-                                .padding(.horizontal, 24)
+                                .padding(.horizontal, 12)
                                 #else
                                 .padding(.horizontal)
                                 #endif
                                 .padding(.vertical, 8)
-                                Divider()
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    playSong(song)
+                                }
+
+                                if index != songs.count - 1 {
+                                    Divider()
                                     #if os(macOS)
-                                    .padding(.leading, 24 + 50)
+                                        .padding(.leading, 68)
                                     #else
-                                    .padding(.leading, 50)
+                                        .padding(.leading, 50)
                                     #endif
+                                }
                             }
                         }
+                        #if os(macOS)
+                        .padding(.horizontal, 12)
+                        .background(.background.secondary, in: .rect(cornerRadius: 8))
+                        .padding(.horizontal, 24)
+                        #endif
                     }
                 }
-            }
         }
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     #if os(macOS)
@@ -152,5 +199,24 @@ struct ArtistDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.top, 20)
+    }
+
+    private func playAll() {
+        let queue = playableSongs
+        guard let first = queue.first else { return }
+        player.setQueue(queue, startAt: 0)
+        Task { await player.play(song: first) }
+    }
+
+    private func shuffleAll() {
+        player.shuffleEnabled = true
+        playAll()
+    }
+
+    private func playSong(_ song: Song) {
+        let queue = playableSongs
+        guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
+        player.setQueue(queue, startAt: index)
+        Task { await player.play(song: song) }
     }
 }

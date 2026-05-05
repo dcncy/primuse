@@ -2,24 +2,25 @@
 import SwiftUI
 import PrimuseKit
 
-/// macOS-native home dashboard. Replaces the iOS hero card + full-width
-/// purple buttons with a denser layout that's appropriate for a wide
-/// desktop window: a quick-stats strip, recently added albums grid and
-/// recently played row. No tinted blocks, no fixed-width oversized
-/// buttons — inherits the system's tinted/bordered controls so it sits
-/// quietly inside the window chrome.
+/// macOS home as a real library dashboard. It uses the user's own cover art
+/// and live source/scan/backfill state, so the first screen explains what
+/// Primuse is managing instead of just showing another content list.
 struct MacHomeView: View {
     @Environment(MusicLibrary.self) private var library
     @Environment(AudioPlayerService.self) private var player
+    @Environment(SourcesStore.self) private var sourcesStore
+    @Environment(ScanService.self) private var scanService
+    @Environment(MetadataBackfillService.self) private var backfill
 
     private var hasContent: Bool { !library.visibleSongs.isEmpty }
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 32) {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 28) {
                 heroSection
 
                 if hasContent {
+                    dashboardGrid
                     recentlyAddedAlbumsSection
                     recentlyPlayedSection
                     if !library.visibleArtists.isEmpty {
@@ -31,13 +32,11 @@ struct MacHomeView: View {
             }
             .padding(.horizontal, 32)
             .padding(.top, 24)
-            // Mini bar (~76pt) sits in the bottom safe area inset; pad
-            // generously so the last row doesn't tuck under it.
-            .padding(.bottom, 96)
+            .padding(.bottom, 104)
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Hero
 
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -49,25 +48,22 @@ struct MacHomeView: View {
         }
     }
 
-    /// 左 greeting + 大标题 + 库统计一行 / 右 Play All + Shuffle 按钮组。
-    /// 替换原本的 4 列 stat strip — 后者最末位放 quick-play 双按钮卡，
-    /// 在窗口偏窄时按钮文案被截断成 "随机..."。
     private var heroSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(greeting)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
+        HStack(alignment: .center, spacing: 28) {
+            VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("welcome_back")
-                        .font(.system(size: 34, weight: .bold))
-                    Text(librarySummary)
+                    Text(greeting)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text("home_dashboard_title")
+                        .font(.system(size: 36, weight: .bold))
+                        .lineLimit(2)
+                    Text("home_dashboard_subtitle")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
-                Spacer(minLength: 12)
+
                 HStack(spacing: 10) {
                     Button { playLibrary(shuffled: true) } label: {
                         Label("shuffle", systemImage: "shuffle")
@@ -83,7 +79,221 @@ struct MacHomeView: View {
                 }
                 .disabled(!hasContent)
             }
+
+            Spacer(minLength: 20)
+
+            coverMosaic
+                .frame(width: 316, height: 206)
         }
+        .padding(22)
+        .background(.background.secondary, in: .rect(cornerRadius: 8))
+    }
+
+    private var coverMosaic: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.quaternary)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(88), spacing: 8), count: 3), spacing: 8) {
+                ForEach(Array(mosaicSongs.prefix(6).enumerated()), id: \.element.id) { index, song in
+                    CachedArtworkView(
+                        coverRef: song.coverArtFileName,
+                        songID: song.id,
+                        size: 88,
+                        cornerRadius: 7,
+                        sourceID: song.sourceID,
+                        filePath: song.filePath
+                    )
+                    .rotationEffect(.degrees(index.isMultiple(of: 2) ? -1.5 : 1.5))
+                    .shadow(color: .black.opacity(0.14), radius: 5, y: 3)
+                }
+            }
+            .padding(14)
+
+            if mosaicSongs.isEmpty {
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var mosaicSongs: [Song] {
+        let recent = library.recentlyPlayedSongs(limit: 12)
+        let added = library.visibleSongs.sorted { $0.dateAdded > $1.dateAdded }.prefix(40)
+        var pool = recent
+        for song in added where !pool.contains(where: { $0.id == song.id }) {
+            pool.append(song)
+        }
+        let covered = pool.filter { $0.coverArtFileName?.isEmpty == false }
+        return Array((covered.isEmpty ? pool : covered).prefix(6))
+    }
+
+    // MARK: - Dashboard
+
+    private var dashboardGrid: some View {
+        LazyVGrid(columns: [
+            GridItem(.adaptive(minimum: 280, maximum: 420), spacing: 14, alignment: .top)
+        ], alignment: .leading, spacing: 14) {
+            libraryHealthCard
+            sourceStatusCard
+            pipelineCard
+        }
+    }
+
+    private var libraryHealthCard: some View {
+        dashboardCard(title: "home_health_title", icon: "waveform.path.ecg") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    metricBlock(value: library.visibleSongs.count, label: "tab_songs")
+                    metricBlock(value: library.visibleAlbums.count, label: "tab_albums")
+                    metricBlock(value: library.visibleArtists.count, label: "tab_artists")
+                }
+                healthRow("home_cover_art", value: coverRatio, color: .purple)
+                healthRow("home_lyrics", value: lyricsRatio, color: .teal)
+                healthRow("home_playable", value: playableRatio, color: .green)
+            }
+        }
+    }
+
+    private var sourceStatusCard: some View {
+        dashboardCard(title: "home_sources_title", icon: "externaldrive.connected.to.line.below") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    metricBlock(value: enabledSourcesCount, label: "home_enabled_sources")
+                    metricBlock(value: activeScans.count, label: "home_active_scans")
+                    metricBlock(value: backfill.remainingCount(forSource: nil), label: "home_pending_details")
+                }
+
+                if let scan = activeScans.first {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ProgressView(value: scan.totalCount > 0 ? min(scan.progress, 1) : nil)
+                        Text(scan.currentFile.isEmpty ? String(localized: "scan_in_progress") : scan.currentFile)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Label("home_no_scans", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var pipelineCard: some View {
+        dashboardCard(title: "home_source_pipeline", icon: "point.3.connected.trianglepath.dotted") {
+            HStack(spacing: 0) {
+                pipelineNode("externaldrive.fill", "home_pipeline_sources", isActive: !sourcesStore.sources.isEmpty)
+                pipelineLine()
+                pipelineNode("waveform.badge.magnifyingglass", "home_pipeline_scan", isActive: !activeScans.isEmpty || hasContent)
+                pipelineLine()
+                pipelineNode("wand.and.stars", "home_pipeline_metadata", isActive: backfill.remainingCount(forSource: nil) == 0 && hasContent)
+                pipelineLine()
+                pipelineNode("play.fill", "home_pipeline_listen", isActive: player.currentSong != nil)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+        }
+    }
+
+    private func dashboardCard<Content: View>(
+        title: LocalizedStringKey,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                Text(title)
+                    .font(.headline)
+                Spacer()
+            }
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: .rect(cornerRadius: 8))
+    }
+
+    private func metricBlock(value: Int, label: LocalizedStringKey) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value, format: .number)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func healthRow(_ title: LocalizedStringKey, value: Double, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(value, format: .percent.precision(.fractionLength(0)))
+                    .monospacedDigit()
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    Capsule()
+                        .fill(color.gradient)
+                        .frame(width: geo.size.width * min(max(value, 0), 1))
+                }
+            }
+            .frame(height: 6)
+        }
+    }
+
+    private func pipelineNode(_ icon: String, _ title: LocalizedStringKey, isActive: Bool) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(isActive ? Color.accentColor : .secondary)
+                .frame(width: 34, height: 34)
+                .background(isActive ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.10),
+                            in: .circle)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: 66)
+    }
+
+    private func pipelineLine() -> some View {
+        Rectangle()
+            .fill(.quaternary)
+            .frame(height: 2)
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 20)
+    }
+
+    private var activeScans: [ScanService.ScanState] {
+        scanService.scanStates.values.filter { $0.isScanning || $0.canResume }
+    }
+
+    private var enabledSourcesCount: Int {
+        sourcesStore.sources.filter(\.isEnabled).count
+    }
+
+    private var coverRatio: Double { ratio(count: library.visibleSongs.filter { $0.coverArtFileName?.isEmpty == false }.count) }
+    private var lyricsRatio: Double { ratio(count: library.visibleSongs.filter { $0.lyricsFileName?.isEmpty == false }.count) }
+    private var playableRatio: Double { ratio(count: library.visibleSongs.filter(\.isPlayable).count) }
+
+    private func ratio(count: Int) -> Double {
+        guard !library.visibleSongs.isEmpty else { return 0 }
+        return Double(count) / Double(library.visibleSongs.count)
     }
 
     private var librarySummary: String {
@@ -100,8 +310,6 @@ struct MacHomeView: View {
             Text("recently_added")
                 .font(.title3).fontWeight(.semibold)
 
-            // 130/170 让 1180 宽窗口下能塞 6 列；之前 160/200 在窄窗口
-            // 退化成 1 列就一片留白。
             LazyVGrid(columns: [
                 GridItem(.adaptive(minimum: 130, maximum: 170), spacing: 18, alignment: .top)
             ], alignment: .leading, spacing: 22) {

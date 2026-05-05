@@ -62,7 +62,7 @@ struct ListeningStatsView: View {
 
     #if os(macOS)
     private var macBody: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(spacing: 12) {
                     Text("stats_range")
@@ -83,8 +83,12 @@ struct ListeningStatsView: View {
                     macEmptyState
                 } else {
                     macSummarySection
-                    macHeatmapSection
-                    macRankingSection
+                    HStack(alignment: .top, spacing: 24) {
+                        macHeatmapSection
+                            .frame(width: 340)
+                        macRankingSection
+                            .frame(maxWidth: .infinity)
+                    }
                     macClearSection
                 }
             }
@@ -149,21 +153,24 @@ struct ListeningStatsView: View {
         let counts = store.dailyPlayCounts(in: range)
         let maxCount = counts.map(\.count).max() ?? 0
         return VStack(alignment: .leading, spacing: 10) {
-            Text("stats_heatmap_title")
-                .font(.title3.weight(.semibold))
+            Label("stats_heatmap_title", systemImage: "square.grid.3x3.fill")
+                .font(.headline)
+                .foregroundStyle(.primary)
             heatmapGrid(counts: counts, maxCount: maxCount)
             heatmapLegend(maxCount: maxCount)
             Text("stats_heatmap_footer")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .padding(18)
+        .background(.background.secondary, in: .rect(cornerRadius: 8))
     }
 
     private var macRankingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("stats_top_header")
-                    .font(.title3.weight(.semibold))
+                Label("stats_top_header", systemImage: "chart.bar.fill")
+                    .font(.headline)
                 Spacer()
                 Picker("rank_by", selection: $rankTab) {
                     ForEach(RankTab.allCases, id: \.self) { tab in
@@ -195,6 +202,8 @@ struct ListeningStatsView: View {
                 .background(.background.secondary, in: .rect(cornerRadius: 8))
             }
         }
+        .padding(18)
+        .background(.background.secondary.opacity(0.65), in: .rect(cornerRadius: 8))
     }
 
     private var macClearSection: some View {

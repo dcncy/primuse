@@ -13,6 +13,8 @@ struct MacSidebar: View {
                     .tag(MacRoute.home)
                 Label("stats_title", systemImage: "chart.bar.xaxis")
                     .tag(MacRoute.stats)
+                Label("sources_title", systemImage: "externaldrive.connected.to.line.below")
+                    .tag(MacRoute.sources)
                 Label("search_title", systemImage: "magnifyingglass")
                     .tag(MacRoute.search)
             }

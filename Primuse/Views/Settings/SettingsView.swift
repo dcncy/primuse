@@ -6,148 +6,265 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("playback") {
-                    NavigationLink {
-                        EqualizerView()
-                    } label: {
-                        Label("equalizer", systemImage: "slider.horizontal.3")
-                    }
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    settingsHeader
 
-                    NavigationLink {
-                        AudioEffectsView()
-                    } label: {
-                        Label("audio_effects", systemImage: "waveform.badge.plus")
-                    }
-
-                    NavigationLink {
-                        PlaybackSettingsView()
-                    } label: {
-                        Label("playback_settings", systemImage: "play.circle")
-                    }
-                }
-
-                Section("library") {
-                    NavigationLink {
-                        SourcesView()
-                    } label: {
-                        Label("manage_sources", systemImage: "externaldrive.connected.to.line.below")
-                    }
-
-                    NavigationLink {
-                        MetadataScrapingView()
-                    } label: {
-                        Label("metadata_scraping", systemImage: "wand.and.stars")
-                    }
-
-                    NavigationLink {
-                        LyricsTranslationSettingsView()
-                    } label: {
-                        Label("lyrics_translation_title", systemImage: "character.bubble")
-                    }
-
-                    NavigationLink {
-                        DuplicateSongsView()
-                    } label: {
-                        Label("dup_title", systemImage: "square.stack.3d.up.badge.automatic")
-                    }
-
-                    NavigationLink {
-                        PlaylistImportView()
-                    } label: {
-                        Label("playlist_import_title", systemImage: "tray.and.arrow.down")
-                    }
-
-                    NavigationLink {
-                        StorageManagementView()
-                    } label: {
-                        Label("storage_management", systemImage: "internaldrive")
-                    }
-                }
-
-                Section("security") {
-                    NavigationLink {
-                        TrustedDomainsView()
-                    } label: {
-                        HStack {
-                            Label("trusted_domains", systemImage: "lock.shield")
-                            Spacer()
-                            Text("\(SSLTrustStore.shared.trustedDomains.count)")
-                                .foregroundStyle(.secondary)
+                    SettingsSectionCard(title: "playback", icon: "play.circle.fill", tint: .blue) {
+                        SettingsNavRow("playback_settings", systemImage: "play.circle", tint: .blue) {
+                            PlaybackSettingsView()
+                        }
+                        SettingsNavRow("equalizer", systemImage: "slider.horizontal.3", tint: .cyan) {
+                            EqualizerView()
+                        }
+                        SettingsNavRow("audio_effects", systemImage: "waveform.badge.plus", tint: .purple) {
+                            AudioEffectsView()
                         }
                     }
-                }
 
-                #if os(iOS)
-                Section("appearance") {
-                    NavigationLink {
-                        AppIconSettingsView()
-                    } label: {
-                        Label("app_icon", systemImage: "app.badge")
+                    SettingsSectionCard(title: "library", icon: "books.vertical.fill", tint: .pink) {
+                        SettingsNavRow("metadata_scraping", systemImage: "wand.and.stars", tint: .pink) {
+                            MetadataScrapingView()
+                        }
+                        SettingsNavRow("lyrics_translation_title", systemImage: "character.bubble", tint: .teal) {
+                            LyricsTranslationSettingsView()
+                        }
+                        SettingsNavRow("dup_title", systemImage: "square.stack.3d.up.badge.automatic", tint: .orange) {
+                            DuplicateSongsView()
+                        }
+                        SettingsNavRow("playlist_import_title", systemImage: "tray.and.arrow.down", tint: .green) {
+                            PlaylistImportView()
+                        }
+                        SettingsNavRow("storage_management", systemImage: "internaldrive", tint: .indigo) {
+                            StorageManagementView()
+                        }
                     }
-                }
-                #endif
 
-                Section("sync") {
-                    NavigationLink {
-                        CloudSyncSettingsView()
-                    } label: {
-                        Label("icloud_sync_title", systemImage: "icloud")
-                    }
-
-                    NavigationLink {
-                        RecentlyDeletedView()
-                    } label: {
-                        Label("recently_deleted", systemImage: "trash")
+                    SettingsSectionCard(title: "security", icon: "lock.shield.fill", tint: .green) {
+                        SettingsNavRow("trusted_domains", systemImage: "lock.shield", tint: .green,
+                                       trailing: "\(SSLTrustStore.shared.trustedDomains.count)") {
+                            TrustedDomainsView()
+                        }
                     }
 
                     #if os(iOS)
-                    NavigationLink {
-                        ListeningStatsView()
-                    } label: {
-                        Label("stats_title", systemImage: "chart.bar.xaxis")
+                    SettingsSectionCard(title: "appearance", icon: "sparkles", tint: .purple) {
+                        SettingsNavRow("app_icon", systemImage: "app.badge", tint: .purple) {
+                            AppIconSettingsView()
+                        }
                     }
                     #endif
 
-                    NavigationLink {
-                        ScrobbleSettingsView()
-                    } label: {
-                        Label("scrobble_title", systemImage: "music.note.list")
+                    SettingsSectionCard(title: "sync", icon: "icloud.fill", tint: .blue) {
+                        SettingsNavRow("icloud_sync_title", systemImage: "icloud", tint: .blue) {
+                            CloudSyncSettingsView()
+                        }
+                        SettingsNavRow("recently_deleted", systemImage: "trash", tint: .red) {
+                            RecentlyDeletedView()
+                        }
+                        #if os(iOS)
+                        SettingsNavRow("stats_title", systemImage: "chart.bar.xaxis", tint: .cyan) {
+                            ListeningStatsView()
+                        }
+                        #endif
+                        SettingsNavRow("scrobble_title", systemImage: "music.note.list", tint: .pink) {
+                            ScrobbleSettingsView()
+                        }
                     }
+
+                    notificationCard
+                    aboutCard
                 }
-
-                Section {
-                    Toggle("notify_long_tasks", isOn: $notifyLongTasks)
-                    Text("notify_long_tasks_hint")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("about") {
-                    HStack {
-                        Text("version")
-                        Spacer()
-                        Text(Bundle.main.appVersion)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("build")
-                        Spacer()
-                        Text(Bundle.main.appBuildNumber)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    NavigationLink {
-                        LicensesView()
-                    } label: {
-                        Text("licenses")
-                    }
-                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+                .padding(.bottom, 20)
             }
+            .background(settingsBackground)
             .navigationTitle("settings_title")
             .toolbarTitleDisplayMode(.inlineLarge)
         }
+    }
+
+    private var settingsHeader: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.blue.opacity(0.16))
+                Image(systemName: "gearshape.2.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(.blue)
+            }
+            .frame(width: 70, height: 70)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("settings_title")
+                    .font(.largeTitle.bold())
+                Text("settings_overview_subtitle")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var notificationCard: some View {
+        SettingsSectionCard(title: "notifications", icon: "bell.badge.fill", tint: .orange) {
+            Toggle(isOn: $notifyLongTasks) {
+                Label {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("notify_long_tasks")
+                            .font(.body.weight(.medium))
+                        Text("notify_long_tasks_hint")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                } icon: {
+                    SettingsIcon(systemImage: "clock.badge.checkmark", tint: .orange)
+                }
+            }
+            .toggleStyle(.switch)
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var aboutCard: some View {
+        SettingsSectionCard(title: "about", icon: "info.circle.fill", tint: .secondary) {
+            SettingsInfoRow("version", value: Bundle.main.appVersion)
+            SettingsInfoRow("build", value: Bundle.main.appBuildNumber)
+            SettingsNavRow("licenses", systemImage: "doc.text", tint: .secondary) {
+                LicensesView()
+            }
+        }
+    }
+
+    private var settingsBackground: some View {
+        #if os(iOS)
+        Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+        #else
+        Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+        #endif
+    }
+}
+
+private struct SettingsSectionCard<Content: View>: View {
+    let title: LocalizedStringKey
+    let icon: String
+    let tint: Color
+    @ViewBuilder var content: Content
+
+    init(title: LocalizedStringKey, icon: String, tint: Color, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.tint = tint
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 18)
+                Text(title)
+                    .font(.headline)
+                Spacer()
+            }
+            VStack(spacing: 0) {
+                content
+            }
+            .padding(12)
+            .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.primary.opacity(0.06), lineWidth: 1)
+            }
+        }
+    }
+}
+
+private struct SettingsNavRow<Destination: View>: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+    let tint: Color
+    let trailing: String?
+    @ViewBuilder var destination: Destination
+
+    init(_ title: LocalizedStringKey,
+         systemImage: String,
+         tint: Color,
+         trailing: String? = nil,
+         @ViewBuilder destination: () -> Destination) {
+        self.title = title
+        self.systemImage = systemImage
+        self.tint = tint
+        self.trailing = trailing
+        self.destination = destination()
+    }
+
+    var body: some View {
+        NavigationLink {
+            destination
+        } label: {
+            HStack(spacing: 12) {
+                SettingsIcon(systemImage: systemImage, tint: tint)
+                Text(title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 12)
+                if let trailing {
+                    Text(trailing)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SettingsInfoRow: View {
+    let title: LocalizedStringKey
+    let value: String
+
+    init(_ title: LocalizedStringKey, value: String) {
+        self.title = title
+        self.value = value
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body.weight(.medium))
+            Spacer()
+            Text(value)
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 9)
+    }
+}
+
+private struct SettingsIcon: View {
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(tint.opacity(0.14))
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+        }
+        .frame(width: 34, height: 34)
     }
 }
 

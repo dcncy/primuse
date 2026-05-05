@@ -51,20 +51,26 @@ struct MacNowPlayingView: View {
         ZStack(alignment: .topTrailing) {
             backdrop
 
-            // 全屏与普通展开复用同一套「左封面 + 右滚动歌词」布局,
-            // 只是字号 / 间距更大、退出全屏按钮替换关闭按钮。这样
-            // 全屏下也能看到完整滚动歌词,而不是像桌面歌词那样只
-            // 显示当前一两句。
-            HStack(alignment: .top, spacing: isWindowFullScreen ? 56 : 36) {
-                artworkPane
-                    .frame(width: isWindowFullScreen ? 480 : 380)
-                    .frame(maxHeight: .infinity)
-                lyricsPane
+            if player.currentSong == nil {
+                emptyNowPlaying
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 48)
+            } else {
+                // 全屏与普通展开复用同一套「左封面 + 右滚动歌词」布局,
+                // 只是字号 / 间距更大、退出全屏按钮替换关闭按钮。这样
+                // 全屏下也能看到完整滚动歌词,而不是像桌面歌词那样只
+                // 显示当前一两句。
+                HStack(alignment: .top, spacing: isWindowFullScreen ? 56 : 36) {
+                    artworkPane
+                        .frame(width: isWindowFullScreen ? 480 : 380)
+                        .frame(maxHeight: .infinity)
+                    lyricsPane
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding(.horizontal, isWindowFullScreen ? 64 : 40)
+                .padding(.top, isWindowFullScreen ? 56 : 32)
+                .padding(.bottom, isWindowFullScreen ? 48 : 24)
             }
-            .padding(.horizontal, isWindowFullScreen ? 64 : 40)
-            .padding(.top, isWindowFullScreen ? 56 : 32)
-            .padding(.bottom, isWindowFullScreen ? 48 : 24)
 
             floatingControls
                 .padding(18)
@@ -101,6 +107,31 @@ struct MacNowPlayingView: View {
     }
 
     // MARK: - Sections
+
+    private var emptyNowPlaying: some View {
+        VStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .fill(.primary.opacity(0.06))
+                    .frame(width: 118, height: 118)
+                Image(systemName: "music.note")
+                    .font(.system(size: 48, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 8) {
+                Text("player_empty_title")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(.primary)
+                Text("player_empty_message")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: 520)
+        }
+    }
 
     /// 完全铺满的 ambient backdrop —— 之前 `regularMaterial + 0.35
     /// 透明度的 cover blur` 在浅色模式下两侧像两条白边,封面色完全

@@ -5,6 +5,7 @@ enum MacRoute: Hashable {
     case home
     case stats
     case search
+    case sources
     case playlistImport
     case duplicates
     case scrobble

@@ -2,7 +2,7 @@ import SwiftUI
 import PrimuseKit
 
 struct HomeView: View {
-    var switchToSettingsTab: (() -> Void)?
+    var switchToSourcesTab: (() -> Void)?
     @Environment(AudioPlayerService.self) private var player
     @Environment(MusicLibrary.self) private var library
 
@@ -308,7 +308,7 @@ struct HomeView: View {
                 Text("home_empty_desc").font(.body).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 40)
             }
-            Button { switchToSettingsTab?() } label: {
+            Button { switchToSourcesTab?() } label: {
                 Label("manage_sources", systemImage: "externaldrive.badge.plus")
                     .fontWeight(.semibold)
                     #if os(iOS)

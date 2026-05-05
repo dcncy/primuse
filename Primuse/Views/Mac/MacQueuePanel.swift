@@ -45,82 +45,113 @@ struct MacQueuePanel: View {
                 description: Text("queue_empty_desc")
             )
         } else {
-            List {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    queueSummary
+
                 if let current = player.currentSong {
-                    Section("now_playing") {
-                        SongRowView(
-                            song: current,
-                            isPlaying: true,
-                            showsActions: false,
-                            context: SongRowView.context(for: current,
-                                                         sourcesStore: sourcesStore,
-                                                         backfill: backfill)
-                        )
-                    }
+                        queueSection(title: "now_playing") {
+                            queueRow(song: current, index: player.currentIndex, isPlaying: true)
+                        }
                 }
 
                 let upNextIndices = (player.currentIndex + 1)..<player.queue.count
                 if !upNextIndices.isEmpty {
-                    Section("up_next") {
-                        ForEach(Array(upNextIndices), id: \.self) { index in
-                            let song = player.queue[index]
-                            SongRowView(
-                                song: song,
-                                isPlaying: false,
-                                showsActions: false,
-                                context: SongRowView.context(for: song,
-                                                             sourcesStore: sourcesStore,
-                                                             backfill: backfill)
-                            )
-                            .contentShape(Rectangle())
-                            .onTapGesture { playAt(index: index) }
-                        }
-                        .onMove { source, destination in
-                            // 把 section 内偏移换算成 queue 全局 offset。
-                            let adjustedSource = IndexSet(source.map { $0 + player.currentIndex + 1 })
-                            let adjustedDest = destination + player.currentIndex + 1
-                            player.queue.move(fromOffsets: adjustedSource, toOffset: adjustedDest)
+                        queueSection(title: "up_next") {
+                            ForEach(Array(upNextIndices), id: \.self) { index in
+                                queueRow(song: player.queue[index], index: index)
                         }
                     }
                 }
 
                 let playedIndices = 0..<player.currentIndex
                 if !playedIndices.isEmpty {
-                    Section {
-                        ForEach(Array(playedIndices), id: \.self) { index in
-                            let song = player.queue[index]
-                            SongRowView(
-                                song: song,
-                                isPlaying: false,
-                                showsActions: false,
-                                context: SongRowView.context(for: song,
-                                                             sourcesStore: sourcesStore,
-                                                             backfill: backfill)
-                            )
-                            .opacity(0.6)
-                            .contentShape(Rectangle())
-                            .onTapGesture { playAt(index: index) }
-                        }
-                    } header: {
-                        HStack {
-                            Text("played")
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("played")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
                             Spacer()
                             Button {
                                 clearPlayed(uptoIndex: player.currentIndex)
                             } label: {
-                                Text("clear_all")
-                                    .font(.caption)
-                                    .foregroundStyle(Color.accentColor)
+                                    Label("clear_all", systemImage: "trash")
+                                        .labelStyle(.iconOnly)
                             }
                             .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .help(Text("clear_all"))
+                            }
+
+                            VStack(spacing: 0) {
+                                ForEach(Array(playedIndices), id: \.self) { index in
+                                    queueRow(song: player.queue[index], index: index)
+                                        .opacity(0.58)
+                                    if index != playedIndices.upperBound - 1 {
+                                        Divider().padding(.leading, 56)
+                                    }
+                                }
+                            }
+                            .background(.background.secondary, in: .rect(cornerRadius: 8))
                         }
                     }
                 }
             }
-            // .plain 比 .inset 在 sidebar 场景下顶部留白更紧凑,且 section
-            // header 直接贴到第一行上方,跟 Apple Music 队列视觉一致。
-            .listStyle(.plain)
+                .padding(16)
+                .padding(.bottom, 24)
+            }
+    }
+
+    private var queueSummary: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "list.bullet")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 42, height: 42)
+                .background(.tint.opacity(0.14), in: .rect(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("queue_title")
+                    .font(.headline)
+                Text("\(player.queue.count) \(String(localized: "songs_count"))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
         }
+        .padding(12)
+        .background(.background.secondary, in: .rect(cornerRadius: 8))
+    }
+
+    private func queueSection<Content: View>(
+        title: LocalizedStringKey,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                content()
+            }
+            .background(.background.secondary, in: .rect(cornerRadius: 8))
+        }
+    }
+
+    private func queueRow(song: Song, index: Int, isPlaying: Bool = false) -> some View {
+        SongRowView(
+            song: song,
+            isPlaying: isPlaying,
+            showsActions: false,
+            context: SongRowView.context(for: song,
+                                         sourcesStore: sourcesStore,
+                                         backfill: backfill)
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture { playAt(index: index) }
     }
 
     // MARK: - Actions

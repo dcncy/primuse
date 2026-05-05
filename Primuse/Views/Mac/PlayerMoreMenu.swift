@@ -102,6 +102,10 @@ struct PlayerMoreMenu<MenuLabel: View>: View {
     @ViewBuilder
     private var popoverMenuContent: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let song = player.currentSong {
+                menuHeader(song)
+                divider()
+            }
             menuRow(title: "previous_song", symbol: "backward.fill") {
                 Task { await player.previous() }
             }
@@ -174,7 +178,35 @@ struct PlayerMoreMenu<MenuLabel: View>: View {
             }
         }
         .padding(.vertical, 6)
-        .frame(width: 240)
+        .frame(width: 260)
+        .background(.regularMaterial)
+    }
+
+    private func menuHeader(_ song: Song) -> some View {
+        HStack(spacing: 10) {
+            CachedArtworkView(
+                coverRef: song.coverArtFileName,
+                songID: song.id,
+                size: 42,
+                cornerRadius: 7,
+                sourceID: song.sourceID,
+                filePath: song.filePath
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                Text(song.artistName ?? String(localized: "unknown_artist"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     private func menuRow(title: LocalizedStringKey, symbol: String,

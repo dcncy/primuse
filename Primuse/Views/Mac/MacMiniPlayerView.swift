@@ -259,16 +259,31 @@ struct MacMiniPlayerView: View {
 
     private var queueList: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(alignment: .leading, spacing: 6) {
+            LazyVStack(alignment: .leading, spacing: 8) {
                 if player.queue.isEmpty {
-                    Text("queue_empty")
-                        .font(.callout).foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity).padding(.top, 30)
+                    VStack(spacing: 8) {
+                        Image(systemName: "music.note.list")
+                            .font(.title3)
+                            .foregroundStyle(.tertiary)
+                        Text("queue_empty")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 30)
                 } else {
+                    if let current = player.currentSong {
+                        Text("now_playing")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        queueRow(index: player.currentIndex, song: current, isPlaying: true)
+                            .padding(.bottom, 4)
+                    }
+
                     let upNext = (player.currentIndex + 1)..<player.queue.count
                     if !upNext.isEmpty {
                         Text("up_next")
-                            .font(.caption).fontWeight(.semibold)
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.top, 6)
                         ForEach(Array(upNext), id: \.self) { idx in
@@ -278,7 +293,7 @@ struct MacMiniPlayerView: View {
                     let played = 0..<player.currentIndex
                     if !played.isEmpty {
                         Text("played")
-                            .font(.caption).fontWeight(.semibold)
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.top, 12)
                         ForEach(Array(played), id: \.self) { idx in
@@ -291,22 +306,35 @@ struct MacMiniPlayerView: View {
         }
     }
 
-    private func queueRow(index: Int) -> some View {
-        let song = player.queue[index]
-        return HStack(spacing: 8) {
+    private func queueRow(index: Int, song overrideSong: Song? = nil, isPlaying: Bool = false) -> some View {
+        let song = overrideSong ?? player.queue[index]
+        return HStack(spacing: 9) {
             CachedArtworkView(
                 coverRef: song.coverArtFileName,
                 songID: song.id,
-                size: 28, cornerRadius: 4,
+                size: 32, cornerRadius: 6,
                 sourceID: song.sourceID,
                 filePath: song.filePath
             )
+            .overlay {
+                if isPlaying {
+                    Color.black.opacity(0.32)
+                        .clipShape(.rect(cornerRadius: 6))
+                    Image(systemName: "waveform")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(song.title).font(.caption).lineLimit(1)
                 Text(song.artistName ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isPlaying ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04),
+                    in: .rect(cornerRadius: 8))
         .contentShape(Rectangle())
         .onTapGesture {
             player.currentIndex = index

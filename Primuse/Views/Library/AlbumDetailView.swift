@@ -17,7 +17,26 @@ struct AlbumDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
+        Group {
+            #if os(macOS)
+            ScrollView(.vertical, showsIndicators: false) {
+                detailContent
+                    .frame(maxWidth: 980, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.bottom, 112)
+            }
+            #else
+            ScrollView {
+                detailContent
+            }
+            #endif
+        }
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
             #if os(macOS)
             macHeader
             #else
@@ -76,9 +95,14 @@ struct AlbumDetailView: View {
                             #endif
                     }
                 }
+                #if os(macOS)
+                .padding(.horizontal, 24)
+                .background(.background.secondary, in: .rect(cornerRadius: 8))
+                .padding(.horizontal, 24)
+                .padding(.top, 4)
+                #endif
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     #if os(macOS)

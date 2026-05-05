@@ -25,6 +25,9 @@ struct ListeningStatsView: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        macBody
+        #else
         Form {
             Section {
                 Picker("stats_range", selection: $range) {
@@ -54,7 +57,160 @@ struct ListeningStatsView: View {
         } message: {
             Text("stats_clear_message")
         }
+        #endif
     }
+
+    #if os(macOS)
+    private var macBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(spacing: 12) {
+                    Text("stats_range")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Picker("stats_range", selection: $range) {
+                        ForEach(PlayHistoryStore.Range.allCases) { r in
+                            Text(LocalizedStringKey(r.localizationKey)).tag(r)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 240)
+                    Spacer()
+                }
+
+                if store.entries.isEmpty {
+                    macEmptyState
+                } else {
+                    macSummarySection
+                    macHeatmapSection
+                    macRankingSection
+                    macClearSection
+                }
+            }
+            .padding(.horizontal, 32)
+            .padding(.top, 24)
+            .padding(.bottom, 120)
+            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .navigationTitle("stats_title")
+        .task(id: range) { logHeatmapStats() }
+        .alert("stats_clear_confirm", isPresented: $showClearConfirm) {
+            Button("delete", role: .destructive) { store.clearAll() }
+            Button("cancel", role: .cancel) {}
+        } message: {
+            Text("stats_clear_message")
+        }
+    }
+
+    private var macEmptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("stats_empty_title")
+                .font(.headline)
+            Text("stats_empty_desc")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 520)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 96)
+    }
+
+    private var macSummarySection: some View {
+        let s = store.summary(in: range)
+        return VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                summaryCell(value: "\(s.totalPlays)",
+                            label: String(localized: "stats_total_plays"),
+                            icon: "play.fill",
+                            color: .accentColor)
+                summaryCell(value: formatHours(s.totalSec),
+                            label: String(localized: "stats_total_time"),
+                            icon: "clock.fill",
+                            color: .green)
+                summaryCell(value: "\(s.activeDays)",
+                            label: String(localized: "stats_active_days"),
+                            icon: "calendar",
+                            color: .orange)
+                summaryCell(value: "\(s.uniqueSongs)",
+                            label: String(localized: "stats_unique_songs"),
+                            icon: "music.note",
+                            color: .purple)
+            }
+        }
+    }
+
+    private var macHeatmapSection: some View {
+        let counts = store.dailyPlayCounts(in: range)
+        let maxCount = counts.map(\.count).max() ?? 0
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("stats_heatmap_title")
+                .font(.title3.weight(.semibold))
+            heatmapGrid(counts: counts, maxCount: maxCount)
+            heatmapLegend(maxCount: maxCount)
+            Text("stats_heatmap_footer")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var macRankingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("stats_top_header")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                Picker("rank_by", selection: $rankTab) {
+                    ForEach(RankTab.allCases, id: \.self) { tab in
+                        Text(tab.label).tag(tab)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 260)
+            }
+
+            let items = rankItems()
+            if items.isEmpty {
+                Text("stats_rank_empty")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 16)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        rankingRow(rank: index + 1, item: item)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                        if index != items.count - 1 {
+                            Divider().padding(.leading, 48)
+                        }
+                    }
+                }
+                .background(.background.secondary, in: .rect(cornerRadius: 8))
+            }
+        }
+    }
+
+    private var macClearSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(role: .destructive) {
+                showClearConfirm = true
+            } label: {
+                Label("stats_clear_action", systemImage: "trash")
+            }
+            .buttonStyle(.bordered)
+            Text("stats_privacy_footer")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+    #endif
 
     // MARK: - Sections
 

@@ -206,11 +206,7 @@ struct MacNowPlayingView: View {
                         ForEach(Array(lyrics.enumerated()), id: \.element.id) { i, line in
                             let isActive = i == currentIndex
                             let baseSize = isActive ? Self.lyricsActiveBaseSize : Self.lyricsInactiveBaseSize
-                            Text(line.text)
-                                .font(.system(size: baseSize * CGFloat(lyricsFontScale),
-                                              weight: isActive ? .semibold : .regular))
-                                .foregroundStyle(isActive ? .primary : .secondary)
-                                .opacity(isActive ? 1 : 0.6)
+                            macLyricLine(line: line, index: i, isActive: isActive, fontSize: baseSize)
                                 .id(line.id)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
@@ -229,6 +225,32 @@ struct MacNowPlayingView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func macLyricLine(line: LyricLine, index: Int, isActive: Bool, fontSize: CGFloat) -> some View {
+        let scaledSize = fontSize * CGFloat(lyricsFontScale)
+        let weight: Font.Weight = isActive ? .semibold : .regular
+        if shouldRenderWordTimeline(line: line, index: index, isActive: isActive) {
+            KaraokeLineView(
+                line: line,
+                fontSize: scaledSize,
+                weight: weight,
+                activeColor: .primary.opacity(isActive ? 1 : 0.65),
+                inactiveColor: .secondary.opacity(isActive ? 0.55 : 0.42),
+                timeAt: { date in player.interpolatedTime(at: date) }
+            )
+        } else {
+            Text(line.text)
+                .font(.system(size: scaledSize, weight: weight))
+                .foregroundStyle(isActive ? .primary : .secondary)
+                .opacity(isActive ? 1 : 0.6)
+        }
+    }
+
+    private func shouldRenderWordTimeline(line: LyricLine, index: Int, isActive: Bool) -> Bool {
+        guard line.isWordLevel else { return false }
+        return isActive || abs(index - currentIndex) == 1
     }
 
     // MARK: - Floating controls (top-right of the window)

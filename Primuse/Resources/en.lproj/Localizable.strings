@@ -173,6 +173,7 @@
 "cat_local" = "Local";
 "edit_source" = "Edit Source";
 "edit" = "Edit";
+"export" = "Export";
 "delete" = "Delete";
 "disable" = "Disable";
 "enable" = "Enable";

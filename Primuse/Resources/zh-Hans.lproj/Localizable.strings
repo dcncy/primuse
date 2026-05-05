@@ -173,6 +173,7 @@
 "cat_local" = "本地";
 "edit_source" = "编辑音乐源";
 "edit" = "编辑";
+"export" = "导出";
 "delete" = "删除";
 "disable" = "禁用";
 "enable" = "启用";

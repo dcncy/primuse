@@ -723,3 +723,4 @@
 "password_show" = "Show password";
 "password_hide" = "Hide password";
 "password_ascii_hint" = "Use English/half-width input to avoid full-width characters breaking sign-in.";
+"mac_sidebar_tools" = "Tools";

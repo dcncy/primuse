@@ -64,6 +64,9 @@ struct PlaylistImportView: View {
                isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("ok", role: .cancel) {}
         } message: { Text(importError ?? "") }
+        #if os(macOS)
+        .macReadablePane(maxWidth: 820)
+        #endif
     }
 
     // MARK: - Sections

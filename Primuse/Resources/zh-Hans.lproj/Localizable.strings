@@ -724,3 +724,4 @@
 "password_show" = "显示密码";
 "password_hide" = "隐藏密码";
 "password_ascii_hint" = "建议使用英文/半角输入,避免全角符号导致认证失败。";
+"mac_sidebar_tools" = "工具";

@@ -17,6 +17,15 @@ struct MacSidebar: View {
                     .tag(MacRoute.search)
             }
 
+            Section("mac_sidebar_tools") {
+                Label("playlist_import_title", systemImage: "tray.and.arrow.down")
+                    .tag(MacRoute.playlistImport)
+                Label("dup_title", systemImage: "square.stack.3d.up.badge.automatic")
+                    .tag(MacRoute.duplicates)
+                Label("scrobble_title", systemImage: "music.note.list")
+                    .tag(MacRoute.scrobble)
+            }
+
             Section("library_title") {
                 ForEach(LibrarySection.allCases, id: \.self) { section in
                     Label {

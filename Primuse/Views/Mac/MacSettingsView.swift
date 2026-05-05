@@ -12,8 +12,8 @@ import PrimuseKit
 /// into the vertical center of the window and look untethered.
 struct MacSettingsView: View {
     private enum Tab: String, Hashable {
-        case general, equalizer, effects, library, lyricsTranslation, sources, playlistImport
-        case duplicates, scrobble, widgets, sync, recentlyDeleted, security, about
+        case general, equalizer, effects, library, lyricsTranslation, sources
+        case widgets, sync, recentlyDeleted, security, about
     }
 
     @State private var tab: Tab = .general
@@ -44,18 +44,6 @@ struct MacSettingsView: View {
             MacSourcesView().tabPaneSize()
                 .tabItem { Label("manage_sources", systemImage: "externaldrive.connected.to.line.below") }
                 .tag(Tab.sources)
-
-            PlaylistImportView().tabPaneSize()
-                .tabItem { Label("playlist_import_title", systemImage: "tray.and.arrow.down") }
-                .tag(Tab.playlistImport)
-
-            DuplicateSongsView().tabPaneSize()
-                .tabItem { Label("dup_title", systemImage: "square.stack.3d.up.badge.automatic") }
-                .tag(Tab.duplicates)
-
-            ScrobbleSettingsView().tabPaneSize()
-                .tabItem { Label("scrobble_title", systemImage: "music.note.list") }
-                .tag(Tab.scrobble)
 
             MacWidgetSyncSettingsView().tabPaneSize()
                 .tabItem { Label("desktop_widgets", systemImage: "rectangle.grid.2x2") }
@@ -180,6 +168,17 @@ private extension View {
     /// 参考 Apple Music / System Settings 的做法,内容紧贴顶部。
     func tabPaneSize() -> some View {
         self.frame(minWidth: 720, minHeight: 520, alignment: .top)
+    }
+}
+
+extension View {
+    func macReadablePane(maxWidth: CGFloat = 860) -> some View {
+        self
+            .formStyle(.grouped)
+            .frame(maxWidth: maxWidth, maxHeight: .infinity, alignment: .top)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 #endif

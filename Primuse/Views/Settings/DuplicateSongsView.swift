@@ -71,6 +71,9 @@ struct DuplicateSongsView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        #if os(macOS)
+        .macReadablePane(maxWidth: 980)
+        #endif
     }
 
     // MARK: - Sections

@@ -29,6 +29,15 @@ struct MacDetailContainer: View {
             MacHomeView()
         case .stats:
             ListeningStatsView()
+        case .playlistImport:
+            PlaylistImportView()
+                .navigationTitle("playlist_import_title")
+        case .duplicates:
+            DuplicateSongsView()
+                .navigationTitle("dup_title")
+        case .scrobble:
+            ScrobbleSettingsView()
+                .navigationTitle("scrobble_title")
         case .search:
             SearchView(searchText: $searchText)
                 .navigationTitle("search_title")

@@ -71,6 +71,9 @@ struct ScrobbleSettingsView: View {
             }
             Button("cancel", role: .cancel) {}
         }
+        #if os(macOS)
+        .macReadablePane(maxWidth: 820)
+        #endif
     }
 
     // MARK: - ListenBrainz

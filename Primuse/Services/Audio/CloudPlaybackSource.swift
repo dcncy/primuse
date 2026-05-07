@@ -271,6 +271,30 @@ private final class State: @unchecked Sendable {
     private var fetchCount: Int = 0
     private var fetchTotalElapsed: TimeInterval = 0
     private var fetchTotalBytes: Int = 0
+    /// SFB read 命中已 cache 部分的次数 / 字节。跟 fetchCount 一起在切歌时
+    /// 输出 summary, 看 cache 复用率, 帮诊断"为什么这首歌仍然卡 ── 是 SFB
+    /// 反复跨 chunk 边界 cache miss, 还是云盘真的拉不动"。
+    private var cacheHitCount: Int = 0
+    private var cacheHitBytes: Int = 0
+    /// 每个 chunkStart 累计被 fetch 的次数。第 2 次 + 时打 retry 日志,
+    /// 不正常应用情况下 SFB 不应该让同一个 chunk 被 fetch 多次 (fetch
+    /// 完会写 cache, 下次 read 应该 cache hit)。出现 retry > 1 通常是
+    /// 上次 fetch 写 cache 失败 / 或解码器的 short-read 触发了 chunk
+    /// 重新对齐。
+    private var fetchAttemptByChunk: [Int64: Int] = [:]
+    /// 本 session 最慢 / 最快的单次 fetch, 帮诊断网络抖动是均匀慢还是
+    /// 单次 spike。
+    private var maxFetchElapsed: TimeInterval = 0
+    private var slowestChunkStart: Int64 = -1
+    private var minFetchElapsed: TimeInterval = .greatestFiniteMagnitude
+    /// 等待并行 prefetch 完成的次数和总等待时间。这两个值高 = SFB 读到一个
+    /// 已经在 prefetch 的 chunk, prefetch 没赶上 SFB 节奏 (chunk size 太大
+    /// 或 prefetchAhead 不够)。
+    private var prefetchWaitCount: Int = 0
+    private var prefetchWaitTotalElapsed: TimeInterval = 0
+    /// session 创建到 finalize 之间是否输出过摘要, 防止重复输出 (例如
+    /// 同一 session 被 finalize 两次)。
+    private var summaryEmitted: Bool = false
 
     /// 「补全 trailing 缺口」任务是否已经派出去过。每个 session 只跑一次,
     /// 防止 writeToCache 反复触发 + 多个 in-flight fill 互相打架。
@@ -328,6 +352,12 @@ private final class State: @unchecked Sendable {
 
         // Cache hit — read straight from disk.
         if let cached = readFromCacheIfAvailable(offset: offset, endOffset: endOffset) {
+            // 不每次 plog, 累计在 finalize summary 输出 (read 一首歌可能几百
+            // 次, 每次打日志会淹没真正重要的 fetch / 失败信息)。
+            lock.lock()
+            cacheHitCount += 1
+            cacheHitBytes += cached.count
+            lock.unlock()
             served = cached
         } else {
             // Chunk-align fetch, but skip already-cached prefix within
@@ -361,10 +391,24 @@ private final class State: @unchecked Sendable {
             if prefetchActive {
                 // Poll cache (background thread, sleep OK). Prefetch 完成
                 // (成功写 cache 或失败移除 in-flight) 时退出 wait。
-                let waitDeadline = Date().addingTimeInterval(8)
+                let waitStart = Date()
+                let waitDeadline = waitStart.addingTimeInterval(8)
                 while Date() < waitDeadline {
                     Thread.sleep(forTimeInterval: 0.03)
                     if let cached = readFromCacheIfAvailable(offset: offset, endOffset: endOffset) {
+                        let elapsed = Date().timeIntervalSince(waitStart)
+                        lock.lock()
+                        prefetchWaitCount += 1
+                        prefetchWaitTotalElapsed += elapsed
+                        lock.unlock()
+                        cacheHitCountIncrement(by: cached.count)
+                        // 等超过 100ms 才打日志, 一般 prefetch 已经几乎完成
+                        // 时不需要噪声; 100ms+ 表示 prefetch 跟不上 SFB,
+                        // 需要诊断 chunk size / prefetchAhead 配置。
+                        if elapsed > 0.1 {
+                            plog(String(format: "⏳ Cloud stream '%@' waited %.0fms for prefetch chunkStart=%lld (then served from cache)",
+                                        label, elapsed * 1000, chunkStart))
+                        }
                         return cached
                     }
                     lock.lock()
@@ -374,11 +418,33 @@ private final class State: @unchecked Sendable {
                         // Prefetch 退出了 — 再读 cache, 命中就返回; 否则
                         // (prefetch 失败) fall through 到 user fetch 路径。
                         if let cached = readFromCacheIfAvailable(offset: offset, endOffset: endOffset) {
+                            let elapsed = Date().timeIntervalSince(waitStart)
+                            lock.lock()
+                            prefetchWaitCount += 1
+                            prefetchWaitTotalElapsed += elapsed
+                            lock.unlock()
+                            cacheHitCountIncrement(by: cached.count)
                             return cached
                         }
+                        let elapsed = Date().timeIntervalSince(waitStart)
+                        plog(String(format: "⚠️ Cloud stream '%@' prefetch chunkStart=%lld dropped (waited %.0fms, falling back to user fetch)",
+                                    label, chunkStart, elapsed * 1000))
                         break
                     }
                 }
+            }
+
+            // 记录这次 fetch 的 attempt 次数。SFB 正常顺序读时每个 chunk 应该
+            // 只 fetch 一次, attempt > 1 说明上次 fetch 完成但 cache 没写到
+            // SFB 期望的位置 (e.g. partial fetch, short read), 或者解码器
+            // 跳读后又回来。
+            lock.lock()
+            let attempt = (fetchAttemptByChunk[chunkStart] ?? 0) + 1
+            fetchAttemptByChunk[chunkStart] = attempt
+            lock.unlock()
+            if attempt > 1 {
+                plog(String(format: "🔁 Cloud stream '%@' fetch RETRY chunkStart=%lld attempt=%d (offsetReq=%lld)",
+                            label, chunkStart, attempt, offset))
             }
 
             // Bridge async → sync. SFBAudioEngine's decode thread isn't
@@ -435,6 +501,13 @@ private final class State: @unchecked Sendable {
             fetchCount += 1
             fetchTotalElapsed += elapsed
             fetchTotalBytes += data.count
+            if elapsed > maxFetchElapsed {
+                maxFetchElapsed = elapsed
+                slowestChunkStart = chunkStart
+            }
+            if elapsed < minFetchElapsed {
+                minFetchElapsed = elapsed
+            }
             let count = fetchCount
             let totalElapsed = fetchTotalElapsed
             let totalBytes = fetchTotalBytes
@@ -552,6 +625,51 @@ private final class State: @unchecked Sendable {
         lock.lock()
         fetchDisabled = true
         lock.unlock()
+    }
+
+    /// 把 cacheHit 累计字段加锁更新成原子动作。serve 多入口都要计数, 抽出
+    /// 来比每处 lock/unlock 易读。
+    private func cacheHitCountIncrement(by bytes: Int) {
+        lock.lock()
+        cacheHitCount += 1
+        cacheHitBytes += bytes
+        lock.unlock()
+    }
+
+    /// 在 finalizeSession / disconnect 之前打一次本 session 的统计摘要。
+    /// 用来回头看一首歌为什么卡 ── 是 fetch 慢还是 SFB 反复 short-read 重读
+    /// 还是 prefetch 跟不上, 一行能定位。
+    fileprivate func emitSessionSummary() {
+        lock.lock()
+        if summaryEmitted { lock.unlock(); return }
+        summaryEmitted = true
+        let count = fetchCount
+        let totalElapsed = fetchTotalElapsed
+        let totalBytes = fetchTotalBytes
+        let maxE = maxFetchElapsed
+        let slow = slowestChunkStart
+        let minE = minFetchElapsed == .greatestFiniteMagnitude ? 0 : minFetchElapsed
+        let hit = cacheHitCount
+        let hitKB = cacheHitBytes / 1024
+        let pwCount = prefetchWaitCount
+        let pwElapsed = prefetchWaitTotalElapsed
+        let retries = fetchAttemptByChunk.values.filter { $0 > 1 }.count
+        let cachedKB = cachedRanges.reduce(0) { $0 + Int($1.upperBound - $1.lowerBound) } / 1024
+        let totalKB = Int(totalLength) / 1024
+        let sinceFirst = firstServeAt.map { Date().timeIntervalSince($0) } ?? 0
+        lock.unlock()
+
+        plog(String(format:
+            "📊 Cloud SUMMARY '%@' %dKB/%dKB cached, fetch=%d (%.2fs avg=%.2fs min=%.2fs max=%.2fs@%lld) retry=%d hit=%d/%dKB prefetchWait=%d/%.2fs lifetime=%.1fs",
+            label,
+            cachedKB, totalKB,
+            count, totalElapsed,
+            count > 0 ? totalElapsed / Double(count) : 0,
+            minE, maxE, slow,
+            retries,
+            hit, hitKB,
+            pwCount, pwElapsed,
+            sinceFirst))
     }
 
     /// Caller MUST hold `lock`. Returns true when `cachedRanges`
@@ -678,6 +796,10 @@ private final class State: @unchecked Sendable {
     /// - 缺口太大 (用户跳过没听到那段): 不动, .partial 留着 LRU / pruneStale
     ///   后续清理。
     fileprivate func finalizeSession() {
+        // 不论结果如何, finalize 时机一律输出一次 session summary, 用来对照
+        // 本首歌的 fetch / cache / prefetch 表现。emitSessionSummary 内部
+        // dedupe, 多次调用只输出一次。
+        emitSessionSummary()
         lock.lock()
         // 已经 rename 过了, 啥也不做。
         if activeURL == finalURL {

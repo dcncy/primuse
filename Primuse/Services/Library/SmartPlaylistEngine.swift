@@ -20,9 +20,16 @@ enum SmartPlaylistEngine {
         in library: MusicLibrary,
         history: PlayHistoryStore
     ) -> [Song] {
+        let startedAt = Date()
+        let totalSongs = library.visibleSongs.count
+
         // 空规则集合: 命中 library 全部 (用户可能新建后还没编辑规则就先看个全量)
         guard !smart.rules.isEmpty else {
-            return sortAndLimit(library.visibleSongs, smart: smart, history: history)
+            let result = sortAndLimit(library.visibleSongs, smart: smart, history: history)
+            let elapsed = Date().timeIntervalSince(startedAt)
+            plog(String(format: "🎯 SmartPlaylist '%@' match: 0 rules → matched=%d/%d in %.0fms",
+                        smart.name, result.count, totalSongs, elapsed * 1000))
+            return result
         }
 
         let stats = PlayStats(history: history)
@@ -34,7 +41,17 @@ enum SmartPlaylistEngine {
                      stats: stats,
                      library: library)
         }
-        return sortAndLimit(matched, smart: smart, history: history)
+        let result = sortAndLimit(matched, smart: smart, history: history)
+        let elapsed = Date().timeIntervalSince(startedAt)
+        plog(String(format: "🎯 SmartPlaylist '%@' match: rules=%d combinator=%@ sortBy=%@ limit=%@ → matched=%d/%d (truncated to %d) in %.0fms",
+                    smart.name,
+                    smart.rules.count,
+                    smart.combinator.rawValue,
+                    smart.sortField.rawValue,
+                    smart.limit.map(String.init) ?? "none",
+                    matched.count, totalSongs, result.count,
+                    elapsed * 1000))
+        return result
     }
 
     // MARK: - Rule evaluation

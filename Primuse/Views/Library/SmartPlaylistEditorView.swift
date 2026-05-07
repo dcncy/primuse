@@ -170,9 +170,13 @@ struct SmartPlaylistEditorView: View {
 
 // MARK: - Rule editor row
 
-/// 单行规则编辑: 字段 picker + 操作符 picker + 值输入。
-/// 字段切换后操作符自动 reset 为该字段的第一个支持选项, 避免 type-incompatible
-/// 残留 (e.g. text 字段切到 integer 后还留着 contains)。
+/// 单条规则编辑行 ── 卡片式视觉。
+///
+/// 上半: 字段 (带类型图标) + 操作符, 都做成 capsule menu。
+/// 下半: 值输入区, 用统一圆角容器, 形态根据字段 valueKind 切换。
+///
+/// 字段切换时操作符会自动 reset 成该字段类型的第一个支持选项, 避免 type-
+/// incompatible 残留 (如 text 切到 integer 后还留着 contains)。
 private struct SmartPlaylistRuleEditorRow: View {
     @Binding var rule: SmartPlaylistRule
 
@@ -181,68 +185,140 @@ private struct SmartPlaylistRuleEditorRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Picker("", selection: $rule.field) {
-                    ForEach(SmartPlaylistField.allCases, id: \.self) { f in
-                        Text(fieldLabel(f)).tag(f)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .onChange(of: rule.field) { _, newField in
-                    // 切换字段后, 如果当前 op 跟新字段类型不兼容, 重置成第一个支持的。
-                    if !rule.op.supports(newField.valueKind) {
-                        rule.op = SmartPlaylistOperator.allCases.first(where: { $0.supports(newField.valueKind) }) ?? .equals
-                    }
-                }
-
-                Picker("", selection: $rule.op) {
-                    ForEach(supportedOps, id: \.self) { o in
-                        Text(opLabel(o)).tag(o)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
+        VStack(alignment: .leading, spacing: 10) {
+            // 上行: 字段 + 操作符 capsule
+            HStack(spacing: 8) {
+                fieldMenu
+                opMenu
+                Spacer(minLength: 0)
             }
 
+            // 下行: 值输入。统一圆角容器, 内部按字段类型变形。
             valueInput
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
     }
+
+    // MARK: 字段 menu (capsule + 类型图标 + 文字 + 三角)
+
+    private var fieldMenu: some View {
+        Menu {
+            ForEach(SmartPlaylistField.allCases, id: \.self) { f in
+                Button {
+                    rule.field = f
+                    if !rule.op.supports(f.valueKind) {
+                        rule.op = SmartPlaylistOperator.allCases.first(where: { $0.supports(f.valueKind) }) ?? .equals
+                    }
+                } label: {
+                    Label(fieldLabel(f), systemImage: fieldIcon(f))
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: fieldIcon(rule.field))
+                    .font(.caption)
+                Text(fieldLabel(rule.field))
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+            .foregroundStyle(Color.accentColor)
+        }
+    }
+
+    // MARK: 操作符 menu (capsule, 浅灰, 跟字段视觉层级区分)
+
+    private var opMenu: some View {
+        Menu {
+            ForEach(supportedOps, id: \.self) { o in
+                Button { rule.op = o } label: {
+                    Text(opLabel(o))
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(opLabel(rule.op))
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.secondary.opacity(0.15)))
+            .foregroundStyle(.primary)
+        }
+    }
+
+    // MARK: 值输入
 
     @ViewBuilder
     private var valueInput: some View {
-        switch rule.field.valueKind {
-        case .text:
-            if rule.field == .isInPlaylist {
-                playlistPicker
-            } else {
-                TextField("smart_value_placeholder", text: $rule.value)
-                    .textInputAutocapitalization(.never)
-            }
-        case .integer, .double:
-            if rule.op == .between {
-                HStack {
-                    BetweenInput(value: $rule.value)
+        Group {
+            switch rule.field.valueKind {
+            case .text:
+                if rule.field == .isInPlaylist {
+                    SmartPlaylistPicker(value: $rule.value)
+                } else {
+                    TextField(String(localized: "smart_value_placeholder"), text: $rule.value)
+                        .textInputAutocapitalization(.never)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(roundedFieldBackground)
                 }
-            } else {
-                TextField("smart_value_placeholder", text: $rule.value)
-                    .keyboardType(.decimalPad)
+            case .integer, .double:
+                if rule.op == .between {
+                    BetweenInput(value: $rule.value)
+                } else {
+                    TextField(String(localized: "smart_value_placeholder"), text: $rule.value)
+                        .keyboardType(.decimalPad)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(roundedFieldBackground)
+                }
+            case .date:
+                // 日期场景统一为"最近 N 天" stepper, 不暴露原始 ISO8601 输入
+                // ── 手输 timestamp 没人会用, 直接给数字步进器更明确。
+                DateValueEditor(value: $rule.value)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(roundedFieldBackground)
             }
-        case .date:
-            // value 编辑成相对天数 ── "最近 N 天" 是最常见场景。手动 ISO8601
-            // 用户基本不会输入。直接给 stepper 改 days 数字。
-            DateValueEditor(value: $rule.value)
         }
     }
 
-    @ViewBuilder
-    private var playlistPicker: some View {
-        // isInPlaylist 用 picker 选 library 里现有 playlist。
-        // 这里没有直接拿 library, 用 NotificationCenter / Environment 都可以;
-        // 简化起见用一个 helper view 注入 library。
-        SmartPlaylistPicker(value: $rule.value)
+    private var roundedFieldBackground: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Color(.systemBackground))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+    }
+
+    // MARK: 字段 icon / label
+
+    private func fieldIcon(_ f: SmartPlaylistField) -> String {
+        switch f {
+        case .title: return "music.note"
+        case .artistName: return "person.fill"
+        case .albumTitle: return "square.stack.fill"
+        case .genre: return "guitars"
+        case .fileFormat: return "waveform"
+        case .sourceID: return "externaldrive"
+        case .year: return "calendar"
+        case .fileSize: return "doc"
+        case .bitRate: return "gauge"
+        case .durationSec: return "clock"
+        case .dateAdded: return "calendar.badge.plus"
+        case .playCount: return "play.circle"
+        case .lastPlayedAt: return "clock.arrow.circlepath"
+        case .isInPlaylist: return "music.note.list"
+        }
     }
 
     private func fieldLabel(_ f: SmartPlaylistField) -> String {
@@ -269,14 +345,23 @@ private struct DateValueEditor: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
+            Image(systemName: "calendar")
+                .foregroundStyle(.secondary)
             Text("smart_date_recent_days")
+                .font(.subheadline)
             Spacer()
             Stepper(value: Binding(
                 get: { days },
                 set: { value = "days:\($0)" }
             ), in: 1...3650) {
-                Text("\(days)")
+                HStack(spacing: 4) {
+                    Text("\(days)")
+                        .monospacedDigit()
+                        .fontWeight(.medium)
+                    Text(verbatim: "d")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .onAppear {
@@ -309,17 +394,33 @@ private struct BetweenInput: View {
                 set: { value = "\($0)|\(hi)" }
             ))
             .keyboardType(.decimalPad)
-            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(boxBackground)
 
-            Text("─")
+            Text(verbatim: "─")
+                .foregroundStyle(.secondary)
 
             TextField("max", text: Binding(
                 get: { hi },
                 set: { value = "\(lo)|\($0)" }
             ))
             .keyboardType(.decimalPad)
-            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(boxBackground)
         }
+    }
+
+    private var boxBackground: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Color(.systemBackground))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
     }
 }
 
@@ -329,13 +430,50 @@ private struct SmartPlaylistPicker: View {
     @Binding var value: String
     @Environment(MusicLibrary.self) private var library
 
-    var body: some View {
-        Picker("smart_value_playlist", selection: $value) {
-            Text("smart_value_playlist_none").tag("")
-            ForEach(library.playlists) { p in
-                Text(p.name).tag(p.id)
-            }
+    private var selectedName: String {
+        if value.isEmpty {
+            return String(localized: "smart_value_playlist_none")
         }
-        .pickerStyle(.menu)
+        return library.playlists.first(where: { $0.id == value })?.name
+            ?? String(localized: "smart_value_playlist_none")
+    }
+
+    var body: some View {
+        Menu {
+            Button { value = "" } label: {
+                Label(String(localized: "smart_value_playlist_none"), systemImage: "circle.dashed")
+            }
+            if !library.playlists.isEmpty {
+                Divider()
+                ForEach(library.playlists) { p in
+                    Button { value = p.id } label: {
+                        Label(p.name, systemImage: "music.note.list")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "music.note.list")
+                    .foregroundStyle(.secondary)
+                Text(selectedName)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+            )
+        }
     }
 }

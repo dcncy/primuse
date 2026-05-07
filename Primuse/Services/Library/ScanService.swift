@@ -137,6 +137,15 @@ final class ScanService {
     /// Must match `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
     static let backgroundTaskIdentifier = "com.welape.yuanyin.scan-resume"
 
+    /// 扫描期间向 library 批量提交的阈值。改大可以显著降低 main actor 上
+    /// rebuildIndex / persistSnapshot 的频率, 避免 1w+ 首库 scale 时出现
+    /// "扫描期间 UI 卡顿"。1w 首库下从原本的每 10 首提交一次 (1000 次
+    /// rebuildIndex) 降到每 200 首一次 (50 次), 主线程阻塞时间下降 20×。
+    private static let flushBatchSize = 200
+    /// 即便没攒够 batchSize, 距离上次 flush 超过这个间隔也强制 flush 一次
+    /// 让用户看到 "scanned X" 数字仍在动 (别等到扫描结束才一次性更新)。
+    private static let flushInterval: TimeInterval = 1.5
+
     /// Re-launch any source whose scan was interrupted (has a checkpoint with
     /// unfinished progress) and is not already running. Idempotent — safe to
     /// call on every app foreground or background-task wake.
@@ -300,6 +309,7 @@ final class ScanService {
         do {
             var lastSongs: [Song] = []
             var lastIncrementalUpdate = 0
+            var lastFlushAt = Date()
             for try await update in stream {
                 try Task.checkCancellation()
                 scanStates[source.id]?.scannedCount = update.scannedCount
@@ -307,7 +317,9 @@ final class ScanService {
                 scanStates[source.id]?.currentFile = update.currentFile
                 lastSongs = update.songs
 
-                if update.scannedCount - lastIncrementalUpdate >= 10 {
+                let pendingDelta = update.scannedCount - lastIncrementalUpdate
+                let timeSinceFlush = Date().timeIntervalSince(lastFlushAt)
+                if pendingDelta >= Self.flushBatchSize || (pendingDelta > 0 && timeSinceFlush >= Self.flushInterval) {
                     library.addSongs(lastSongs)
                     let acceptedCount = library.songs.filter { $0.sourceID == source.id }.count
                     sourceStore.updateLocal(source.id) { $0.songCount = acceptedCount }
@@ -319,6 +331,7 @@ final class ScanService {
                         currentFile: update.currentFile
                     )
                     lastIncrementalUpdate = update.scannedCount
+                    lastFlushAt = Date()
                 }
             }
 
@@ -388,6 +401,7 @@ final class ScanService {
         do {
             var lastSongs: [Song] = []
             var lastIncrementalUpdate = 0
+            var lastFlushAt = Date()
             for try await update in stream {
                 try Task.checkCancellation()
                 scanStates[source.id]?.scannedCount = update.scannedCount
@@ -396,11 +410,13 @@ final class ScanService {
                 scanStates[source.id]?.currentFile = update.currentFile
                 lastSongs = update.songs
 
-                // Flush every 10 *new* songs (not every 10 yields). With
-                // incremental scan, yields and new songs are the same, but
-                // when the scanner processes a song that was already in
-                // the library this still avoids needless DB churn.
-                if update.addedCount - lastIncrementalUpdate >= 10 {
+                // Flush 阈值: 每 flushBatchSize 首 *新增* 一次, 或者距上次 flush
+                // 超过 flushInterval 也强制 flush。原本是每 10 首一次, 1w 首库
+                // 时 1000 次 rebuildIndex / persistSnapshot 把 main actor 卡到
+                // 用户能感觉到。
+                let pendingDelta = update.addedCount - lastIncrementalUpdate
+                let timeSinceFlush = Date().timeIntervalSince(lastFlushAt)
+                if pendingDelta >= Self.flushBatchSize || (pendingDelta > 0 && timeSinceFlush >= Self.flushInterval) {
                     library.addSongs(lastSongs)
                     let acceptedCount = library.songs.filter { $0.sourceID == source.id }.count
                     sourceStore.updateLocal(source.id) { $0.songCount = acceptedCount }
@@ -412,6 +428,7 @@ final class ScanService {
                         currentFile: update.currentFile
                     )
                     lastIncrementalUpdate = update.addedCount
+                    lastFlushAt = Date()
                 }
             }
 

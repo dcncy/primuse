@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import PrimuseKit
+import UIKit
 
 /// Fills in metadata for songs that were added by ConnectorScanner in
 /// "bare-song" mode (cloud sources only download a few hundred KB during
@@ -56,6 +57,11 @@ final class MetadataBackfillService {
     /// finishing worker can wipe `worker`/`isRunning` set by a new `start()`
     /// that ran between cancel and Task.value resumption.
     private var workerGeneration: Int = 0
+
+    /// Worker 持有的 UIBackgroundTask ID, app 切到后台时给 backfill ~30 秒额外
+    /// 收尾时间。worker 完成 / stop 时释放。expirationHandler 兜底 ── 系统提前
+    /// 回收时主动 stop, 不留半挂状态。
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     init(library: MusicLibrary, sourceManager: SourceManager) {
         self.library = library
@@ -238,6 +244,7 @@ final class MetadataBackfillService {
         isRunning = true
         workerGeneration += 1
         let generation = workerGeneration
+        beginBackgroundTaskIfNeeded()
         // Diagnostic: prove that we only pick still-bare songs. If you see
         // this number stay >0 forever you can compare against
         // `library.songs.count` to confirm no infinite reprocessing.
@@ -246,11 +253,49 @@ final class MetadataBackfillService {
             await self?.runWorker()
             await MainActor.run { [weak self] in
                 guard let self, self.workerGeneration == generation else { return }
+                let processed = self.processedCount
                 self.worker = nil
                 self.isRunning = false
                 self.pendingCount = 0
+                self.endBackgroundTaskIfHeld()
+                // 完成通知 ── 处理 >= 5 首才发, 避免每次 worker 短跑都打扰用户。
+                // hasPendingWork == false 表示当前没遗留 ── 队列全清才算"完成"。
+                // postIfEnabled 内部会检查用户在设置页是否开了开关 + 系统是否已授权,
+                // 不满足条件直接 noop。
+                if processed >= 5 && !self.hasPendingWork {
+                    Task {
+                        await UserNotificationService.postIfEnabled(
+                            userDefaultsKey: UserNotificationService.backfillCompleteNotificationKey,
+                            title: String(localized: "backfill_done_title"),
+                            body: String(format: String(localized: "backfill_done_body"), processed),
+                            identifier: "primuse.backfill.done"
+                        )
+                    }
+                }
             }
         }
+    }
+
+    private func beginBackgroundTaskIfNeeded() {
+        guard backgroundTaskID == .invalid else { return }
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "primuse.backfill") { [weak self] in
+            // System wants the time back ── stop worker gracefully, release token.
+            // 之前没这个 expirationHandler, app 切到后台时 backfill 立刻被挂起,
+            // 没机会 flush in-flight batch。现在能多 30 秒优雅收尾。
+            Task { @MainActor [weak self] in
+                self?.stop()
+                self?.endBackgroundTaskIfHeld()
+            }
+        }
+        plog("📥 Backfill: beginBackgroundTask id=\(backgroundTaskID.rawValue)")
+    }
+
+    private func endBackgroundTaskIfHeld() {
+        guard backgroundTaskID != .invalid else { return }
+        let id = backgroundTaskID
+        backgroundTaskID = .invalid
+        UIApplication.shared.endBackgroundTask(id)
+        plog("📥 Backfill: endBackgroundTask id=\(id.rawValue)")
     }
 
     /// Stop the worker after the in-flight song finishes. Safe to call on
@@ -263,6 +308,7 @@ final class MetadataBackfillService {
         worker?.cancel()
         worker = nil
         isRunning = false
+        endBackgroundTaskIfHeld()
     }
 
     /// Re-evaluate the queue every time the library changes (e.g. a fresh
@@ -347,6 +393,12 @@ final class MetadataBackfillService {
     /// Even with a partial batch, flush at least every N seconds so the
     /// user sees progress without having to wait for 10 songs.
     private static let flushInterval: TimeInterval = 3
+    /// 并发处理 worker 数。百度网盘 actor 内的 throttle 把 callAPI 串行化
+    /// (避免 errno 31034 限流), 但 Range fetch 走 actor 外 URLSession 能真
+    /// 并发。3 个 worker 实测下吞吐量翻倍多, 再多会撞 throttle 等待 + 触发
+    /// 服务端限流。其他 connector (Synology / WebDAV) 也用同一个并发数,
+    /// 它们没限速但 3 路并发也比串行快。
+    private static let workerConcurrency = 3
 
     private func runWorker() async {
         // Outer loop: take a snapshot of bare songs, process the snapshot
@@ -393,43 +445,69 @@ final class MetadataBackfillService {
         var lastFlushAt = Date()
         plog("📥 processSnapshot: starting with \(snapshot.count) songs")
 
-        for song in snapshot {
-            if Task.isCancelled { break }
+        // 预热阶段: 按 source 分组, 给每个 source 调一次 batch prefetchMetadata
+        // (百度网盘会一次拿 100 个 dlink, 其他 connector 默认 noop)。后续每首
+        // 的 fetchRange 走 dlink cache 命中, 省掉 1w 次 filemetas API 配额。
+        let songsBySource: [String: [Song]] = Dictionary(grouping: snapshot) { $0.sourceID }
+        for (_, sourceSongs) in songsBySource {
+            guard !Task.isCancelled else { return }
+            guard let representative = sourceSongs.first else { continue }
+            if let connector = try? await sourceManager.connectorForSong(representative) {
+                let paths = sourceSongs.map(\.filePath)
+                await connector.prefetchMetadata(paths: paths)
+            }
+        }
 
-            // Cellular check between songs — flush what we have and bail
-            // so the user's data isn't burned past their setting.
-            if shouldBlockForCellular() {
-                if !pendingFlush.isEmpty {
-                    library.replaceSongs(pendingFlush)
-                    pendingFlush.removeAll(keepingCapacity: true)
+        // 并发 worker 拉取 ── TaskGroup pull-pattern, 启动 N 个 task 跑 processOne,
+        // 谁完成立刻拿下一首。比 chunk 切片均匀, 慢源 / 快源混合时不会被慢
+        // 元素拖整批进度。pendingFlush 的累积 + flush 都在 main actor (TaskGroup
+        // body 是 main actor isolated, 各 task 完成回到这里时是 serial 的),
+        // 不需要锁。
+        var iterator = snapshot.makeIterator()
+        await withTaskGroup(of: (song: Song, outcome: BackfillOutcome).self) { group in
+            // Seed: 启动 workerConcurrency 个 task
+            for _ in 0..<Self.workerConcurrency {
+                guard let song = iterator.next() else { break }
+                if shouldBlockForCellular() { return }
+                group.addTask { [self] in (song, await self.processOne(song)) }
+            }
+
+            // Drain: 每完成一个就启动下一个, 同时累积 / flush
+            while let result = await group.next() {
+                if Task.isCancelled { break }
+
+                processedCount += 1
+                if result.outcome.markFailed {
+                    failedSongIDs.insert(result.song.id)
+                    saveFailed()
                 }
-                return
-            }
+                if let updated = result.outcome.song {
+                    pendingFlush.append(updated)
+                }
 
-            let outcome = await processOne(song)
-            processedCount += 1
-            if outcome.markFailed {
-                failedSongIDs.insert(song.id)
-                saveFailed()
-            }
-            if let updated = outcome.song {
-                pendingFlush.append(updated)
-            }
+                // Flush when the batch is full OR the interval has elapsed。
+                // 在 main actor 上, library.replaceSongs 调一次即可。
+                let shouldFlush = pendingFlush.count >= Self.flushBatchSize
+                    || Date().timeIntervalSince(lastFlushAt) >= Self.flushInterval
+                if shouldFlush, !pendingFlush.isEmpty {
+                    let batch = pendingFlush
+                    pendingFlush.removeAll(keepingCapacity: true)
+                    lastFlushAt = Date()
+                    library.replaceSongs(batch)
+                    plog("📥 flushed \(batch.count) songs to library")
+                }
 
-            // Flush when the batch is full OR the interval has elapsed.
-            // Inlined (was a closure that Swift 6's actor-isolation
-            // closure handling silently no-op'd — `await flush(...)`
-            // returned without ever entering the body, so songs were
-            // appended forever and `library.replaceSongs` was never
-            // called. Direct call avoids the trap.
-            let shouldFlush = pendingFlush.count >= Self.flushBatchSize
-                || Date().timeIntervalSince(lastFlushAt) >= Self.flushInterval
-            if shouldFlush, !pendingFlush.isEmpty {
-                let batch = pendingFlush
-                pendingFlush.removeAll(keepingCapacity: true)
-                lastFlushAt = Date()
-                library.replaceSongs(batch)
-                plog("📥 flushed \(batch.count) songs to library")
+                // Cellular check between songs ── 切到 cellular 后停止派发新
+                // task, 已 in-flight 的让它们自然完成 (next 仍会 yield)。
+                if shouldBlockForCellular() {
+                    plog("📥 Backfill: cellular detected, stop dispatching new tasks")
+                    continue
+                }
+
+                // 派发下一首给空闲 worker。
+                if let next = iterator.next() {
+                    group.addTask { [self] in (next, await self.processOne(next)) }
+                }
             }
         }
 

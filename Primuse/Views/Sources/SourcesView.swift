@@ -148,6 +148,10 @@ struct SourcesView: View {
                         }
                     }
                     .font(.caption2).foregroundStyle(.secondary)
+                    // 安抚: 让用户明确知道扫描在后台跑, 可以离开当前页面继续用 app。
+                    Text("scan_runs_in_background_hint")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             } else {
                 // Phase A finished. If there are still bare songs from this source
@@ -158,12 +162,20 @@ struct SourcesView: View {
                 // with the global "remaining" in StorageManagementView.
                 let bare = backfill.remainingCount(forSource: source.id)
                 if bare > 0 {
-                    HStack(spacing: 8) {
-                        ProgressView().scaleEffect(0.7).tint(.secondary)
-                        Text("backfill_in_progress").font(.caption2)
-                        Spacer()
-                        Text(String(format: String(localized: "backfill_remaining"), bare))
-                            .font(.caption2).monospacedDigit()
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            ProgressView().scaleEffect(0.7).tint(.secondary)
+                            Text("backfill_in_progress").font(.caption2)
+                            Spacer()
+                            Text(String(format: String(localized: "backfill_remaining"), bare))
+                                .font(.caption2).monospacedDigit()
+                        }
+                        Text("backfill_runs_in_background_hint")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text("backfill_keep_app_alive_hint")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                     .foregroundStyle(.secondary)
                 }

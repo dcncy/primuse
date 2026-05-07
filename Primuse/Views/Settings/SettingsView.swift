@@ -561,6 +561,10 @@ struct StorageManagementView: View {
     @Environment(PlaybackSettingsStore.self) private var playbackSettings
     @Environment(MetadataBackfillService.self) private var backfill
     @AppStorage(MetadataBackfillService.wifiOnlyDefaultsKey) private var cloudScanWifiOnly: Bool = true
+    @AppStorage(UserNotificationService.backfillCompleteNotificationKey) private var notifyBackfillComplete: Bool = false
+    /// 系统授权状态 ── 进页面时查一次。用户在系统 Settings 关掉后, toggle
+    /// 仍是 on 但显示"已被系统拒绝"提示, 让用户知道为什么开关无效。
+    @State private var notificationStatusDenied: Bool = false
     @State private var audioCacheSize: String = "..."
     @State private var imageCacheSize: String = "..."
     @State private var metadataSize: String = "..."
@@ -590,6 +594,24 @@ struct StorageManagementView: View {
                         // start (or stop) right after flipping the switch.
                         backfill.refreshQueue()
                     }
+                Toggle("notify_backfill_complete", isOn: $notifyBackfillComplete)
+                    .onChange(of: notifyBackfillComplete) { _, on in
+                        guard on else { return }
+                        // 用户从关 → 开: 主动请求权限。系统第一次会弹对话框,
+                        // 之前 deny 过的话不会再弹, 我们用 currentAuthorizationStatus
+                        // 检测并提示用户去系统 Settings 开。
+                        Task {
+                            let granted = await UserNotificationService.requestAuthorization()
+                            if !granted {
+                                notificationStatusDenied = true
+                            }
+                        }
+                    }
+                if notifyBackfillComplete && notificationStatusDenied {
+                    Label("notify_permission_denied_hint", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
                 if backfill.hasPendingWork {
                     HStack {
                         Text("backfill_in_progress")
@@ -603,6 +625,14 @@ struct StorageManagementView: View {
                 Text("network")
             } footer: {
                 Text("cloud_scan_wifi_only_footer")
+            }
+            .task {
+                // 进设置页时查一次系统授权状态。如果用户在 Settings 关掉了,
+                // toggle 显示打开但 notificationStatusDenied 让 UI 提示。
+                if notifyBackfillComplete {
+                    let status = await UserNotificationService.currentAuthorizationStatus()
+                    notificationStatusDenied = (status == .denied)
+                }
             }
 
             Section {

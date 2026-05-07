@@ -146,6 +146,7 @@
 		96B283F41FBDFCEBD9C0222D /* BaiduPanSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = F40F5CE9382F37C345E04D5B /* BaiduPanSource.swift */; };
 		971D5EDC7B3FEAC87870DB0D /* MetadataService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 645BBABA564E600B40010061 /* MetadataService.swift */; };
 		996C1B4150BF531114D218FD /* SynologySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E60AA3C090087F657145292 /* SynologySource.swift */; };
+		9AA28382B7611D91B0A8D1CB /* UserNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4AB7D8D80005D72670738D0 /* UserNotificationService.swift */; };
 		9B2A49C180BA29D56A74D9CD /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D2741FA5052447F5E1B27A4 /* QueueView.swift */; };
 		9FFA8FE518DD0500CA0B913B /* PlaybackLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA5AE882AD3B192D6A6764E /* PlaybackLiveActivity.swift */; };
 		A4B7165F820806605899C00B /* ScanService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 632A16B1EB87A560435B7039 /* ScanService.swift */; };
@@ -478,6 +479,7 @@
 		E0CD6571B6CA1E276A954F2F /* SidecarWriteService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidecarWriteService.swift; sourceTree = "<group>"; };
 		E43D86A7277FFD6BA412DECF /* SourcesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourcesStore.swift; sourceTree = "<group>"; };
 		E4A9D5B6369B77FBCEFFF97C /* XorZlibLyricsDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XorZlibLyricsDecoder.swift; sourceTree = "<group>"; };
+		E4AB7D8D80005D72670738D0 /* UserNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserNotificationService.swift; sourceTree = "<group>"; };
 		E4F6B266B199B4973F7A9134 /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		E7BBFA50461FE980684501FA /* AddSourceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSourceView.swift; sourceTree = "<group>"; };
 		E7F90F8D26A59F3DF6BF867F /* SidecarMetadataLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidecarMetadataLoader.swift; sourceTree = "<group>"; };
@@ -835,6 +837,7 @@
 				227B30DE534574B04EF07610 /* Sources */,
 				A796306024AE3678DB56D02A /* AppIconService.swift */,
 				74134D8D32D016D927D59D77 /* ThemeService.swift */,
+				E4AB7D8D80005D72670738D0 /* UserNotificationService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1459,6 +1462,7 @@
 				51A139BDA91C3D1378607A22 /* UgreenAPI.swift in Sources */,
 				374F3BE97119D0550F06478A /* UgreenSource.swift in Sources */,
 				5C09CCC8FE4085218C5465FA /* UnsupportedSourceConnector.swift in Sources */,
+				9AA28382B7611D91B0A8D1CB /* UserNotificationService.swift in Sources */,
 				87FF2436F5492C7D7D1D1A26 /* WebDAVBrowserView.swift in Sources */,
 				BCD118DDD7CB7A8F1DCC6BED /* WebDAVSource.swift in Sources */,
 				E77B4CEB5D9E9A052E4DBA84 /* XorZlibLyricsDecoder.swift in Sources */,

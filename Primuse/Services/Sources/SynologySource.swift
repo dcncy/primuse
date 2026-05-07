@@ -51,7 +51,31 @@ actor SynologySource: MusicSourceConnector {
 
     func connect() async throws {
         if await api.isLoggedIn { return }
+
+        // 空密码 guard ── 关键保护机制。
+        //
+        // 之前没这个 guard 时, keychain 暂时不可访问 (kSecAttrAccessibleAfterFirstUnlock
+        // 在 app 冷启动 + 设备锁屏状态下读不到密码) 会导致 KeychainService.getPassword
+        // 返回 nil, 上层 fallback 成空字符串, 然后 connect() 拿空密码反复打 NAS,
+        // DSM 把 IP / 账号锁掉, 此后哪怕密码恢复了所有歌也都 connectionFailed
+        // ── 实测连续几十首歌全部 "登录尝试次数过多, 请稍后再试"。
+        //
+        // 这里直接 throw, UI 层会拿到 connectionFailed 并通过 SourceAuthAlert
+        // 弹"重新输入密码"。比浪费几次失败 login + 触发 NAS 端 lockout 强得多。
+        if password.isEmpty {
+            plog("⛔ SynologySource '\(sourceID)' connect aborted: password unavailable (keychain not yet accessible or credential cleared)")
+            await MainActor.run {
+                SourceAuthAlert.report(sourceID: sourceID, message: "缺少登录密码 ── 请重新输入")
+            }
+            throw SourceError.connectionFailed("missing password")
+        }
+
         if let existing = loginTask {
+            // 多个 caller 等同一个 in-flight login 时打一条聚合日志, 方便确认
+            // dedupe 在工作 ── 没这条日志时只能从 SynologyAPI:59 "login start"
+            // 数量推测 (一次 login start + N 个 dedupe wait 是健康的, N 次
+            // login start 才是 dedupe 失效)。
+            plog("🔁 SynologySource '\(sourceID)' connect: joining existing in-flight login task")
             try await existing.value
             return
         }

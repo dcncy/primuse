@@ -321,8 +321,12 @@ final class AudioPlayerService {
 
             // Remote URLs: use StreamingDownloadDecoder (handles self-signed HTTPS via URLSession)
             if isRemoteURL {
-                plog("▶️ Using StreamingDownloadDecoder for remote URL: \(url.scheme ?? "")://...")
-                plog("▶️   outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
+                // 解码器选型: HTTPS / HTTP URL → StreamingDownloadDecoder。
+                // 这条路径用 URLSession 一次性把整首歌下载下来再解码, 适合
+                // NAS / WebDAV / SFTP 等 connector 已经把 streaming URL
+                // 准备好的场景。CloudPlaybackSource (range-based) 适合
+                // 云盘那种需要 dlink 拼接 / 多次 Range 的场景, 选不到这条。
+                plog("▶️ Decoder: StreamingDownloadDecoder (reason: scheme=\(url.scheme ?? "?") is HTTP/HTTPS, full-download path) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
                 let cacheURL = playbackSettings.audioCacheEnabled ? sourceManager?.cacheURL(for: song) : nil
                 await playWithStreamingDownload(song: song, url: url, outputFormat: outputFormat, playID: id, cacheURL: cacheURL)
                 return
@@ -338,11 +342,21 @@ final class AudioPlayerService {
                    for: song,
                    cacheEnabled: playbackSettings.audioCacheEnabled
                ) {
-                plog("▶️ Using CloudPlaybackSource (streaming SFBInputSource, cache=\(playbackSettings.audioCacheEnabled))")
+                // 解码器选型: 自定义 cloudStreamingScheme (primuse-stream://)
+                // 走 CloudPlaybackSource。它包装一层 SFBInputSource, SFB read
+                // 时按需走 HTTP Range fetch, 配合 sparse cache 实现"边下边播"。
+                // 适合云盘 (Baidu / Aliyun / OneDrive / Dropbox) 的 dlink
+                // 流式播放 ── 这些场景下不能像 NAS 那样直接给 SFBAudioEngine
+                // 一个稳定的 HTTPS URL。
+                plog("▶️ Decoder: CloudPlaybackSource (reason: scheme=primuse-stream, range-based streaming) cache=\(playbackSettings.audioCacheEnabled) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
                 activeDecoderKind = .cloudStream
                 stream = nativeDecoder.decode(from: inputSource, outputFormat: outputFormat, onResolveSourceLength: makeResolveLengthCallback(for: song))
             } else {
                 // Local file path (or fallback when streaming setup failed)
+                let reason = isCloudStream
+                    ? "primuse-stream URL but inputSource setup failed, fallback to file path"
+                    : "local file path (file:// scheme)"
+                plog("▶️ Decoder: NativeDecoder (reason: \(reason)) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
                 stream = nativeDecoder.decode(from: url, outputFormat: outputFormat, onResolveSourceLength: makeResolveLengthCallback(for: song))
             }
             let iteratorBox = BufferIteratorBox(stream.makeAsyncIterator())

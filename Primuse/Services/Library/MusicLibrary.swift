@@ -21,6 +21,16 @@ final class MusicLibrary {
             .filter { $0.isDeleted }
             .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
     }
+    /// 智能歌单 ── 跟普通 playlist 共用 soft-delete + snapshot 持久化模型。
+    /// 只存定义 (规则 / 排序 / 上限), 不缓存匹配结果 ── 每次 query 实时算,
+    /// 避免不同设备 PlayHistoryStore 不一致导致显示错位。
+    private(set) var allSmartPlaylists: [SmartPlaylist] = []
+    var smartPlaylists: [SmartPlaylist] { allSmartPlaylists.filter { !$0.isDeleted } }
+    var recentlyDeletedSmartPlaylists: [SmartPlaylist] {
+        allSmartPlaylists
+            .filter { $0.isDeleted }
+            .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
+    }
     private var playlistSongIDs: [String: [String]] = [:]
     private var recentPlaybackSongIDs: [String] = []
     /// Identities pulled from CloudKit that didn't resolve to a local
@@ -138,7 +148,16 @@ final class MusicLibrary {
         // same upstream account mints a new mount.id but the path is
         // unchanged, and we want the tombstone to keep working. The
         // user can reverse the tombstone via `restoreDeletedSong`.
-        let filteredNewSongs = newSongs.filter { !deletedSongIdentities.contains(identityKey(for: $0)) }
+        // 给每首新歌就近填 albumID/artistID。这样后台 rebuildIndex 不需要回头
+        // mutate songs 数组, 1w+ 首库扫描时 main actor 不会被全表 ID 重赋值
+        // 卡到。计算成本 = SHA256(string) × 2 per song, 1w 首约 5ms 总。
+        let filteredNewSongs = newSongs
+            .filter { !deletedSongIdentities.contains(identityKey(for: $0)) }
+            .map { song -> Song in
+                var s = song
+                MusicLibrary.fillDerivedIDs(&s)
+                return s
+            }
         let incomingIDs = Set(filteredNewSongs.map(\.id))
         let sourceIDs = Set(filteredNewSongs.map(\.sourceID))
 
@@ -405,6 +424,61 @@ final class MusicLibrary {
         for playlist in toPrune {
             permanentlyDeletePlaylist(id: playlist.id)
         }
+    }
+
+    // MARK: - Smart Playlists
+
+    /// 创建 / 更新一份智能歌单。Caller 自己构造 SmartPlaylist (含 rules), 这里
+    /// 只负责存进 allSmartPlaylists 并刷新 updatedAt + 触发同步。
+    func saveSmartPlaylist(_ smart: SmartPlaylist) {
+        var stored = smart
+        stored.updatedAt = Date()
+        if let idx = allSmartPlaylists.firstIndex(where: { $0.id == smart.id }) {
+            allSmartPlaylists[idx] = stored
+        } else {
+            allSmartPlaylists.append(stored)
+        }
+        sortSmartPlaylists()
+        persistSnapshot()
+        notifySmartPlaylistsChanged([stored.id])
+    }
+
+    /// Soft-delete: 跟 Playlist 一致, mark deleted 并保留 30 天给 CloudKit
+    /// 多设备收敛时间窗。
+    func deleteSmartPlaylist(id: String) {
+        guard let idx = allSmartPlaylists.firstIndex(where: { $0.id == id }) else { return }
+        allSmartPlaylists[idx].isDeleted = true
+        allSmartPlaylists[idx].deletedAt = Date()
+        allSmartPlaylists[idx].updatedAt = Date()
+        persistSnapshot()
+        notifySmartPlaylistsChanged([id])
+    }
+
+    func restoreSmartPlaylist(id: String) {
+        guard let idx = allSmartPlaylists.firstIndex(where: { $0.id == id }) else { return }
+        allSmartPlaylists[idx].isDeleted = false
+        allSmartPlaylists[idx].deletedAt = nil
+        allSmartPlaylists[idx].updatedAt = Date()
+        persistSnapshot()
+        notifySmartPlaylistsChanged([id])
+    }
+
+    func permanentlyDeleteSmartPlaylist(id: String) {
+        allSmartPlaylists.removeAll { $0.id == id }
+        persistSnapshot()
+        notifySmartPlaylistDeleted(id)
+    }
+
+    func pruneSmartPlaylists(deletedBefore threshold: Date) {
+        let toPrune = allSmartPlaylists.filter { $0.isDeleted && ($0.deletedAt ?? .distantFuture) < threshold }
+        guard !toPrune.isEmpty else { return }
+        for smart in toPrune {
+            permanentlyDeleteSmartPlaylist(id: smart.id)
+        }
+    }
+
+    private func sortSmartPlaylists() {
+        allSmartPlaylists.sort { $0.updatedAt > $1.updatedAt }
     }
 
     func add(songID: String, toPlaylist playlistID: String) {
@@ -714,6 +788,41 @@ final class MusicLibrary {
         )
     }
 
+    private func notifySmartPlaylistsChanged(_ ids: [String]) {
+        NotificationCenter.default.post(
+            name: .primuseSmartPlaylistsDidChange,
+            object: nil,
+            userInfo: ["ids": ids]
+        )
+    }
+
+    private func notifySmartPlaylistDeleted(_ id: String) {
+        NotificationCenter.default.post(
+            name: .primuseSmartPlaylistDidDelete,
+            object: nil,
+            userInfo: ["id": id]
+        )
+    }
+
+    /// 删除来自远端 (CloudKit) 的智能歌单。不触发 changed notification 避免
+    /// 回声同步。
+    func deleteSmartPlaylistFromRemote(id: String) {
+        allSmartPlaylists.removeAll { $0.id == id }
+        persistSnapshot()
+    }
+
+    /// 应用来自远端 (CloudKit) 的智能歌单更新。比 Playlist 简单很多 ── 没有
+    /// songID 解析问题, 因为 SmartPlaylist 只存规则定义不存歌曲列表。
+    func applyRemoteSmartPlaylist(_ smart: SmartPlaylist) {
+        if let idx = allSmartPlaylists.firstIndex(where: { $0.id == smart.id }) {
+            allSmartPlaylists[idx] = smart
+        } else {
+            allSmartPlaylists.append(smart)
+        }
+        sortSmartPlaylists()
+        persistSnapshot()
+    }
+
     /// Most recently replaced song — observable so consumers (e.g. player) can sync.
     /// Use songReplacementToken for onChange triggers (it changes on every replace, even same song).
     private(set) var lastReplacedSong: Song?
@@ -727,9 +836,11 @@ final class MusicLibrary {
 
     func replaceSong(_ updatedSong: Song) {
         guard let index = songs.firstIndex(where: { $0.id == updatedSong.id }) else { return }
-        songs[index] = updatedSong
-        lastReplacedSong = updatedSong
-        lastReplacedSongIDs = [updatedSong.id]
+        var s = updatedSong
+        MusicLibrary.fillDerivedIDs(&s)
+        songs[index] = s
+        lastReplacedSong = s
+        lastReplacedSongIDs = [s.id]
         songReplacementToken = UUID()
         rebuildIndex()
         cleanPlaylistEntries()
@@ -760,9 +871,11 @@ final class MusicLibrary {
                 missedIDs.append(updated.id)
                 continue
             }
-            songs[index] = updated
-            lastApplied = updated
-            appliedIDs.insert(updated.id)
+            var s = updated
+            MusicLibrary.fillDerivedIDs(&s)
+            songs[index] = s
+            lastApplied = s
+            appliedIDs.insert(s.id)
         }
         plog("📚 replaceSongs: requested=\(updatedSongs.count) applied=\(appliedIDs.count) missed=\(missedIDs.count) librarySongs=\(songs.count) missedSampleID=\(missedIDs.first ?? "-") sampleLibID=\(songs.first?.id ?? "-")")
         guard let lastApplied else { return }
@@ -781,67 +894,46 @@ final class MusicLibrary {
 
     // MARK: - Index Rebuild
 
+    /// 后台重建 albums / artists 集合。songs 上的 albumID / artistID 在
+    /// addSongs / replaceSong 同步路径里就近填好 (`fillDerivedIDs`), rebuildIndex
+    /// 不再 mutate songs ── 它只 derive 集合, 可以扔到背景 executor 算, 算完
+    /// hop 回 main actor 替换。
+    ///
+    /// 1w+ 首库 scale 时 main actor 几乎不阻塞: 之前 1000 次同步 rebuildIndex
+    /// 累计 main thread 阻塞 ~10s, 现在 0s (后台 thread 算, main 只做数组替换)。
+    ///
+    /// generation 检查防止 stale 结果覆盖最新数据 ── 短时间多次 rebuildIndex
+    /// 时只有最后一次的结果会 apply。
+    private var rebuildIndexTask: Task<Void, Never>?
+    private var rebuildIndexGeneration: Int = 0
+
     private func rebuildIndex() {
-        // Build albums — only group songs that have an actual album title
-        // Songs without album title get no albumID (treated as singles)
-        let unknownArtist = String(localized: "unknown_artist")
-        let songsWithAlbum = songs.filter { $0.albumTitle != nil && !$0.albumTitle!.isEmpty }
-        let albumGroups = Dictionary(grouping: songsWithAlbum) { song -> String in
-            let artist = song.artistName ?? unknownArtist
-            let album = song.albumTitle!
-            return "\(artist)\0\(album)"
-        }
+        rebuildIndexGeneration &+= 1
+        let myGen = rebuildIndexGeneration
+        let snapshot = songs
 
-        albums = albumGroups.map { key, songs in
-            let parts = key.split(separator: "\0", maxSplits: 1)
-            let artistName = parts.count > 0 ? String(parts[0]) : unknownArtist
-            let albumTitle = parts.count > 1 ? String(parts[1]) : unknownArtist
-            let id = hashID("\(artistName):\(albumTitle)")
-
-            let artistID = hashID(artistName.lowercased())
-            return Album(
-                id: id,
-                title: albumTitle,
-                artistID: artistID,
-                artistName: artistName,
-                year: songs.first?.year,
-                genre: songs.first?.genre,
-                songCount: songs.count,
-                totalDuration: songs.reduce(0) { $0 + $1.duration.sanitizedDuration },
-                sourceID: songs.first?.sourceID
-            )
-        }.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
-
-        // Update albumID on songs — nil for songs without album
-        for i in songs.indices {
-            if let album = songs[i].albumTitle, !album.isEmpty {
-                let artist = songs[i].artistName ?? unknownArtist
-                songs[i].albumID = hashID("\(artist):\(album)")
-            } else {
-                songs[i].albumID = nil
+        rebuildIndexTask?.cancel()
+        rebuildIndexTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let result = MusicLibrary.computeAlbumsAndArtists(songs: snapshot)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                // generation 校验: 期间又有新的 rebuildIndex 调度过, 当前结果
+                // 已经 stale, 丢弃。
+                guard self.rebuildIndexGeneration == myGen else { return }
+                self.albums = result.albums
+                self.artists = result.artists
+                self.rebuildVisibleCache()
             }
         }
+    }
 
-        // Build artists
-        let artistGroups = Dictionary(grouping: songs) { $0.artistName ?? unknownArtist }
-
-        artists = artistGroups.map { name, songs in
-            let id = hashID(name.lowercased())
-            let albumCount = Set(songs.compactMap(\.albumTitle)).count
-            return Artist(
-                id: id,
-                name: name,
-                albumCount: albumCount,
-                songCount: songs.count
-            )
-        }.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
-
-        // Update artistID on songs
-        for i in songs.indices {
-            let name = songs[i].artistName ?? unknownArtist
-            songs[i].artistID = hashID(name.lowercased())
-        }
-
+    /// 启动 / 测试场景下需要"调用即生效"的同步重建。比异步版本贵 (会卡
+    /// main actor 一下), 但只在 init / migration 等 UI 还没起来的路径用。
+    private func rebuildIndexSync() {
+        let result = MusicLibrary.computeAlbumsAndArtists(songs: songs)
+        albums = result.albums
+        artists = result.artists
         rebuildVisibleCache()
     }
 
@@ -853,6 +945,7 @@ final class MusicLibrary {
 
         songs = snapshot.songs
         allPlaylists = snapshot.playlists
+        allSmartPlaylists = snapshot.smartPlaylists ?? []
         playlistSongIDs = snapshot.playlistSongIDs ?? [:]
         recentPlaybackSongIDs = snapshot.recentPlaybackSongIDs ?? []
         // Old `deletedSongIDs` field stored mount-UUID-derived song.id
@@ -867,7 +960,13 @@ final class MusicLibrary {
         // previous launch (e.g. user added the right cloud source between
         // sessions). Try resolving them once on load.
         flushPendingIdentities()
-        rebuildIndex()
+        // 启动时给所有歌就近填 albumID/artistID, 之后 mutation 路径自维护。
+        // 老的 snapshot 里如果 ID 已存在, 重填一遍也无妨 (deterministic hash)。
+        for i in songs.indices {
+            MusicLibrary.fillDerivedIDs(&songs[i])
+        }
+        // init 阶段直接同步 rebuild ── UI 还没起来, 不需要走异步 schedule。
+        rebuildIndexSync()
     }
 
     private var persistTask: Task<Void, Never>?
@@ -886,6 +985,7 @@ final class MusicLibrary {
         let snapshot = Snapshot(
             songs: songs,
             playlists: allPlaylists,
+            smartPlaylists: allSmartPlaylists.isEmpty ? nil : allSmartPlaylists,
             playlistSongIDs: playlistSongIDs,
             recentPlaybackSongIDs: recentPlaybackSongIDs,
             deletedSongIdentities: Array(deletedSongIdentities),
@@ -920,14 +1020,76 @@ final class MusicLibrary {
         recentPlaybackSongIDs = recentPlaybackSongIDs.filter { validSongIDs.contains($0) }
     }
 
-    private func hashID(_ input: String) -> String {
+    /// 纯函数, 可跨 actor 调用 ── rebuildIndex 后台化时 nonisolated
+    /// computeAlbumsAndArtists 也要用。
+    nonisolated static func hashID(_ input: String) -> String {
         let hash = SHA256.hash(data: Data(input.utf8))
         return hash.prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// 给单首歌就近填好 albumID / artistID, 不依赖整库 rebuildIndex。这样
+    /// addSongs / replaceSong 同步路径里, song 加入 library 时 IDs 立刻
+    /// 可读, 后台 rebuildIndex 只负责 derive albums/artists 集合。
+    nonisolated static func fillDerivedIDs(_ song: inout Song) {
+        let unknownArtist = String(localized: "unknown_artist")
+        let artist = song.artistName ?? unknownArtist
+        song.artistID = hashID(artist.lowercased())
+        if let album = song.albumTitle, !album.isEmpty {
+            song.albumID = hashID("\(artist):\(album)")
+        } else {
+            song.albumID = nil
+        }
+    }
+
+    /// 后台 derive albums / artists 集合。纯函数 ── 给定 songs 数组, 算出
+    /// 派生集合, 不操作 self。
+    nonisolated static func computeAlbumsAndArtists(songs: [Song]) -> (albums: [Album], artists: [Artist]) {
+        let unknownArtist = String(localized: "unknown_artist")
+
+        // Albums ── 只 group 有 albumTitle 的歌曲
+        let songsWithAlbum = songs.filter { $0.albumTitle != nil && !$0.albumTitle!.isEmpty }
+        let albumGroups = Dictionary(grouping: songsWithAlbum) { song -> String in
+            let artist = song.artistName ?? unknownArtist
+            let album = song.albumTitle!
+            return "\(artist)\0\(album)"
+        }
+        let albums = albumGroups.map { key, songs -> Album in
+            let parts = key.split(separator: "\0", maxSplits: 1)
+            let artistName = parts.count > 0 ? String(parts[0]) : unknownArtist
+            let albumTitle = parts.count > 1 ? String(parts[1]) : unknownArtist
+            return Album(
+                id: hashID("\(artistName):\(albumTitle)"),
+                title: albumTitle,
+                artistID: hashID(artistName.lowercased()),
+                artistName: artistName,
+                year: songs.first?.year,
+                genre: songs.first?.genre,
+                songCount: songs.count,
+                totalDuration: songs.reduce(0) { $0 + $1.duration.sanitizedDuration },
+                sourceID: songs.first?.sourceID
+            )
+        }.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+
+        // Artists ── 全 songs 都参与 group
+        let artistGroups = Dictionary(grouping: songs) { $0.artistName ?? unknownArtist }
+        let artists = artistGroups.map { name, songs -> Artist in
+            let albumCount = Set(songs.compactMap(\.albumTitle)).count
+            return Artist(
+                id: hashID(name.lowercased()),
+                name: name,
+                albumCount: albumCount,
+                songCount: songs.count
+            )
+        }.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+
+        return (albums, artists)
     }
 
     private struct Snapshot: Codable {
         var songs: [Song]
         var playlists: [Playlist]
+        /// 智能歌单。Optional 让旧 snapshot decode 不报错。
+        var smartPlaylists: [SmartPlaylist]?
         var playlistSongIDs: [String: [String]]?
         var recentPlaybackSongIDs: [String]?
         /// Account-or-source-prefixed identity keys ("<id>:<filePath>").
@@ -944,6 +1106,8 @@ final class MusicLibrary {
 extension Notification.Name {
     static let primusePlaylistsDidChange = Notification.Name("primuse.playlistsDidChange")
     static let primusePlaylistDidDelete = Notification.Name("primuse.playlistDidDelete")
+    static let primuseSmartPlaylistsDidChange = Notification.Name("primuse.smartPlaylistsDidChange")
+    static let primuseSmartPlaylistDidDelete = Notification.Name("primuse.smartPlaylistDidDelete")
     static let primusePlaybackHistoryDidChange = Notification.Name("primuse.playbackHistoryDidChange")
     static let primuseSourcesDidChange = Notification.Name("primuse.sourcesDidChange")
     static let primuseSourceDidDelete = Notification.Name("primuse.sourceDidDelete")

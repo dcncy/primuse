@@ -405,6 +405,106 @@ actor BaiduPanSource: MusicSourceConnector, OAuthCloudSource {
         return fileData
     }
 
+    /// 批量预热 dlink cache, 给定一组 path, 一次 filemetas 调用拿 100 个 dlink。
+    ///
+    /// 配合 MetadataBackfillService 使用: 1w 首库 backfill 时, 之前要打 1w 次
+    /// filemetas (每次 throttle 100ms = 16+ 分钟纯 API 等待), 现在打 100 次,
+    /// 节省 99% API 配额。
+    ///
+    /// 单次 fsids 数组最大 100 (百度文档明确写死)。超过会报 "param too long"
+    /// 类型错误, 这里手动切片。
+    ///
+    /// 失败容错: 整体或单批次失败时只 plog 一行, 不抛错 ── prefetch 是优化,
+    /// 失败时后续 backfill 走 getDlink 单首慢路径仍能正常工作。
+    func prefetchMetadata(paths: [String]) async {
+        loadPersistedDlinksIfNeeded()
+        // 过滤掉已经在 cache 内且未过期的 path。剩下的才需要走 filemetas。
+        let now = Date()
+        let neededPaths = paths.filter { path in
+            if let cached = dlinkCache[path], cached.expiresAt > now {
+                return false
+            }
+            return true
+        }
+        guard !neededPaths.isEmpty else {
+            plog("☁️ Baidu prefetchMetadata: all \(paths.count) paths already in dlink cache")
+            return
+        }
+        plog("☁️ Baidu prefetchMetadata: starting batch dlink resolve for \(neededPaths.count)/\(paths.count) paths")
+        let started = Date()
+
+        // Step 1: 按目录 group, list 各目录拿 fs_id。dirListingCache 已有的
+        // 目录跳过, listEntries 内部自带 5 分钟 cache。
+        var fsIdByPath: [String: Int64] = [:]
+        let pathsByDir: [String: [String]] = Dictionary(grouping: neededPaths) {
+            ($0 as NSString).deletingLastPathComponent
+        }
+        for (dir, dirPaths) in pathsByDir {
+            do {
+                let entries = try await listEntries(in: dir)
+                let entryByName: [String: [String: Any]] = Dictionary(
+                    entries.compactMap { e -> (String, [String: Any])? in
+                        guard let name = e["server_filename"] as? String else { return nil }
+                        return (name, e)
+                    },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                for path in dirPaths {
+                    let name = (path as NSString).lastPathComponent
+                    if let entry = entryByName[name],
+                       let fsId = entry["fs_id"] as? Int64 {
+                        fsIdByPath[path] = fsId
+                    }
+                }
+            } catch {
+                plog("⚠️ Baidu prefetchMetadata: listEntries failed for \(dir): \(error.localizedDescription)")
+            }
+        }
+
+        guard !fsIdByPath.isEmpty else {
+            plog("⚠️ Baidu prefetchMetadata: no fs_id resolved (listEntries all failed?)")
+            return
+        }
+
+        // Step 2: 100 个 fsid 一批, 调 filemetas。结果回写 dlinkCache。
+        // path → fsId 反向映射 (fsId → path) 用于把响应的 fsid 找回到 path。
+        let pathByFsId: [Int64: String] = Dictionary(
+            fsIdByPath.map { ($1, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let fsIds = Array(fsIdByPath.values)
+        let batchSize = 100
+        var resolvedCount = 0
+        for batchStart in stride(from: 0, to: fsIds.count, by: batchSize) {
+            let batch = Array(fsIds[batchStart..<min(batchStart + batchSize, fsIds.count)])
+            let fsidsArg = "[" + batch.map(String.init).joined(separator: ",") + "]"
+            do {
+                let metaJson = try await callAPI(
+                    base: "\(Self.apiBase)/rest/2.0/xpan/multimedia",
+                    queryItems: [
+                        .init(name: "method", value: "filemetas"),
+                        .init(name: "fsids", value: fsidsArg),
+                        .init(name: "dlink", value: "1"),
+                    ]
+                )
+                guard let metas = metaJson["list"] as? [[String: Any]] else { continue }
+                for meta in metas {
+                    guard let fsId = meta["fs_id"] as? Int64,
+                          let dlink = meta["dlink"] as? String,
+                          let path = pathByFsId[fsId] else { continue }
+                    dlinkCache[path] = (dlink, Date().addingTimeInterval(Self.dlinkTTL))
+                    resolvedCount += 1
+                }
+            } catch {
+                plog("⚠️ Baidu prefetchMetadata: batch \(batchStart) failed: \(error.localizedDescription)")
+            }
+        }
+        scheduleDlinkPersist()
+        let elapsed = Date().timeIntervalSince(started)
+        plog(String(format: "☁️ Baidu prefetchMetadata: resolved %d/%d dlinks in %.2fs (saved ~%d API calls)",
+                    resolvedCount, neededPaths.count, elapsed, max(0, neededPaths.count - (fsIds.count + 99) / 100)))
+    }
+
     /// Resolve a remote path to a Baidu dlink URL (without access_token suffix).
     /// Cached at two levels:
     /// - `dlinkCache[path]` — once we have a dlink, reuse it for `dlinkTTL`

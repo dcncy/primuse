@@ -9,10 +9,11 @@ struct AlbumGridView: View {
 
     var body: some View {
         if library.albums.isEmpty {
-            ContentUnavailableView(
-                "no_albums",
-                systemImage: "square.stack",
-                description: Text("no_albums_desc")
+            EmptyStateView(
+                titleKey: "no_albums",
+                descriptionKey: "no_albums_desc",
+                imageName: "EmptyStateNoAlbums",
+                systemImage: "square.stack"
             )
         } else {
             ScrollView {

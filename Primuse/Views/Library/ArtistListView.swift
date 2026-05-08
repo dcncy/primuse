@@ -6,10 +6,11 @@ struct ArtistListView: View {
 
     var body: some View {
         if artists.isEmpty {
-            ContentUnavailableView(
-                "no_artists",
-                systemImage: "music.mic",
-                description: Text("no_artists_desc")
+            EmptyStateView(
+                titleKey: "no_artists",
+                descriptionKey: "no_artists_desc",
+                imageName: "EmptyStateNoArtists",
+                systemImage: "music.mic"
             )
         } else {
             List(artists) { artist in

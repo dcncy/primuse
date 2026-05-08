@@ -32,10 +32,11 @@ struct SongListView: View {
 
     var body: some View {
         if songs.isEmpty {
-            ContentUnavailableView(
-                "no_songs",
-                systemImage: "music.note",
-                description: Text("no_songs_desc")
+            EmptyStateView(
+                titleKey: "no_songs",
+                descriptionKey: "no_songs_desc",
+                imageName: "EmptyStateNoSongs",
+                systemImage: "music.note"
             )
         } else {
             List {

@@ -19,10 +19,15 @@ struct SearchView: View {
             Group {
                 if searchText.isEmpty {
                     if library.visibleSongs.isEmpty {
-                        ContentUnavailableView(
-                            "search_empty_library",
-                            systemImage: "magnifyingglass",
-                            description: Text("search_empty_library_desc")
+                        // Empty-library prompt — distinct from
+                        // "no search results", so use the unified
+                        // illustration. The "no matches for query"
+                        // path keeps Apple's polished system view.
+                        EmptyStateView(
+                            titleKey: "search_empty_library",
+                            descriptionKey: "search_empty_library_desc",
+                            imageName: "EmptyStateNoSongs",
+                            systemImage: "magnifyingglass"
                         )
                     } else {
                         recentSearchView

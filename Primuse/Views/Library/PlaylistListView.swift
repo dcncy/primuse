@@ -13,14 +13,14 @@ struct PlaylistListView: View {
     var body: some View {
         Group {
             if playlists.isEmpty && smartPlaylists.isEmpty {
-                ContentUnavailableView {
-                    Label("no_playlists", systemImage: "music.note.list")
-                } description: {
-                    Text("no_playlists_desc")
-                } actions: {
-                    Button("new_playlist") { showNewPlaylist = true }
-                        .buttonStyle(.borderedProminent)
-                }
+                EmptyStateView(
+                    titleKey: "no_playlists",
+                    descriptionKey: "no_playlists_desc",
+                    imageName: "EmptyStateNoPlaylists",
+                    systemImage: "music.note.list",
+                    actionLabel: "new_playlist",
+                    action: { showNewPlaylist = true }
+                )
             } else {
                 List {
                     if !smartPlaylists.isEmpty {

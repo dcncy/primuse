@@ -87,12 +87,13 @@ struct SmartPlaylistDetailView: View {
 
                         // Songs
                         if matched.isEmpty {
-                            ContentUnavailableView(
-                                "smart_playlist_no_matches",
-                                systemImage: "magnifyingglass",
-                                description: Text("smart_playlist_no_matches_desc")
+                            EmptyStateView(
+                                titleKey: "smart_playlist_no_matches",
+                                descriptionKey: "smart_playlist_no_matches_desc",
+                                imageName: "EmptyStateNoSongs",
+                                systemImage: "magnifyingglass"
                             )
-                            .padding(.top, 40)
+                            .padding(.top, 24)
                         } else {
                             LazyVStack(spacing: 0) {
                                 ForEach(matched) { song in

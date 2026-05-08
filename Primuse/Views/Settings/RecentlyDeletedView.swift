@@ -18,10 +18,11 @@ struct RecentlyDeletedView: View {
             if library.recentlyDeletedPlaylists.isEmpty
                 && sourcesStore.recentlyDeletedSources.isEmpty
                 && ScraperConfigStore.shared.recentlyDeletedConfigs.isEmpty {
-                ContentUnavailableView(
-                    "recently_deleted_empty",
-                    systemImage: "trash",
-                    description: Text("recently_deleted_empty_desc")
+                EmptyStateView(
+                    titleKey: "recently_deleted_empty",
+                    descriptionKey: "recently_deleted_empty_desc",
+                    imageName: "EmptyStateRecentlyDeleted",
+                    systemImage: "trash"
                 )
             }
         }

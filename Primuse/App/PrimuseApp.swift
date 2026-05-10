@@ -168,6 +168,13 @@ struct PrimuseApp: App {
                 }
                 .task {
                     PrimuseAppDelegate.sync = cloudSync
+                    // Apple Watch 桥 ── 启动 WCSession, 1Hz 推 Now Playing
+                    // 状态到 Watch, 接收 Watch 端的播控指令。
+                    WatchSessionBridge.shared.attach(
+                        player: playerService,
+                        library: musicLibrary,
+                        theme: themeService
+                    )
                     if iCloudSyncEnabled { await cloudSync.start() }
                     // Stage 4c migration: deduplicate legacy
                     // duplicate-OAuth sources by upstream account UID.

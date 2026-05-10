@@ -21,7 +21,6 @@ import UIKit
 final class AppUpdateChecker {
     struct UpdateInfo: Sendable, Equatable {
         let version: String
-        let releaseNotes: String?
         let storeURL: URL
     }
 
@@ -37,11 +36,12 @@ final class AppUpdateChecker {
     private static let skippedVersionKey = "primuse.update.skippedVersion"
     private static let snoozeUntilKey = "primuse.update.snoozeUntil"
     private static let lastCheckKey = "primuse.update.lastCheckedAt"
-    /// "Remind me later" silences the banner for 24h.
-    private static let snoozeDuration: TimeInterval = 24 * 3600
-    /// Don't hammer Apple — once per 6h is plenty unless the user
-    /// explicitly forces a check.
-    private static let throttleInterval: TimeInterval = 6 * 3600
+    /// "稍后提醒" 静默 7 天 ── 跟微信 / 抖音的更新提示节奏对齐。24 小时
+    /// 太频繁; 一周一提既能让用户记起, 又不至于打扰。
+    private static let snoozeDuration: TimeInterval = 7 * 24 * 3600
+    /// 一天 fetch 一次 App Store 足够 ── 用户实际感知的"有新版"决策
+    /// 颗粒度本来就是天级。频繁 hit Apple lookup 浪费流量也可能被节流。
+    private static let throttleInterval: TimeInterval = 24 * 3600
 
     init(defaults: UserDefaults = .standard, session: URLSession = .shared) {
         let info = Bundle.main.infoDictionary
@@ -115,39 +115,26 @@ final class AppUpdateChecker {
     private struct LookupResponse: Decodable {
         struct Result: Decodable {
             let version: String
-            let releaseNotes: String?
             let trackViewUrl: String
         }
         let results: [Result]
     }
 
-    /// Try region-specific storefront first (for localized release
-    /// notes), then bare lookup as fallback. Apple returns an empty
-    /// `results` array when the bundle ID isn't published in the
-    /// requested storefront.
+    /// 不再走 country 参数 ── 之前是为了拿对应 storefront 的 localized
+    /// release notes, 现在弹框不展示 release notes 也不需要本地化版本号,
+    /// bare lookup 一次到位即可。
     private func fetchLatest() async throws -> UpdateInfo? {
-        let region = Locale.current.region?.identifier.lowercased() ?? "cn"
-        let candidates = [
-            "https://itunes.apple.com/lookup?bundleId=\(bundleID)&country=\(region)",
-            "https://itunes.apple.com/lookup?bundleId=\(bundleID)"
-        ]
-        for urlStr in candidates {
-            guard let url = URL(string: urlStr) else { continue }
-            var req = URLRequest(url: url)
-            req.cachePolicy = .reloadIgnoringLocalCacheData
-            req.timeoutInterval = 10
-            do {
-                let (data, _) = try await session.data(for: req)
-                let response = try JSONDecoder().decode(LookupResponse.self, from: data)
-                if let r = response.results.first,
-                   let storeURL = URL(string: r.trackViewUrl) {
-                    return UpdateInfo(version: r.version, releaseNotes: r.releaseNotes, storeURL: storeURL)
-                }
-            } catch {
-                continue
-            }
+        guard let url = URL(string: "https://itunes.apple.com/lookup?bundleId=\(bundleID)") else {
+            return nil
         }
-        return nil
+        var req = URLRequest(url: url)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.timeoutInterval = 10
+        let (data, _) = try await session.data(for: req)
+        let response = try JSONDecoder().decode(LookupResponse.self, from: data)
+        guard let r = response.results.first,
+              let storeURL = URL(string: r.trackViewUrl) else { return nil }
+        return UpdateInfo(version: r.version, storeURL: storeURL)
     }
 
     /// Numeric semantic compare — "1.10.0" > "1.2.0" (which the default

@@ -138,10 +138,11 @@ struct LastFmProvider: ScrobbleProvider {
         } else {
             request = URLRequest(url: baseURL)
             request.httpMethod = "POST"
-            let body = params
-                .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" }
-                .joined(separator: "&")
-            request.httpBody = body.data(using: .utf8)
+            var components = URLComponents()
+            components.queryItems = params
+                .sorted { $0.key < $1.key }
+                .map { URLQueryItem(name: $0.key, value: $0.value) }
+            request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
             request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         }
         request.timeoutInterval = 30

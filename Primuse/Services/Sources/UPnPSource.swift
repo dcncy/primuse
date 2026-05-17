@@ -93,9 +93,7 @@ actor UPnPSource: SongScanningConnector {
     }
 
     func localURL(for path: String) async throws -> URL {
-        guard let remoteURL = URL(string: path), remoteURL.scheme?.hasPrefix("http") == true else {
-            throw SourceError.fileNotFound(path)
-        }
+        let remoteURL = try playbackURL(for: path)
 
         let localURL = cacheDirectory.appendingPathComponent(cacheFileName(for: remoteURL))
         if FileManager.default.fileExists(atPath: localURL.path) {
@@ -106,6 +104,10 @@ actor UPnPSource: SongScanningConnector {
         try validate(response)
         try data.write(to: localURL, options: .atomic)
         return localURL
+    }
+
+    func streamingURL(for path: String) async throws -> URL? {
+        try playbackURL(for: path)
     }
 
     func streamData(for path: String) async throws -> AsyncThrowingStream<Data, Error> {
@@ -130,6 +132,13 @@ actor UPnPSource: SongScanningConnector {
                 }
             }
         }
+    }
+
+    private func playbackURL(for path: String) throws -> URL {
+        guard let remoteURL = URL(string: path), remoteURL.scheme?.hasPrefix("http") == true else {
+            throw SourceError.fileNotFound(path)
+        }
+        return remoteURL
     }
 
     func scanAudioFiles(from path: String) async throws -> AsyncThrowingStream<RemoteFileItem, Error> {

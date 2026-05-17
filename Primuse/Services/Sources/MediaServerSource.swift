@@ -142,27 +142,22 @@ actor MediaServerSource: SongScanningConnector {
             return fileURL
         }
 
-        let remoteURL: URL
-        switch kind {
-        case .plex:
-            remoteURL = try await plexPlaybackURL(for: itemID)
-        case .jellyfin, .emby:
-            guard let accessToken else {
-                throw SourceError.authenticationFailed
-            }
-            remoteURL = buildURL(
-                path: "/Videos/\(itemID)/stream",
-                queryItems: [
-                    URLQueryItem(name: "Static", value: "true"),
-                    URLQueryItem(name: "api_key", value: accessToken)
-                ]
-            )
-        }
+        let remoteURL = try await playbackURL(for: itemID)
 
         let (data, response) = try await session.data(from: remoteURL)
         try validate(response)
         try data.write(to: fileURL, options: .atomic)
         return fileURL
+    }
+
+    func streamingURL(for path: String) async throws -> URL? {
+        try await connect()
+
+        guard let itemID = itemID(from: path) else {
+            throw SourceError.fileNotFound(path)
+        }
+
+        return try await playbackURL(for: itemID)
     }
 
     func streamData(for path: String) async throws -> AsyncThrowingStream<Data, Error> {
@@ -183,6 +178,24 @@ actor MediaServerSource: SongScanningConnector {
                     continuation.finish(throwing: error)
                 }
             }
+        }
+    }
+
+    private func playbackURL(for itemID: String) async throws -> URL {
+        switch kind {
+        case .plex:
+            return try await plexPlaybackURL(for: itemID)
+        case .jellyfin, .emby:
+            guard let accessToken else {
+                throw SourceError.authenticationFailed
+            }
+            return buildURL(
+                path: "/Videos/\(itemID)/stream",
+                queryItems: [
+                    URLQueryItem(name: "Static", value: "true"),
+                    URLQueryItem(name: "api_key", value: accessToken)
+                ]
+            )
         }
     }
 

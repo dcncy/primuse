@@ -114,6 +114,18 @@ struct SettingsView: View {
                     } label: {
                         Label("scrobble_title", systemImage: "music.note.list")
                     }
+
+                    NavigationLink {
+                        AppleMusicSettingsView()
+                    } label: {
+                        Label("settings_apple_music_section", systemImage: "applelogo")
+                    }
+
+                    NavigationLink {
+                        DLNARendererSettingsView()
+                    } label: {
+                        Label("settings_dlna_section", systemImage: "antenna.radiowaves.left.and.right")
+                    }
                 }
 
                 Section("about") {

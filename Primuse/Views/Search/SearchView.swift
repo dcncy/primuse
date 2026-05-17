@@ -1,4 +1,5 @@
 import SwiftUI
+import MusicKit
 import PrimuseKit
 
 struct SearchView: View {
@@ -9,8 +10,9 @@ struct SearchView: View {
     @Environment(MusicLibrary.self) private var library
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
+    @Environment(AppleMusicService.self) private var appleMusic
     @Binding var searchText: String
-    @State private var searchResults: [Song] = []
+    @State private var searchResults: [PrimuseKit.Song] = []
     @State private var recentSearches: [String] = []
     @State private var searchTask: Task<Void, Never>?
 
@@ -53,6 +55,8 @@ struct SearchView: View {
         }
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
+            // 同步触发 Apple Music 搜索, 服务内部自己 debounce + 鉴权
+            appleMusic.search(query: newValue)
         }
         .onDisappear {
             searchTask?.cancel()
@@ -134,8 +138,68 @@ struct SearchView: View {
                     .onTapGesture { playSong(song) }
                 }
             }
+
+            // Apple Music — 只在用户已授权且查到结果时显示。未授权状态走
+            // Settings 入口让用户主动 opt-in,不在搜索这条路径里弹系统授权
+            // 对话框 (用户搜歌时被弹会很迷)。
+            if appleMusic.authState == .authorized {
+                if !appleMusic.searchResults.isEmpty {
+                    Section {
+                        ForEach(appleMusic.searchResults, id: \.id) { song in
+                            appleMusicRow(song)
+                        }
+                    } header: {
+                        HStack {
+                            Image(systemName: "applelogo")
+                            Text("search_section_apple_music")
+                        }
+                    }
+                } else if appleMusic.isSearching {
+                    Section {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text("search_apple_music_loading")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let err = appleMusic.lastPlaybackError {
+                    Section {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
         }
         .listStyle(.plain)
+    }
+
+    private func appleMusicRow(_ song: MusicKit.Song) -> some View {
+        Button {
+            Task { await appleMusic.play(song) }
+        } label: {
+            HStack(spacing: 12) {
+                AsyncImage(url: song.artwork?.url(width: 88, height: 88)) { phase in
+                    if let img = phase.image {
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Color.secondary.opacity(0.15)
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.title).font(.subheadline).lineLimit(1)
+                    Text(song.artistName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "applelogo").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func performSearch(query: String) {
@@ -155,7 +219,7 @@ struct SearchView: View {
         }
     }
 
-    private func playSong(_ song: Song) {
+    private func playSong(_ song: PrimuseKit.Song) {
         let queue = searchResults.filteredPlayable()
         guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
         player.setQueue(queue, startAt: index)

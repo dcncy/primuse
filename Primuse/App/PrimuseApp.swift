@@ -113,6 +113,8 @@ struct PrimuseApp: App {
     @State private var metadataBackfill: MetadataBackfillService
     @State private var updateChecker: AppUpdateChecker
     @State private var coverTintProvider: CoverTintProvider
+    @State private var appleMusic: AppleMusicService
+    @State private var dlnaRenderer: DLNARendererService
 
     @AppStorage("primuse.iCloudSyncEnabled") private var iCloudSyncEnabled: Bool = true
 
@@ -137,6 +139,8 @@ struct PrimuseApp: App {
         _metadataBackfill = State(initialValue: services.metadataBackfill)
         _updateChecker = State(initialValue: services.updateChecker)
         _coverTintProvider = State(initialValue: services.coverTintProvider)
+        _appleMusic = State(initialValue: services.appleMusic)
+        _dlnaRenderer = State(initialValue: services.dlnaRenderer)
     }
 
     var body: some Scene {
@@ -159,6 +163,8 @@ struct PrimuseApp: App {
                 .environment(metadataBackfill)
                 .environment(updateChecker)
                 .environment(coverTintProvider)
+                .environment(appleMusic)
+                .environment(dlnaRenderer)
                 .task {
                     // Background-poll the App Store. Throttled internally
                     // to once per 6h, so calling on every scene-active is

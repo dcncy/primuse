@@ -19,6 +19,8 @@ final class AppServices {
     let updateChecker: AppUpdateChecker
     let coverTintProvider: CoverTintProvider
     let spotlightIndex: SpotlightIndexService
+    let appleMusic: AppleMusicService
+    let dlnaRenderer: DLNARendererService
     let crashDiagnostics: CrashDiagnosticsService
 
     private init() {
@@ -69,6 +71,8 @@ final class AppServices {
         self.updateChecker = AppUpdateChecker()
         self.coverTintProvider = CoverTintProvider()
         self.spotlightIndex = SpotlightIndexService()
+        self.appleMusic = AppleMusicService()
+        self.dlnaRenderer = DLNARendererService(player: player)
         let crash = CrashDiagnosticsService()
         crash.register()
         self.crashDiagnostics = crash

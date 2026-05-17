@@ -55,6 +55,8 @@
 	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.music</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Primuse uses Apple Music to search the catalog and play tracks if you have an active subscription.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

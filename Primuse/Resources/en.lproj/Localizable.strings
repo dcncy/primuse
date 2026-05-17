@@ -820,6 +820,8 @@
 "dlna_status_listening" = "Waiting for senders";
 "dlna_status_playing_format" = "Casting: %@";
 "dlna_status_error_format" = "Error: %@";
+"settings_dlna_log_section" = "Live Activity";
+"settings_dlna_log_empty" = "No events yet. Open a control point app and look for Primuse to verify discovery.";
 "diagnostics_title" = "Diagnostic Reports";
 "diagnostics_empty_title" = "No diagnostic reports";
 "diagnostics_empty_subtitle" = "If Primuse crashes or freezes, iOS will leave a report here for you to share with the developer.";

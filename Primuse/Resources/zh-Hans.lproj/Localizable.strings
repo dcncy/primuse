@@ -821,6 +821,8 @@
 "dlna_status_listening" = "等待发现";
 "dlna_status_playing_format" = "正在播放: %@";
 "dlna_status_error_format" = "错误: %@";
+"settings_dlna_log_section" = "实时活动";
+"settings_dlna_log_empty" = "暂无事件。打开控制点 app,在其设备列表里找猿音以验证发现是否生效。";
 "diagnostics_title" = "诊断报告";
 "diagnostics_empty_title" = "暂无诊断报告";
 "diagnostics_empty_subtitle" = "猿音崩溃或卡顿时，iOS 会在此留下报告供你分享给开发者。";

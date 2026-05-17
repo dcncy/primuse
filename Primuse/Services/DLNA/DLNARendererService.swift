@@ -31,6 +31,28 @@ final class DLNARendererService {
     private(set) var isRunning = false
     /// 最近一条状态行,给 settings 显示 "等待发现" / "正在播放 xx" / "错误: xx"。
     private(set) var statusText: String = ""
+    /// 最近 30 条事件 ── 给 Settings 调试面板按时间倒序展示。包含 M-SEARCH 命中、
+    /// SOAP 控制调用、GENA 订阅生命周期。环形覆盖, 太老的事件丢掉。
+    private(set) var recentEvents: [DebugEvent] = []
+    private static let maxRecentEvents = 30
+
+    struct DebugEvent: Identifiable, Sendable {
+        let id = UUID()
+        let timestamp: Date
+        let kind: Kind
+        let detail: String
+        enum Kind: Sendable { case discovery, control, event, error }
+    }
+
+    private func logEvent(_ kind: DebugEvent.Kind, _ detail: String) {
+        recentEvents.insert(
+            DebugEvent(timestamp: Date(), kind: kind, detail: detail),
+            at: 0
+        )
+        if recentEvents.count > Self.maxRecentEvents {
+            recentEvents.removeLast(recentEvents.count - Self.maxRecentEvents)
+        }
+    }
 
     private var ssdpListener: NWListener?
     private var httpListener: NWListener?
@@ -215,6 +237,12 @@ final class DLNARendererService {
         ]
         guard interestedTargets.contains(where: { lower.contains($0) }) else { return }
         // 把单播响应直接走 message.reply,不需要单独建 NWConnection。
+        let st = lower
+            .split(separator: "\r\n")
+            .first { $0.hasPrefix("st:") }
+            .map { String($0.split(separator: ":", maxSplits: 1).last ?? "") }?
+            .trimmingCharacters(in: .whitespaces) ?? "?"
+        logEvent(.discovery, "M-SEARCH (ST=\(st)) — replied")
         sendSSDPReplies(via: message)
     }
 
@@ -411,6 +439,7 @@ final class DLNARendererService {
         let action = soapActionLine.split(separator: "#").last.map(String.init)?
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"\r\n ")) ?? ""
         let body = raw.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n")
+        logEvent(.control, "RenderingControl: \(action)")
 
         switch action {
         case "GetVolume":
@@ -490,6 +519,7 @@ final class DLNARendererService {
             expiresAt: Date().addingTimeInterval(TimeInterval(timeoutSeconds))
         )
         subscriptions[sid] = sub
+        logEvent(.event, "SUBSCRIBE \(service) → \(callbackURL.host ?? "?") (sid=\(sid.suffix(8)))")
 
         let response = """
         HTTP/1.1 200 OK\r
@@ -513,6 +543,7 @@ final class DLNARendererService {
             let sid = sidLine.split(separator: ":", maxSplits: 1)
                 .last.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
             subscriptions.removeValue(forKey: sid)
+            logEvent(.event, "UNSUBSCRIBE (sid=\(sid.suffix(8)))")
         }
         await sendStatus(200, on: connection)
     }
@@ -622,6 +653,7 @@ final class DLNARendererService {
         // SOAP body 在 \r\n\r\n 之后
         let body = raw.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n")
 
+        logEvent(.control, "AVTransport: \(action)")
         switch action {
         case "SetAVTransportURI":
             // body 里 <CurrentURI>...</CurrentURI>; <CurrentURIMetaData>didl xml</...>

@@ -236,7 +236,7 @@ final class SourceManager {
         // scheme 后会调 makeStreamingInputSource 走 sparse cache。
         // 比 Priority 3 的 plain streamingURL 优先,因为后者会触发
         // StreamingDownloadDecoder 整文件下载(40MB flac 等 6.1s)。
-        if source.supportsRangeStreaming, song.fileSize > 0 {
+        if shouldUseRangeStreamingForPlayback(source: source, song: song) {
             var components = URLComponents()
             components.scheme = Self.cloudStreamingScheme
             components.host = song.sourceID
@@ -681,8 +681,10 @@ final class SourceManager {
                 try await conn.connect()
 
                 if source.supportsRangeStreaming, song.fileSize > 0 {
-                    if cacheEnabled {
+                    if cacheEnabled, shouldUseRangeStreamingForPlayback(source: source, song: song) {
                         await prewarmCloudSong(song: song, connector: conn)
+                    } else if shouldPreferPlainStreamingForPlayback(source: source, song: song) {
+                        plog("⏩ Cache: skip full prefetch for '\(song.title)' (\(source.type.displayName) plain-stream policy)")
                     }
                     return
                 }
@@ -753,7 +755,7 @@ final class SourceManager {
     func prewarmCloudSongPublic(song: Song) async {
         guard let sources = try? await sourcesProvider(),
               let source = sources.first(where: { $0.id == song.sourceID }),
-              source.supportsRangeStreaming else { return }
+              shouldUseRangeStreamingForPlayback(source: source, song: song) else { return }
         let conn = connector(for: source)
         do { try await conn.connect() } catch { return }
         await prewarmCloudSong(song: song, connector: conn)
@@ -898,6 +900,71 @@ final class SourceManager {
             persistOnComplete: cacheEnabled,
             cacheRelativePath: cacheRelativePath
         )
+    }
+
+    private func shouldUseRangeStreamingForPlayback(source: MusicSource, song: Song) -> Bool {
+        guard source.supportsRangeStreaming, song.fileSize > 0 else { return false }
+        return !shouldPreferPlainStreamingForPlayback(source: source, song: song)
+    }
+
+    private func shouldPreferPlainStreamingForPlayback(source: MusicSource, song: Song) -> Bool {
+        guard Self.nasAPIPlainStreamingTypes.contains(source.type),
+              song.fileFormat == .mp3 else { return false }
+
+        // On cellular / Low Data Mode, avoid the aggressive multi-Range
+        // SFB.open path. It can create several concurrent 1MB requests before
+        // audio starts, which behaves poorly over remote NAS API links.
+        if NetworkMonitor.shared.isExpensive || NetworkMonitor.shared.isConstrained {
+            return true
+        }
+
+        // NAS API sources on a public hostname are usually WAN / reverse-proxy paths.
+        // Keep Range streaming for LAN IPs and .local hosts where latency is low.
+        guard let host = source.host, !host.isEmpty else { return false }
+        return !Self.isProbablyLocalHost(host)
+    }
+
+    private static let nasAPIPlainStreamingTypes: Set<MusicSourceType> = [
+        .synology,
+        .qnap,
+        .ugreen,
+        .fnos,
+    ]
+
+    private nonisolated static func isProbablyLocalHost(_ rawHost: String) -> Bool {
+        let trimmed = rawHost
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !trimmed.isEmpty else { return false }
+
+        let host: String
+        if let url = URL(string: trimmed), let parsed = url.host {
+            host = parsed
+        } else {
+            host = trimmed
+                .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+                .split(separator: ":", maxSplits: 1)
+                .first
+                .map(String.init) ?? trimmed
+        }
+
+        if host == "localhost" || host.hasSuffix(".local") { return true }
+        if host == "::1" || host.hasPrefix("fe80:") { return true }
+
+        let octets = host.split(separator: ".").compactMap { Int($0) }
+        guard octets.count == 4 else { return false }
+        switch octets[0] {
+        case 10, 127:
+            return true
+        case 169:
+            return octets[1] == 254
+        case 172:
+            return (16...31).contains(octets[1])
+        case 192:
+            return octets[1] == 168
+        default:
+            return false
+        }
     }
 
     /// Get the shared connector for a song's source (for playback and file writing).

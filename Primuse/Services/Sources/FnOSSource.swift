@@ -65,6 +65,11 @@ actor FnOSSource: MusicSourceConnector {
         return fileURL
     }
 
+    func streamingURL(for path: String) async throws -> URL? {
+        try await connect()
+        return await api.downloadURL(path: path)
+    }
+
     /// HTTP Range GET on fnOS download URL。fnOS 走 HTTP, 标准 Range header
     /// 直接生效, 让 CloudPlaybackSource 边下边播替代整文件下载。
     func fetchRange(path: String, offset: Int64, length: Int64) async throws -> Data {

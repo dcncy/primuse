@@ -583,8 +583,11 @@ final class AudioPlayerService {
             audioEngine.play()
             plog("🌊 Engine diagnostics after play: \(audioEngine.diagnosticInfo())")
 
-            // Fetch duration asynchronously if needed
-            if duration <= 0 {
+            // Fetch duration asynchronously if needed。SFBAudioDecoder 只支持
+            // file:// URL,远程 HTTP/HTTPS URL 走到这条路径会抛 NSException
+            // (NSAssertionHandler) 整 app SIGABRT,`try?` 接不住 ObjC 异常。
+            // 远程流的 duration 由 streamingDownloadDecoder 自己解出来,这里跳过。
+            if duration <= 0 && url.isFileURL {
                 Task {
                     if let info = try? await self.nativeDecoder.fileInfo(for: url) {
                         guard self.playID == id else { return }

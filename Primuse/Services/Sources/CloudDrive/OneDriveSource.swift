@@ -161,7 +161,12 @@ actor OneDriveSource: MusicSourceConnector, OAuthCloudSource {
         var request = URLRequest(url: URL(string: "\(Self.authBase)/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = "grant_type=refresh_token&refresh_token=\(rt)&client_id=\(cid)&scope=Files.Read offline_access".data(using: .utf8)
+        request.httpBody = CloudDriveHelper.formURLEncodedBody([
+            URLQueryItem(name: "grant_type", value: "refresh_token"),
+            URLQueryItem(name: "refresh_token", value: rt),
+            URLQueryItem(name: "client_id", value: cid),
+            URLQueryItem(name: "scope", value: "Files.Read offline_access"),
+        ])
         let (data, _) = try await URLSession.shared.data(for: request)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         guard let at = json["access_token"] as? String else { throw CloudDriveError.tokenRefreshFailed("") }

@@ -88,6 +88,12 @@ struct CloudDriveHelper: Sendable {
         self.tokenManager = CloudTokenManager(sourceID: sourceID)
     }
 
+    static func formURLEncodedBody(_ items: [URLQueryItem]) -> Data? {
+        var components = URLComponents()
+        components.queryItems = items
+        return components.percentEncodedQuery?.data(using: .utf8)
+    }
+
     // MARK: - Range request
 
     /// HTTP Range GET. `offset < 0` means "from end" — translated to `Range: bytes=-N`.

@@ -333,7 +333,7 @@ struct CloudDriveConnectionView: View {
                 if case .userCancelled = error {
                     withAnimation { step = .readyToAuth }
                 } else {
-                    errorMessage = error.localizedDescription ?? "授权失败"
+                    errorMessage = error.localizedDescription
                     withAnimation { step = .failed }
                 }
             } catch {

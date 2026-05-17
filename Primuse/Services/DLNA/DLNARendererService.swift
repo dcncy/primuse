@@ -39,6 +39,21 @@ final class DLNARendererService {
     private var ssdpMulticast: NWConnectionGroup?
     /// NOTIFY alive 周期任务。`ssdp:byebye` 在 stop() 里同步发掉。
     private var notifyTask: Task<Void, Never>?
+
+    /// GENA 订阅表 ── 控制点 SUBSCRIBE /event/<svc> 时这里加一条;
+    /// 状态变 (TransportState / Volume / Mute 等) 时按 service 路由 NOTIFY。
+    /// 简化掉 SEQ 字段递增 (用 monotonic counter), TIMEOUT 用固定 1800s
+    /// 不实现 RENEW (控制点会自己重 SUBSCRIBE)。
+    private struct Subscription {
+        let sid: String
+        let service: String  // "AVTransport" | "RenderingControl"
+        let callbackURL: URL
+        var seq: Int = 0
+        var expiresAt: Date
+    }
+    private var subscriptions: [String: Subscription] = [:]
+    /// Player / volume 观察器, 状态变时触发 NOTIFY。在 start() 里 install。
+    private var playerObservationToken: Task<Void, Never>?
     /// 自分配的设备 UUID,持久化到 UserDefaults 让重启后控制点不会把我们当
     /// 成"新设备"重新订阅 (有些控制点会缓存 UUID)。
     private let deviceUUID: String
@@ -74,6 +89,7 @@ final class DLNARendererService {
         do {
             try startHTTP()
             try startSSDP()
+            installPlayerObservation()
             isRunning = true
             statusText = String(localized: "dlna_status_listening")
             dlnaLog.notice("DLNA renderer started as \(self.friendlyName) (uuid=\(self.deviceUUID))")
@@ -84,10 +100,50 @@ final class DLNARendererService {
         }
     }
 
+    /// 监听 player.isPlaying / currentSong / engine.volume,任一变就给所有
+    /// 订阅了对应服务的控制点 POST NOTIFY。`withObservationTracking` 是
+    /// 单次的,触发后要 re-arm。Task wrapper 让一直跑着。
+    private func installPlayerObservation() {
+        playerObservationToken = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                await self?.tickPlayerObservation()
+            }
+        }
+    }
+
+    private func tickPlayerObservation() async {
+        // withObservationTracking 的 onChange 闭包按 SwiftUI Observation 规范
+        // 只触发一次 (per registration), 用完即弃; 我们用 continuation 等它,
+        // 触发后 resume → 外层循环重新 register, 持续观察。
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            withObservationTracking {
+                _ = player.isPlaying
+                _ = player.currentSong?.id
+                _ = player.audioEngine.volume
+            } onChange: { [weak self] in
+                Task { @MainActor in
+                    self?.notifyAllSubscribers()
+                    cont.resume()
+                }
+            }
+        }
+    }
+
+    private func notifyAllSubscribers() {
+        let now = Date()
+        // 顺手清掉过期订阅 (控制点没 UNSUBSCRIBE 就掉线的常见情况)
+        subscriptions = subscriptions.filter { $0.value.expiresAt > now }
+        for sid in subscriptions.keys {
+            sendGenaNotify(sid: sid)
+        }
+    }
+
     func stop() {
         // 优雅下线: 先发 byebye 让控制点立刻把我们从设备列表移除,再关 listener
         sendByebyeBatch()
         notifyTask?.cancel(); notifyTask = nil
+        playerObservationToken?.cancel(); playerObservationToken = nil
+        subscriptions.removeAll()
         ssdpMulticast?.cancel(); ssdpMulticast = nil
         ssdpListener?.cancel(); ssdpListener = nil
         httpListener?.cancel(); httpListener = nil
@@ -333,9 +389,226 @@ final class DLNARendererService {
             await sendXML(renderingControlSCPD, on: connection)
         case ("POST", "/control/AVTransport"):
             await handleAVTransportAction(raw: raw, connection: connection)
+        case ("POST", "/control/RenderingControl"):
+            await handleRenderingControlAction(raw: raw, connection: connection)
+        case ("SUBSCRIBE", "/event/AVTransport"):
+            await handleSubscribe(service: "AVTransport", raw: raw, connection: connection)
+        case ("SUBSCRIBE", "/event/RenderingControl"):
+            await handleSubscribe(service: "RenderingControl", raw: raw, connection: connection)
+        case ("UNSUBSCRIBE", "/event/AVTransport"), ("UNSUBSCRIBE", "/event/RenderingControl"):
+            await handleUnsubscribe(raw: raw, connection: connection)
         default:
             await sendStatus(404, on: connection)
         }
+    }
+
+    // MARK: - RenderingControl (音量同步)
+
+    private func handleRenderingControlAction(raw: String, connection: NWConnection) async {
+        let soapActionLine = raw.split(separator: "\r\n")
+            .first { $0.lowercased().hasPrefix("soapaction:") }
+            .map(String.init) ?? ""
+        let action = soapActionLine.split(separator: "#").last.map(String.init)?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"\r\n ")) ?? ""
+        let body = raw.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n")
+
+        switch action {
+        case "GetVolume":
+            let v = Int((player.audioEngine.volume * 100).rounded())
+            await sendRCSOAP(
+                action: "GetVolume",
+                body: "<CurrentVolume>\(max(0, min(100, v)))</CurrentVolume>",
+                on: connection
+            )
+        case "SetVolume":
+            // body 里 <DesiredVolume>NN</DesiredVolume>; 范围 0-100。
+            if let str = extract(tag: "DesiredVolume", from: body), let v = Int(str) {
+                let normalized = Float(max(0, min(100, v))) / 100
+                player.audioEngine.volume = normalized
+            }
+            await sendRCSOAP(action: "SetVolume", body: "", on: connection)
+        case "GetMute":
+            let muted = player.audioEngine.volume <= 0.001
+            await sendRCSOAP(
+                action: "GetMute",
+                body: "<CurrentMute>\(muted ? 1 : 0)</CurrentMute>",
+                on: connection
+            )
+        case "SetMute":
+            if let str = extract(tag: "DesiredMute", from: body) {
+                let shouldMute = (str == "1" || str.lowercased() == "true")
+                if shouldMute {
+                    // 简化处理: 静音=音量置 0; 取消静音=回到 0.6 默认音量。
+                    // 严格做法需要记录静音前的 lastVolume,这里 trade-off 让代码简单。
+                    player.audioEngine.volume = 0
+                } else if player.audioEngine.volume <= 0.001 {
+                    player.audioEngine.volume = 0.6
+                }
+            }
+            await sendRCSOAP(action: "SetMute", body: "", on: connection)
+        default:
+            await sendRCSOAP(action: action, body: "", on: connection)
+        }
+    }
+
+    private func sendRCSOAP(action: String, body: String, on connection: NWConnection) async {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+        <s:Body>
+        <u:\(action)Response xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">
+        \(body)
+        </u:\(action)Response>
+        </s:Body>
+        </s:Envelope>
+        """
+        await sendXML(xml, on: connection)
+    }
+
+    // MARK: - GENA (事件订阅)
+
+    private func handleSubscribe(service: String, raw: String, connection: NWConnection) async {
+        let lines = raw.split(separator: "\r\n").map(String.init)
+        let headers = Dictionary(uniqueKeysWithValues: lines.compactMap { line -> (String, String)? in
+            let kv = line.split(separator: ":", maxSplits: 1)
+            guard kv.count == 2 else { return nil }
+            return (kv[0].lowercased().trimmingCharacters(in: .whitespaces),
+                    kv[1].trimmingCharacters(in: .whitespaces))
+        })
+        // CALLBACK 形如 "<http://192.168.1.20:7676/abcd>" 可能多个 URL,取第一个
+        guard let callbackHeader = headers["callback"],
+              let urlStr = callbackHeader.split(separator: "<").last?.split(separator: ">").first,
+              let callbackURL = URL(string: String(urlStr)) else {
+            await sendStatus(400, on: connection); return
+        }
+        let timeoutSeconds = parseTimeout(headers["timeout"]) ?? 1800
+        let sid = "uuid:\(UUID().uuidString.lowercased())"
+        let sub = Subscription(
+            sid: sid,
+            service: service,
+            callbackURL: callbackURL,
+            expiresAt: Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+        )
+        subscriptions[sid] = sub
+
+        let response = """
+        HTTP/1.1 200 OK\r
+        DATE: \(rfc1123Now())\r
+        SERVER: iOS/UPnP/1.0 Primuse/1.0\r
+        SID: \(sid)\r
+        TIMEOUT: Second-\(timeoutSeconds)\r
+        Content-Length: 0\r
+        \r
+
+        """
+        connection.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+        // 按规范, SUBSCRIBE 返回 200 后立刻发一次"initial event" 把当前状态推过去
+        sendGenaNotify(sid: sid)
+    }
+
+    private func handleUnsubscribe(raw: String, connection: NWConnection) async {
+        if let sidLine = raw.split(separator: "\r\n").first(where: { $0.lowercased().hasPrefix("sid:") }) {
+            let sid = sidLine.split(separator: ":", maxSplits: 1)
+                .last.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+            subscriptions.removeValue(forKey: sid)
+        }
+        await sendStatus(200, on: connection)
+    }
+
+    /// 给指定 SID 发一次 NOTIFY。body 是 service 对应的 LastChange xml,
+    /// 包了一层 <e:propertyset>/<e:property>。
+    private func sendGenaNotify(sid: String) {
+        guard let sub = subscriptions[sid] else { return }
+        guard let body = makeEventBody(for: sub.service) else { return }
+        var newSub = sub
+        newSub.seq += 1
+        subscriptions[sid] = newSub
+
+        var request = URLRequest(url: sub.callbackURL)
+        request.httpMethod = "NOTIFY"
+        request.setValue("text/xml; charset=\"utf-8\"", forHTTPHeaderField: "Content-Type")
+        request.setValue("upnp:event", forHTTPHeaderField: "NT")
+        request.setValue("upnp:propchange", forHTTPHeaderField: "NTS")
+        request.setValue(sid, forHTTPHeaderField: "SID")
+        request.setValue(String(newSub.seq), forHTTPHeaderField: "SEQ")
+        request.httpBody = body.data(using: .utf8)
+        URLSession.shared.dataTask(with: request) { _, _, _ in /* fire and forget */ }.resume()
+    }
+
+    private func makeEventBody(for service: String) -> String? {
+        switch service {
+        case "AVTransport":
+            let state = player.isPlaying ? "PLAYING" : (player.currentSong != nil ? "PAUSED_PLAYBACK" : "STOPPED")
+            let title = player.currentSong?.title ?? ""
+            let lastChange = """
+            <Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/">
+              <InstanceID val="0">
+                <TransportState val="\(state)"/>
+                <TransportStatus val="OK"/>
+                <CurrentTrackURI val="\(xmlEscape(player.currentSong?.filePath ?? ""))"/>
+                <CurrentTrack val="1"/>
+                <CurrentTrackDuration val="\(formatTime(player.duration))"/>
+                <CurrentTrackMetaData val="\(xmlEscape(didlForCurrent(title: title)))"/>
+              </InstanceID>
+            </Event>
+            """
+            return wrapPropertyset(varName: "LastChange", value: lastChange)
+        case "RenderingControl":
+            let v = Int((player.audioEngine.volume * 100).rounded())
+            let muted = player.audioEngine.volume <= 0.001
+            let lastChange = """
+            <Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/">
+              <InstanceID val="0">
+                <Volume channel="Master" val="\(max(0, min(100, v)))"/>
+                <Mute channel="Master" val="\(muted ? 1 : 0)"/>
+              </InstanceID>
+            </Event>
+            """
+            return wrapPropertyset(varName: "LastChange", value: lastChange)
+        default:
+            return nil
+        }
+    }
+
+    private func wrapPropertyset(varName: String, value: String) -> String {
+        """
+        <?xml version="1.0" encoding="utf-8"?>
+        <e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">
+          <e:property>
+            <\(varName)>\(xmlEscape(value))</\(varName)>
+          </e:property>
+        </e:propertyset>
+        """
+    }
+
+    private func didlForCurrent(title: String) -> String {
+        // 极简 DIDL-Lite,只放 title,够大多数控制点显示"现在播放什么"。
+        guard !title.isEmpty else { return "" }
+        return """
+        <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
+        <item id="0" parentID="0" restricted="1">
+        <dc:title>\(xmlEscape(title))</dc:title>
+        <upnp:class>object.item.audioItem.musicTrack</upnp:class>
+        </item>
+        </DIDL-Lite>
+        """
+    }
+
+    private func xmlEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    /// "Second-1800" / "Second-infinite" / 缺失 → 默认 1800
+    private func parseTimeout(_ header: String?) -> Int? {
+        guard let header else { return nil }
+        let trimmed = header.lowercased().replacingOccurrences(of: "second-", with: "")
+        if trimmed == "infinite" { return 1800 } // 我们最长跟自己保活的节奏对齐
+        return Int(trimmed)
     }
 
     private func handleAVTransportAction(raw: String, connection: NWConnection) async {
@@ -466,13 +739,52 @@ final class DLNARendererService {
     }
 
     private var renderingControlSCPD: String {
-        // 空 SCPD ── 没实现任何 RenderingControl action, 但要返回个 stub 让
-        // 控制点扫到这个服务时不报错。
+        // Volume / Mute 双向同步。Channel=Master 只支持 single-channel master volume,
+        // 不暴露 LF/RF/Surround 等 multi-channel state vars,简化但够主流控制点用。
         """
         <?xml version="1.0" encoding="UTF-8"?>
         <scpd xmlns="urn:schemas-upnp-org:service-1-0">
           <specVersion><major>1</major><minor>0</minor></specVersion>
-          <actionList></actionList>
+          <actionList>
+            <action>
+              <name>GetVolume</name>
+              <argumentList>
+                <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>
+                <argument><name>Channel</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable></argument>
+                <argument><name>CurrentVolume</name><direction>out</direction><relatedStateVariable>Volume</relatedStateVariable></argument>
+              </argumentList>
+            </action>
+            <action>
+              <name>SetVolume</name>
+              <argumentList>
+                <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>
+                <argument><name>Channel</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable></argument>
+                <argument><name>DesiredVolume</name><direction>in</direction><relatedStateVariable>Volume</relatedStateVariable></argument>
+              </argumentList>
+            </action>
+            <action>
+              <name>GetMute</name>
+              <argumentList>
+                <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>
+                <argument><name>Channel</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable></argument>
+                <argument><name>CurrentMute</name><direction>out</direction><relatedStateVariable>Mute</relatedStateVariable></argument>
+              </argumentList>
+            </action>
+            <action>
+              <name>SetMute</name>
+              <argumentList>
+                <argument><name>InstanceID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_InstanceID</relatedStateVariable></argument>
+                <argument><name>Channel</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Channel</relatedStateVariable></argument>
+                <argument><name>DesiredMute</name><direction>in</direction><relatedStateVariable>Mute</relatedStateVariable></argument>
+              </argumentList>
+            </action>
+          </actionList>
+          <serviceStateTable>
+            <stateVariable sendEvents="yes"><name>Volume</name><dataType>ui2</dataType><allowedValueRange><minimum>0</minimum><maximum>100</maximum><step>1</step></allowedValueRange></stateVariable>
+            <stateVariable sendEvents="yes"><name>Mute</name><dataType>boolean</dataType></stateVariable>
+            <stateVariable sendEvents="no"><name>A_ARG_TYPE_InstanceID</name><dataType>ui4</dataType></stateVariable>
+            <stateVariable sendEvents="no"><name>A_ARG_TYPE_Channel</name><dataType>string</dataType><allowedValueList><allowedValue>Master</allowedValue></allowedValueList></stateVariable>
+          </serviceStateTable>
         </scpd>
         """
     }

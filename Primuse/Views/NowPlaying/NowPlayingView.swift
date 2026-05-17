@@ -10,6 +10,8 @@ struct NowPlayingView: View {
     @Environment(MusicScraperService.self) private var scraperService
     @Environment(SourceManager.self) private var sourceManager
     @Environment(SourcesStore.self) private var sourcesStore
+    @Environment(AudioVisualizerService.self) private var visualizer
+    @Environment(AudioEngine.self) private var audioEngine
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showLyrics = false
     @State private var showQueue = false
@@ -66,6 +68,15 @@ struct NowPlayingView: View {
             }
         }
         .task(id: player.currentSong?.id) { await loadLyrics() }
+        .onAppear {
+            // NowPlayingView 出现时挂 visualizer tap; 关掉视图 (mini player)
+            // 时卸,避免 tap 一直跑无谓 CPU。
+            if let engine = audioEngine.engineForVisualizer,
+               let mainMixer = audioEngine.mainMixerForVisualizer {
+                visualizer.start(engine: engine, on: mainMixer)
+            }
+        }
+        .onDisappear { visualizer.stop() }
         .sheet(isPresented: $showQueue) {
             QueueView()
                 .presentationDetents([.medium, .large])
@@ -470,6 +481,17 @@ struct NowPlayingView: View {
                             moreMenu
                         }
                         .padding(.horizontal, 26).padding(.top, 12)
+                    }
+
+                    // 频谱可视化 ── 仅 cover 模式 + 在播状态展示, 节省 tap 资源
+                    if player.isPlaying {
+                        VisualizerBarsView(
+                            levels: visualizer.bandLevels,
+                            barColor: .white.opacity(0.85),
+                            barWidth: 3, spacing: 4, maxHeight: 28
+                        )
+                        .padding(.horizontal, 26).padding(.top, 10)
+                        .transition(.opacity)
                     }
 
                     // Progress — 抽成独立子 view 隔离 player.currentTime 的高频

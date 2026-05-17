@@ -21,6 +21,7 @@ final class AppServices {
     let spotlightIndex: SpotlightIndexService
     let appleMusic: AppleMusicService
     let dlnaRenderer: DLNARendererService
+    let visualizer: AudioVisualizerService
     let crashDiagnostics: CrashDiagnosticsService
 
     private init() {
@@ -73,6 +74,7 @@ final class AppServices {
         self.spotlightIndex = SpotlightIndexService()
         self.appleMusic = AppleMusicService()
         self.dlnaRenderer = DLNARendererService(player: player)
+        self.visualizer = AudioVisualizerService()
         let crash = CrashDiagnosticsService()
         crash.register()
         self.crashDiagnostics = crash

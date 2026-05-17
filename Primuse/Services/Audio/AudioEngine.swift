@@ -313,6 +313,18 @@ final class AudioEngine {
         }
     }
 
+    /// 给 visualizer 用的 ── mainMixerNode 是输出前最后一站,挂 tap 拿到的
+    /// buffer 已经过 EQ / compressor / reverb / volume,跟 user 实际听到的一致。
+    /// nil 表示 engine 还没 setup,visualizer 直接 stop。
+    var mainMixerForVisualizer: AVAudioMixerNode? {
+        engine?.mainMixerNode
+    }
+
+    /// 让 visualizer 拿到底层 engine 自己 install/remove tap。
+    var engineForVisualizer: AVAudioEngine? {
+        engine
+    }
+
     /// Returns diagnostic info about the engine state for debugging playback issues.
     func diagnosticInfo() -> String {
         let engRunning = engine?.isRunning ?? false

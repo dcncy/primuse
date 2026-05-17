@@ -151,6 +151,8 @@
 		83FBC7E697D9FB957F5CFFE7 /* FileMetadataReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8607E666A6AB28E00D1C257 /* FileMetadataReader.swift */; };
 		8457016E2EBE033A08C38A33 /* DuplicateDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2117016184001B6F46168B00 /* DuplicateDetector.swift */; };
 		84ECB1EB9771EBDA278129BC /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39F6AE35FC2EC095FBF1EA0E /* AudioEngine.swift */; };
+		C5D6E7F809091A2B3C4E5E70 /* AudioVisualizerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D6E7F809091A2B3C4D5E70 /* AudioVisualizerService.swift */; };
+		C5D6E7F809091A2B3C4E5E71 /* VisualizerBarsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D6E7F809091A2B3C4D5E71 /* VisualizerBarsView.swift */; };
 		87D3B3265A7CBAA9C3AB046B /* NetworkDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491A850F03AC46FECF60ADFD /* NetworkDiscoveryService.swift */; };
 		87FF2436F5492C7D7D1D1A26 /* WebDAVBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637B2519A8207FCB3ABC3E34 /* WebDAVBrowserView.swift */; };
 		88744C4DE23E697ACA4B7337 /* FFmpegAudioDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E083139645350B81D8E8C645 /* FFmpegAudioDecoder.swift */; };
@@ -423,6 +425,8 @@
 		363F869C6171BAEF3E787B3A /* ArtworkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkView.swift; sourceTree = "<group>"; };
 		38FB8C7B3EA4A58B80265EDC /* Playlist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Playlist.swift; sourceTree = "<group>"; };
 		39F6AE35FC2EC095FBF1EA0E /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
+		C5D6E7F809091A2B3C4D5E70 /* AudioVisualizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioVisualizerService.swift; sourceTree = "<group>"; };
+		C5D6E7F809091A2B3C4D5E71 /* VisualizerBarsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualizerBarsView.swift; sourceTree = "<group>"; };
 		3A04A9461976D9D58E02D5BA /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		3A0BB7D64F2BBD76A56CD9C5 /* PlaybackState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackState.swift; sourceTree = "<group>"; };
 		3A648FD6CF121358D543D0AB /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -690,6 +694,7 @@
 				78324748ACDF339A48E0E8D4 /* AudioEffectsService.swift */,
 				39F6AE35FC2EC095FBF1EA0E /* AudioEngine.swift */,
 				4F953DC4532B85C7AD604EF9 /* AudioPlayerService.swift */,
+				C5D6E7F809091A2B3C4D5E70 /* AudioVisualizerService.swift */,
 				C54818EBAB874DF0A7E5C6DE /* AudioSessionManager.swift */,
 				8D173D8CC7D37EB5E31E5B8D /* CloudInputSourceObjC.h */,
 				D34E04201479990BA80AEE2A /* CloudInputSourceObjC.m */,
@@ -928,6 +933,7 @@
 				5A65207E9AE0A7B6C259E92C /* NowPlayingView.swift */,
 				5D2741FA5052447F5E1B27A4 /* QueueView.swift */,
 				11180515D910975A39CBE6C5 /* ScrapeOptionsView.swift */,
+				C5D6E7F809091A2B3C4D5E71 /* VisualizerBarsView.swift */,
 			);
 			path = NowPlaying;
 			sourceTree = "<group>";
@@ -1677,6 +1683,8 @@
 				F3EA7BACCB01D8BF92192A3E /* AudioEffectsService.swift in Sources */,
 				709EDC03F503B167501A7E6E /* AudioEffectsView.swift in Sources */,
 				84ECB1EB9771EBDA278129BC /* AudioEngine.swift in Sources */,
+				C5D6E7F809091A2B3C4E5E70 /* AudioVisualizerService.swift in Sources */,
+				C5D6E7F809091A2B3C4E5E71 /* VisualizerBarsView.swift in Sources */,
 				597C9FC6DA3A3EF903307FC9 /* AudioPlayerService.swift in Sources */,
 				8AF7136F6EF1307AD9557628 /* AudioSessionManager.swift in Sources */,
 				96B283F41FBDFCEBD9C0222D /* BaiduPanSource.swift in Sources */,

@@ -115,6 +115,7 @@ struct PrimuseApp: App {
     @State private var coverTintProvider: CoverTintProvider
     @State private var appleMusic: AppleMusicService
     @State private var dlnaRenderer: DLNARendererService
+    @State private var visualizer: AudioVisualizerService
 
     @AppStorage("primuse.iCloudSyncEnabled") private var iCloudSyncEnabled: Bool = true
 
@@ -141,6 +142,7 @@ struct PrimuseApp: App {
         _coverTintProvider = State(initialValue: services.coverTintProvider)
         _appleMusic = State(initialValue: services.appleMusic)
         _dlnaRenderer = State(initialValue: services.dlnaRenderer)
+        _visualizer = State(initialValue: services.visualizer)
     }
 
     var body: some Scene {
@@ -165,6 +167,7 @@ struct PrimuseApp: App {
                 .environment(coverTintProvider)
                 .environment(appleMusic)
                 .environment(dlnaRenderer)
+                .environment(visualizer)
                 .task {
                     // Background-poll the App Store. Throttled internally
                     // to once per 6h, so calling on every scene-active is

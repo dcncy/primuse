@@ -52,9 +52,12 @@ final class AudioVisualizerService {
 
         // tap 闭包只 memcpy + 翻 flag, 完全不 alloc 不 hop actor。
         let buffer = self.buffer
-        node.installTap(onBus: 0, bufferSize: AVAudioFrameCount(Self.fftSize), format: format) { audioBuffer, _ in
-            buffer.fill(from: audioBuffer)
-        }
+        AudioVisualizerTap.install(
+            on: node,
+            bufferSize: AVAudioFrameCount(Self.fftSize),
+            format: format,
+            buffer: buffer
+        )
         self.tappedNode = node
 
         // 用 detached Task 周期性拉 buffer 做 FFT, 跟音频线程完全解耦。
@@ -84,6 +87,23 @@ final class AudioVisualizerService {
     }
 }
 
+/// `installTap` must be created outside the `@MainActor` visualizer service.
+/// Otherwise Swift can inherit MainActor isolation for the tap closure, and
+/// AVAudioEngine will trip the iOS 26 concurrency runtime when it invokes the
+/// closure on Core Audio's realtime queue.
+private enum AudioVisualizerTap {
+    static func install(
+        on node: AVAudioMixerNode,
+        bufferSize: AVAudioFrameCount,
+        format: AVAudioFormat,
+        buffer: SharedSampleBuffer
+    ) {
+        node.installTap(onBus: 0, bufferSize: bufferSize, format: format) { audioBuffer, _ in
+            buffer.fill(from: audioBuffer)
+        }
+    }
+}
+
 // MARK: - Audio-thread-safe sample buffer
 
 /// 共享缓冲: 音频线程写,后台 Task 读。用 os_unfair_lock 替代 Swift actor —
@@ -107,10 +127,13 @@ private final class SharedSampleBuffer: @unchecked Sendable {
         let frames = min(Int(buffer.frameLength), capacity)
         guard frames > 0 else { return }
         guard os_unfair_lock_trylock(&lock) else { return }  // 锁忙就放弃这一帧
-        memcpy(&data, ch[0], frames * MemoryLayout<Float>.size)
-        if frames < capacity {
-            // 不足 capacity 时把尾部置零, FFT 自然就少高频能量, 视觉上正常
-            memset(&data[frames], 0, (capacity - frames) * MemoryLayout<Float>.size)
+        data.withUnsafeMutableBufferPointer { dst in
+            guard let base = dst.baseAddress else { return }
+            memcpy(base, ch[0], frames * MemoryLayout<Float>.size)
+            if frames < capacity {
+                // 不足 capacity 时把尾部置零, FFT 自然就少高频能量, 视觉上正常
+                memset(base.advanced(by: frames), 0, (capacity - frames) * MemoryLayout<Float>.size)
+            }
         }
         hasFresh = true
         os_unfair_lock_unlock(&lock)

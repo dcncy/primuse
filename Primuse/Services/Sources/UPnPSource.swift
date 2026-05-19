@@ -83,10 +83,14 @@ actor UPnPSource: SongScanningConnector {
                 )
             }
 
-            startIndex += page.nodes.count
-            if page.nodes.isEmpty || startIndex >= page.totalMatches {
+            guard let nextStartIndex = nextStartIndex(
+                currentStartIndex: startIndex,
+                page: page,
+                requestedCount: pageSize
+            ) else {
                 break
             }
+            startIndex = nextStartIndex
         }
 
         return containers.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
@@ -108,6 +112,38 @@ actor UPnPSource: SongScanningConnector {
 
     func streamingURL(for path: String) async throws -> URL? {
         try playbackURL(for: path)
+    }
+
+    func fetchRange(path: String, offset: Int64, length: Int64) async throws -> Data {
+        guard length > 0 else { return Data() }
+
+        let remoteURL = try playbackURL(for: path)
+        var request = URLRequest(url: remoteURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 30
+        if offset < 0 {
+            request.setValue("bytes=\(offset)", forHTTPHeaderField: "Range")
+        } else {
+            request.setValue("bytes=\(offset)-\(offset + length - 1)", forHTTPHeaderField: "Range")
+        }
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SourceError.connectionFailed("Invalid UPnP range response")
+        }
+
+        switch httpResponse.statusCode {
+        case 206:
+            return data
+        case 200:
+            let totalSize = Int64(data.count)
+            let actualOffset = offset < 0 ? max(0, totalSize + offset) : offset
+            guard actualOffset < totalSize else { return Data() }
+            let upperBound = min(actualOffset + length, totalSize)
+            return data.subdata(in: Int(actualOffset)..<Int(upperBound))
+        default:
+            throw SourceError.connectionFailed("UPnP range request failed: HTTP \(httpResponse.statusCode)")
+        }
     }
 
     func streamData(for path: String) async throws -> AsyncThrowingStream<Data, Error> {
@@ -221,10 +257,14 @@ actor UPnPSource: SongScanningConnector {
                 }
             }
 
-            startIndex += page.nodes.count
-            if page.nodes.isEmpty || startIndex >= page.totalMatches {
+            guard let nextStartIndex = nextStartIndex(
+                currentStartIndex: startIndex,
+                page: page,
+                requestedCount: pageSize
+            ) else {
                 break
             }
+            startIndex = nextStartIndex
         }
     }
 
@@ -233,8 +273,7 @@ actor UPnPSource: SongScanningConnector {
             return nil
         }
 
-        let ext = resourceURL.pathExtension.lowercased()
-        let format = AudioFormat.from(fileExtension: ext) ?? formatFromMimeType(node.protocolInfo)
+        let format = audioFormat(for: resourceURL, protocolInfo: node.protocolInfo)
         guard let format else {
             return nil
         }
@@ -298,8 +337,27 @@ actor UPnPSource: SongScanningConnector {
 
         return BrowsePage(
             nodes: nodes,
+            numberReturned: soapResult.numberReturned,
             totalMatches: soapResult.totalMatches
         )
+    }
+
+    private func nextStartIndex(
+        currentStartIndex: Int,
+        page: BrowsePage,
+        requestedCount: Int
+    ) -> Int? {
+        let returnedCount = max(page.numberReturned, page.nodes.count)
+        guard page.nodes.isEmpty == false, returnedCount > 0 else {
+            return nil
+        }
+
+        let nextStartIndex = currentStartIndex + returnedCount
+        if page.totalMatches > 0 {
+            return nextStartIndex < page.totalMatches ? nextStartIndex : nil
+        }
+
+        return returnedCount >= requestedCount ? nextStartIndex : nil
     }
 
     private func server(for serverID: String) async throws -> UPnPMediaServer {
@@ -538,32 +596,6 @@ actor UPnPSource: SongScanningConnector {
         return formatter.date(from: value)
     }
 
-    private func formatFromMimeType(_ protocolInfo: String?) -> AudioFormat? {
-        guard let protocolInfo else {
-            return nil
-        }
-
-        let mimeType = protocolInfo
-            .split(separator: ":")
-            .dropFirst(2)
-            .first?
-            .lowercased()
-
-        switch mimeType {
-        case "audio/flac": return .flac
-        case "audio/alac": return .alac
-        case "audio/x-wav", "audio/wav", "audio/wave": return .wav
-        case "audio/aiff", "audio/x-aiff": return .aiff
-        case "audio/aac": return .aac
-        case "audio/mp4", "audio/x-m4a": return .m4a
-        case "audio/ogg", "application/ogg": return .ogg
-        case "audio/opus": return .opus
-        case "audio/x-ms-wma": return .wma
-        case "audio/mpeg", "audio/mp3": return .mp3
-        default: return nil
-        }
-    }
-
     private func escapeXML(_ value: String) -> String {
         value
             .replacingOccurrences(of: "&", with: "&amp;")
@@ -617,31 +649,35 @@ actor UPnPSource: SongScanningConnector {
             throw SourceError.connectionFailed("Unable to bind SSDP socket")
         }
 
-        let request = """
-        M-SEARCH * HTTP/1.1\r
-        HOST: 239.255.255.250:1900\r
-        MAN: "ssdp:discover"\r
-        MX: 2\r
-        ST: urn:schemas-upnp-org:device:MediaServer:1\r
-        USER-AGENT: Primuse/1.0 UPnP/1.1\r
-        \r
-        
-        """
-
         var target = sockaddr_in()
         target.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         target.sin_family = sa_family_t(AF_INET)
         target.sin_port = in_port_t(1900).bigEndian
         target.sin_addr = in_addr(s_addr: inet_addr("239.255.255.250"))
 
-        let sendResult = request.withCString { pointer in
-            withUnsafePointer(to: &target) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    sendto(socketFD, pointer, strlen(pointer), 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        var didSendDiscovery = false
+        for searchTarget in upnpSSDPSearchTargets {
+            let request = [
+                "M-SEARCH * HTTP/1.1",
+                "HOST: 239.255.255.250:1900",
+                "MAN: \"ssdp:discover\"",
+                "MX: 2",
+                "ST: \(searchTarget)",
+                "USER-AGENT: Primuse/1.0 UPnP/1.1",
+                "",
+                "",
+            ].joined(separator: "\r\n")
+
+            let sendResult = request.withCString { pointer in
+                withUnsafePointer(to: &target) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        sendto(socketFD, pointer, strlen(pointer), 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
                 }
             }
+            didSendDiscovery = didSendDiscovery || sendResult >= 0
         }
-        guard sendResult >= 0 else {
+        guard didSendDiscovery else {
             throw SourceError.connectionFailed("Unable to send SSDP discovery")
         }
 
@@ -671,8 +707,75 @@ actor UPnPSource: SongScanningConnector {
     }
 }
 
+private let upnpSSDPSearchTargets = [
+    "urn:schemas-upnp-org:device:MediaServer:1",
+    "urn:schemas-upnp-org:service:ContentDirectory:1",
+    "upnp:rootdevice",
+    "ssdp:all",
+]
+
+private func audioFormat(for url: URL, protocolInfo: String?) -> AudioFormat? {
+    let ext = url.pathExtension.lowercased()
+    return AudioFormat.from(fileExtension: ext) ?? audioFormat(fromProtocolInfo: protocolInfo)
+}
+
+private func audioFormat(fromProtocolInfo protocolInfo: String?) -> AudioFormat? {
+    guard let protocolInfo, protocolInfo.isEmpty == false else {
+        return nil
+    }
+
+    let mimeCandidate: String
+    let parts = protocolInfo.split(separator: ":", omittingEmptySubsequences: false)
+    if parts.count >= 3 {
+        mimeCandidate = String(parts[2])
+    } else {
+        mimeCandidate = protocolInfo
+    }
+
+    let mimeType = mimeCandidate
+        .split(separator: ";", maxSplits: 1)
+        .first
+        .map(String.init)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+
+    switch mimeType {
+    case "audio/flac", "audio/x-flac", "application/flac":
+        return .flac
+    case "audio/alac", "audio/x-alac":
+        return .alac
+    case "audio/x-wav", "audio/wav", "audio/wave", "audio/vnd.wave":
+        return .wav
+    case "audio/aiff", "audio/x-aiff":
+        return .aiff
+    case "audio/aac", "audio/aacp", "audio/mp4a-latm":
+        return .aac
+    case "audio/mp4", "audio/x-m4a", "audio/m4a":
+        return .m4a
+    case "audio/ogg", "application/ogg":
+        return .ogg
+    case "audio/opus":
+        return .opus
+    case "audio/x-ms-wma":
+        return .wma
+    case "audio/mpeg", "audio/mp3", "audio/x-mpeg", "audio/mpeg3":
+        return .mp3
+    case "audio/x-ape", "audio/ape", "audio/x-monkeys-audio":
+        return .ape
+    case "audio/x-wavpack", "audio/wavpack":
+        return .wv
+    case "audio/x-dsf", "audio/dsf":
+        return .dsf
+    case "audio/x-dff", "audio/dff":
+        return .dff
+    default:
+        return nil
+    }
+}
+
 private struct BrowsePage: Sendable {
     let nodes: [UPnPNode]
+    let numberReturned: Int
     let totalMatches: Int
 }
 
@@ -748,8 +851,18 @@ private struct UPnPNode: Sendable {
     let bitDepth: Int?
 }
 
+private struct UPnPResource: Sendable {
+    let url: URL
+    let protocolInfo: String?
+    let durationString: String?
+    let size: UInt64?
+    let bitrate: Int?
+    let sampleRate: Int?
+    let bitDepth: Int?
+}
+
 private enum SOAPBrowseResponseParser {
-    static func parse(data: Data) throws -> (resultXML: String, totalMatches: Int) {
+    static func parse(data: Data) throws -> (resultXML: String, numberReturned: Int, totalMatches: Int) {
         let parserDelegate = SOAPBrowseResponseParserDelegate()
         let parser = XMLParser(data: data)
         parser.shouldProcessNamespaces = true
@@ -761,6 +874,7 @@ private enum SOAPBrowseResponseParser {
 
         return (
             resultXML: parserDelegate.resultXML,
+            numberReturned: parserDelegate.numberReturned,
             totalMatches: parserDelegate.totalMatches
         )
     }
@@ -771,6 +885,7 @@ private final class SOAPBrowseResponseParserDelegate: NSObject, XMLParserDelegat
     private var currentText = ""
 
     var resultXML = ""
+    var numberReturned = 0
     var totalMatches = 0
 
     func parser(
@@ -798,6 +913,8 @@ private final class SOAPBrowseResponseParserDelegate: NSObject, XMLParserDelegat
         switch elementName {
         case "Result":
             resultXML = text
+        case "NumberReturned":
+            numberReturned = Int(text) ?? 0
         case "TotalMatches":
             totalMatches = Int(text) ?? 0
         default:
@@ -834,12 +951,15 @@ private final class DIDLParserDelegate: NSObject, XMLParserDelegate {
         var className: String?
         var artist: String?
         var album: String?
-        var resourceURL: URL?
         var albumArtURL: URL?
-        var durationString: String?
-        var protocolInfo: String?
         var dateString: String?
         var trackNumber: Int?
+        var resources: [UPnPResource] = []
+    }
+
+    private struct ResourceBuilder {
+        var protocolInfo: String?
+        var durationString: String?
         var size: UInt64?
         var bitrate: Int?
         var sampleRate: Int?
@@ -850,6 +970,7 @@ private final class DIDLParserDelegate: NSObject, XMLParserDelegate {
     private var currentElement = ""
     private var currentText = ""
     private var currentNode: Builder?
+    private var currentResource: ResourceBuilder?
 
     private(set) var nodes: [UPnPNode] = []
 
@@ -879,12 +1000,14 @@ private final class DIDLParserDelegate: NSObject, XMLParserDelegate {
                 objectID: attributeDict["id"] ?? UUID().uuidString
             )
         case "res":
-            currentNode?.size = attributeDict["size"].flatMap(UInt64.init)
-            currentNode?.durationString = attributeDict["duration"]
-            currentNode?.protocolInfo = attributeDict["protocolInfo"]
-            currentNode?.bitrate = attributeDict["bitrate"].flatMap(Int.init)
-            currentNode?.sampleRate = attributeDict["sampleFrequency"].flatMap(Int.init)
-            currentNode?.bitDepth = attributeDict["bitsPerSample"].flatMap(Int.init)
+            currentResource = ResourceBuilder(
+                protocolInfo: attributeDict["protocolInfo"],
+                durationString: attributeDict["duration"],
+                size: attributeDict["size"].flatMap(UInt64.init),
+                bitrate: attributeDict["bitrate"].flatMap(Int.init),
+                sampleRate: attributeDict["sampleFrequency"].flatMap(Int.init),
+                bitDepth: attributeDict["bitsPerSample"].flatMap(Int.init)
+            )
         default:
             break
         }
@@ -928,13 +1051,25 @@ private final class DIDLParserDelegate: NSObject, XMLParserDelegate {
         case "date":
             node.dateString = text
         case "res":
-            if node.resourceURL == nil, let url = resolveURL(text, baseURL: baseURL) {
-                node.resourceURL = url
+            if let currentResource, let url = resolveURL(text, baseURL: baseURL) {
+                node.resources.append(
+                    UPnPResource(
+                        url: url,
+                        protocolInfo: currentResource.protocolInfo,
+                        durationString: currentResource.durationString,
+                        size: currentResource.size,
+                        bitrate: currentResource.bitrate,
+                        sampleRate: currentResource.sampleRate,
+                        bitDepth: currentResource.bitDepth
+                    )
+                )
             }
+            currentResource = nil
         case "container", "item":
             if node.title.isEmpty {
                 node.title = "Unknown"
             }
+            let selectedResource = selectBestResource(from: node.resources)
             nodes.append(
                 UPnPNode(
                     kind: node.kind,
@@ -943,16 +1078,16 @@ private final class DIDLParserDelegate: NSObject, XMLParserDelegate {
                     className: node.className,
                     artist: node.artist,
                     album: node.album,
-                    resourceURL: node.resourceURL,
+                    resourceURL: selectedResource?.url,
                     albumArtURL: node.albumArtURL,
-                    durationString: node.durationString,
-                    protocolInfo: node.protocolInfo,
+                    durationString: selectedResource?.durationString,
+                    protocolInfo: selectedResource?.protocolInfo,
                     dateString: node.dateString,
                     trackNumber: node.trackNumber,
-                    size: node.size,
-                    bitrate: node.bitrate,
-                    sampleRate: node.sampleRate,
-                    bitDepth: node.bitDepth
+                    size: selectedResource?.size,
+                    bitrate: selectedResource?.bitrate,
+                    sampleRate: selectedResource?.sampleRate,
+                    bitDepth: selectedResource?.bitDepth
                 )
             )
             currentNode = nil
@@ -977,6 +1112,18 @@ private final class DIDLParserDelegate: NSObject, XMLParserDelegate {
         }
 
         return URL(string: value, relativeTo: baseURL)?.absoluteURL
+    }
+
+    private func selectBestResource(from resources: [UPnPResource]) -> UPnPResource? {
+        let playableResources = resources.filter {
+            audioFormat(for: $0.url, protocolInfo: $0.protocolInfo) != nil
+        }
+        let candidates = playableResources.isEmpty ? resources : playableResources
+
+        return candidates.first {
+            let scheme = $0.url.scheme?.lowercased()
+            return scheme == "http" || scheme == "https"
+        } ?? candidates.first
     }
 }
 

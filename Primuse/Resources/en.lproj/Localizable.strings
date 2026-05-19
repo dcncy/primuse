@@ -3,7 +3,7 @@
 "sources_title" = "Sources";
 "settings_title" = "Settings";
 "search_title" = "Search";
-"search_prompt" = "Songs, artists, albums";
+"search_prompt" = "Songs, artists, albums, lyrics";
 
 // MARK: - Greetings
 "greeting_morning" = "Good Morning";
@@ -809,6 +809,8 @@
 "a11y_more_actions" = "More actions";
 "search_section_apple_music" = "Apple Music";
 "search_apple_music_loading" = "Searching Apple Music…";
+"search_match_lyrics" = "Matched lyrics";
+"search_match_fuzzy" = "Fuzzy match";
 "settings_apple_music_section" = "Apple Music";
 "settings_apple_music_connect" = "Connect Apple Music";
 "settings_apple_music_connected" = "Apple Music connected";

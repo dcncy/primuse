@@ -12,7 +12,7 @@ struct SearchView: View {
     @Environment(MetadataBackfillService.self) private var backfill
     @Environment(AppleMusicService.self) private var appleMusic
     @Binding var searchText: String
-    @State private var searchResults: [PrimuseKit.Song] = []
+    @State private var searchResults: [LibrarySearchResult] = []
     @State private var recentSearches: [String] = []
     @State private var searchTask: Task<Void, Never>?
 
@@ -107,10 +107,7 @@ struct SearchView: View {
     private var searchResultsView: some View {
         List {
             // Albums matching
-            let matchingAlbums = library.albums.filter {
-                $0.title.localizedCaseInsensitiveContains(searchText)
-                || ($0.artistName?.localizedCaseInsensitiveContains(searchText) ?? false)
-            }
+            let matchingAlbums = library.searchAlbums(query: searchText)
             if !matchingAlbums.isEmpty {
                 Section("tab_albums") {
                     ForEach(matchingAlbums.prefix(5)) { album in
@@ -128,14 +125,28 @@ struct SearchView: View {
 
             // Songs matching
             Section("tab_songs") {
-                ForEach(searchResults.prefix(30)) { song in
-                    SongRowView(
-                        song: song,
-                        isPlaying: player.currentSong?.id == song.id,
-                        context: SongRowView.context(for: song, sourcesStore: sourcesStore, backfill: backfill)
-                    )
+                ForEach(searchResults.prefix(40)) { result in
+                    VStack(alignment: .leading, spacing: 4) {
+                        SongRowView(
+                            song: result.song,
+                            isPlaying: player.currentSong?.id == result.song.id,
+                            context: SongRowView.context(for: result.song, sourcesStore: sourcesStore, backfill: backfill)
+                        )
+
+                        if result.matchKind == .lyrics {
+                            Label("search_match_lyrics", systemImage: "text.quote")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 54)
+                        } else if result.matchKind == .fuzzy {
+                            Label("search_match_fuzzy", systemImage: "sparkle.magnifyingglass")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 54)
+                        }
+                    }
                     .contentShape(Rectangle())
-                    .onTapGesture { playSong(song) }
+                    .onTapGesture { playSong(result.song) }
                 }
             }
 
@@ -214,13 +225,13 @@ struct SearchView: View {
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
 
-            let results = library.search(query: query)
+            let results = library.searchResults(query: query)
             searchResults = results
         }
     }
 
     private func playSong(_ song: PrimuseKit.Song) {
-        let queue = searchResults.filteredPlayable()
+        let queue = searchResults.map(\.song).filteredPlayable()
         guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
         player.setQueue(queue, startAt: index)
         Task { await player.play(song: song) }

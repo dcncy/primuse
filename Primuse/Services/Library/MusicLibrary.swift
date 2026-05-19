@@ -2,6 +2,109 @@ import Foundation
 import PrimuseKit
 import CryptoKit
 
+enum LibrarySearchMatchKind: Sendable {
+    case metadata
+    case lyrics
+    case fuzzy
+}
+
+struct LibrarySearchResult: Identifiable, Sendable {
+    let song: Song
+    let matchKind: LibrarySearchMatchKind
+    let score: Int
+
+    var id: String { song.id }
+}
+
+private struct LibrarySearchMatcher {
+    let rawQuery: String
+    let normalizedQuery: String
+
+    var isValid: Bool { !normalizedQuery.isEmpty }
+
+    init(query: String) {
+        rawQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalizedQuery = Self.normalized(rawQuery)
+    }
+
+    func score(candidate: String) -> (score: Int, kind: LibrarySearchMatchKind)? {
+        guard !candidate.isEmpty else { return nil }
+
+        if candidate.localizedCaseInsensitiveContains(rawQuery) {
+            return (120, .metadata)
+        }
+
+        let normalizedCandidate = Self.normalized(candidate)
+        guard !normalizedCandidate.isEmpty else { return nil }
+
+        if normalizedCandidate.contains(normalizedQuery) {
+            return (110, .metadata)
+        }
+
+        let initials = Self.initials(candidate)
+        if !initials.isEmpty, initials.contains(normalizedQuery) {
+            return (100, .metadata)
+        }
+
+        if normalizedQuery.count >= 3,
+           Self.isSubsequence(normalizedQuery, of: normalizedCandidate) {
+            return (55, .fuzzy)
+        }
+
+        return nil
+    }
+
+    func matchesLyrics(_ lyrics: String) -> Bool {
+        guard !lyrics.isEmpty else { return false }
+        if lyrics.localizedCaseInsensitiveContains(rawQuery) { return true }
+        return Self.normalized(lyrics).contains(normalizedQuery)
+    }
+
+    private static func normalized(_ text: String) -> String {
+        let latin = text
+            .applyingTransform(.mandarinToLatin, reverse: false)?
+            .applyingTransform(.stripDiacritics, reverse: false)
+            ?? text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+
+        let allowed = CharacterSet.alphanumerics
+        let scalars = latin.lowercased().unicodeScalars.filter { allowed.contains($0) }
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    private static func initials(_ text: String) -> String {
+        let latin = text
+            .applyingTransform(.mandarinToLatin, reverse: false)?
+            .applyingTransform(.stripDiacritics, reverse: false)
+            ?? text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+
+        let allowed = CharacterSet.alphanumerics
+        var result = String.UnicodeScalarView()
+        var shouldTakeNext = true
+        for scalar in latin.lowercased().unicodeScalars {
+            if allowed.contains(scalar) {
+                if shouldTakeNext {
+                    result.append(scalar)
+                    shouldTakeNext = false
+                }
+            } else {
+                shouldTakeNext = true
+            }
+        }
+        return String(result)
+    }
+
+    private static func isSubsequence(_ needle: String, of haystack: String) -> Bool {
+        var remaining = needle[...]
+        for char in haystack {
+            if remaining.first == char {
+                remaining.removeFirst()
+                if remaining.isEmpty { return true }
+            }
+        }
+        return remaining.isEmpty
+    }
+}
+
 /// Global in-memory music library shared across the app
 @MainActor
 @Observable
@@ -84,6 +187,8 @@ final class MusicLibrary {
     private(set) var visibleSongs: [Song] = []
     private(set) var visibleAlbums: [Album] = []
     private(set) var visibleArtists: [Artist] = []
+    private var lyricsSearchTextCache: [String: String] = [:]
+    private var lyricsSearchMissingKeys: Set<String> = []
 
     private let snapshotURL: URL
     private let encoder = JSONEncoder()
@@ -110,6 +215,11 @@ final class MusicLibrary {
             let visibleArtistIDs = Set(visibleSongs.compactMap(\.artistID))
             visibleArtists = artists.filter { visibleArtistIDs.contains($0.id) }
         }
+    }
+
+    private func invalidateSearchCaches() {
+        lyricsSearchTextCache.removeAll()
+        lyricsSearchMissingKeys.removeAll()
     }
 
     init(fileManager: FileManager = .default) {
@@ -252,6 +362,7 @@ final class MusicLibrary {
         // Newly-added songs may resolve identities that were stashed when
         // a CloudKit playlist/history record arrived before the local scan.
         flushPendingIdentities()
+        invalidateSearchCaches()
         rebuildIndex()
         persistSnapshot()
 
@@ -329,6 +440,7 @@ final class MusicLibrary {
     /// Remove all songs for a given source
     func removeSongsForSource(_ sourceID: String) {
         songs.removeAll { $0.sourceID == sourceID }
+        invalidateSearchCaches()
         cleanPlaylistEntries()
         cleanPlaybackHistoryEntries()
         rebuildIndex()
@@ -344,15 +456,105 @@ final class MusicLibrary {
         songs.first(where: { $0.id == id })
     }
 
-    /// Search songs by query
-    func search(query: String) -> [Song] {
-        guard !query.isEmpty else { return [] }
-        let q = query.lowercased()
-        return visibleSongs.filter {
-            $0.title.lowercased().contains(q)
-            || ($0.artistName?.lowercased().contains(q) ?? false)
-            || ($0.albumTitle?.lowercased().contains(q) ?? false)
+    /// Search songs by metadata, pinyin/initials, fuzzy subsequence, and
+    /// locally-cached lyrics. Network/source lyrics are intentionally skipped
+    /// so typing stays responsive.
+    func searchResults(query: String, limit: Int = 120) -> [LibrarySearchResult] {
+        let matcher = LibrarySearchMatcher(query: query)
+        guard matcher.isValid else { return [] }
+
+        let results = visibleSongs.compactMap { song -> LibrarySearchResult? in
+            var bestScore = 0
+            var bestKind: LibrarySearchMatchKind?
+
+            func consider(_ candidate: String?, boost: Int) {
+                guard let candidate,
+                      let match = matcher.score(candidate: candidate) else { return }
+                let score = match.score + boost
+                if score > bestScore {
+                    bestScore = score
+                    bestKind = match.kind
+                }
+            }
+
+            consider(song.title, boost: 30)
+            consider(song.artistName, boost: 20)
+            consider(song.albumTitle, boost: 14)
+            consider(song.genre, boost: 6)
+            consider(song.fileFormat.rawValue, boost: 2)
+
+            if bestScore < 90,
+               let lyrics = searchableLyricsText(for: song),
+               matcher.matchesLyrics(lyrics) {
+                let score = 70
+                if score > bestScore {
+                    bestScore = score
+                    bestKind = .lyrics
+                }
+            }
+
+            guard let bestKind else { return nil }
+            return LibrarySearchResult(song: song, matchKind: bestKind, score: bestScore)
         }
+
+        return Array(results.sorted { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.song.title.localizedCaseInsensitiveCompare(rhs.song.title) == .orderedAscending
+        }.prefix(limit))
+    }
+
+    /// Backward-compatible song-only search API.
+    func search(query: String) -> [Song] {
+        searchResults(query: query).map(\.song)
+    }
+
+    func searchAlbums(query: String, limit: Int = 10) -> [Album] {
+        let matcher = LibrarySearchMatcher(query: query)
+        guard matcher.isValid else { return [] }
+        let ranked = visibleAlbums.compactMap { album -> (Album, Int)? in
+            var best = 0
+            if let score = matcher.score(candidate: album.title)?.score {
+                best = max(best, score + 20)
+            }
+            if let artist = album.artistName,
+               let score = matcher.score(candidate: artist)?.score {
+                best = max(best, score + 10)
+            }
+            return best > 0 ? (album, best) : nil
+        }
+        return Array(ranked.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.0.title.localizedCaseInsensitiveCompare(rhs.0.title) == .orderedAscending
+        }.map(\.0).prefix(limit))
+    }
+
+    private func searchableLyricsText(for song: Song) -> String? {
+        let cacheKey = "\(song.id)|\(song.lyricsFileName ?? "")"
+        if let cached = lyricsSearchTextCache[cacheKey] { return cached }
+        if lyricsSearchMissingKeys.contains(cacheKey) { return nil }
+
+        guard let lines = MetadataAssetStore.shared.cachedLyricsForSearch(
+            songID: song.id,
+            lyricsFileName: song.lyricsFileName
+        ) else {
+            lyricsSearchMissingKeys.insert(cacheKey)
+            return nil
+        }
+
+        let text = lines.flatMap { line -> [String] in
+            var parts = [line.text]
+            if let background = line.background {
+                parts.append(contentsOf: background.map(\.text))
+            }
+            return parts
+        }.joined(separator: "\n")
+
+        guard !text.isEmpty else {
+            lyricsSearchMissingKeys.insert(cacheKey)
+            return nil
+        }
+        lyricsSearchTextCache[cacheKey] = text
+        return text
     }
 
     func songs(forAlbum albumID: String) -> [Song] {
@@ -871,6 +1073,7 @@ final class MusicLibrary {
         lastReplacedSong = s
         lastReplacedSongIDs = [s.id]
         songReplacementToken = UUID()
+        invalidateSearchCaches()
         rebuildIndex()
         cleanPlaylistEntries()
         cleanPlaybackHistoryEntries()
@@ -911,6 +1114,7 @@ final class MusicLibrary {
         lastReplacedSong = lastApplied
         lastReplacedSongIDs = appliedIDs
         songReplacementToken = UUID()
+        invalidateSearchCaches()
         rebuildIndex()
         cleanPlaylistEntries()
         cleanPlaybackHistoryEntries()

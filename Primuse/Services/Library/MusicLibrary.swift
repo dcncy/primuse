@@ -21,6 +21,7 @@ private struct LibrarySearchMatcher {
     let normalizedQuery: String
 
     var isValid: Bool { !normalizedQuery.isEmpty }
+    var normalizedLength: Int { normalizedQuery.count }
 
     init(query: String) {
         rawQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -102,6 +103,137 @@ private struct LibrarySearchMatcher {
             }
         }
         return remaining.isEmpty
+    }
+}
+
+struct LibrarySearchCache: Sendable {
+    var lyricsTextByKey: [String: String] = [:]
+    var missingLyricsKeys: Set<String> = []
+}
+
+struct LibrarySearchOutput: Sendable {
+    var songResults: [LibrarySearchResult]
+    var albumResults: [Album]
+    var cache: LibrarySearchCache
+}
+
+enum LibrarySearchWorker {
+    /// Lyrics search is intentionally held back for short queries. One- and
+    /// two-character searches match too much text, and normal metadata search
+    /// covers that interaction much more cheaply.
+    private static let minimumLyricsQueryLength = 3
+
+    static func compute(
+        query: String,
+        songs: [Song],
+        albums: [Album],
+        cache: LibrarySearchCache,
+        includeLyrics: Bool = true,
+        songLimit: Int = 120,
+        albumLimit: Int = 10
+    ) -> LibrarySearchOutput {
+        let matcher = LibrarySearchMatcher(query: query)
+        guard matcher.isValid else {
+            return LibrarySearchOutput(songResults: [], albumResults: [], cache: cache)
+        }
+
+        var cache = cache
+        let shouldSearchLyrics = includeLyrics && matcher.normalizedLength >= minimumLyricsQueryLength
+
+        let rankedSongs = songs.compactMap { song -> LibrarySearchResult? in
+            if Task.isCancelled { return nil }
+            var bestScore = 0
+            var bestKind: LibrarySearchMatchKind?
+
+            func consider(_ candidate: String?, boost: Int) {
+                guard let candidate,
+                      let match = matcher.score(candidate: candidate) else { return }
+                let score = match.score + boost
+                if score > bestScore {
+                    bestScore = score
+                    bestKind = match.kind
+                }
+            }
+
+            consider(song.title, boost: 30)
+            consider(song.artistName, boost: 20)
+            consider(song.albumTitle, boost: 14)
+            consider(song.genre, boost: 6)
+            consider(song.fileFormat.rawValue, boost: 2)
+
+            if shouldSearchLyrics,
+               bestScore < 90,
+               let lyrics = searchableLyricsText(for: song, cache: &cache),
+               matcher.matchesLyrics(lyrics) {
+                let score = 70
+                if score > bestScore {
+                    bestScore = score
+                    bestKind = .lyrics
+                }
+            }
+
+            guard let bestKind else { return nil }
+            return LibrarySearchResult(song: song, matchKind: bestKind, score: bestScore)
+        }
+
+        let songResults = Array(rankedSongs.sorted { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.song.title.localizedCaseInsensitiveCompare(rhs.song.title) == .orderedAscending
+        }.prefix(songLimit))
+
+        let albumResults = searchAlbums(query: query, albums: albums, limit: albumLimit)
+
+        return LibrarySearchOutput(songResults: songResults, albumResults: albumResults, cache: cache)
+    }
+
+    private static func searchAlbums(query: String, albums: [Album], limit: Int) -> [Album] {
+        let matcher = LibrarySearchMatcher(query: query)
+        guard matcher.isValid else { return [] }
+        let ranked = albums.compactMap { album -> (Album, Int)? in
+            if Task.isCancelled { return nil }
+            var best = 0
+            if let score = matcher.score(candidate: album.title)?.score {
+                best = max(best, score + 20)
+            }
+            if let artist = album.artistName,
+               let score = matcher.score(candidate: artist)?.score {
+                best = max(best, score + 10)
+            }
+            return best > 0 ? (album, best) : nil
+        }
+        return Array(ranked.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.0.title.localizedCaseInsensitiveCompare(rhs.0.title) == .orderedAscending
+        }.map(\.0).prefix(limit))
+    }
+
+    private static func searchableLyricsText(for song: Song, cache: inout LibrarySearchCache) -> String? {
+        let cacheKey = "\(song.id)|\(song.lyricsFileName ?? "")"
+        if let cached = cache.lyricsTextByKey[cacheKey] { return cached }
+        if cache.missingLyricsKeys.contains(cacheKey) { return nil }
+
+        guard let lines = MetadataAssetStore.shared.cachedLyricsForSearch(
+            songID: song.id,
+            lyricsFileName: song.lyricsFileName
+        ) else {
+            cache.missingLyricsKeys.insert(cacheKey)
+            return nil
+        }
+
+        let text = lines.flatMap { line -> [String] in
+            var parts = [line.text]
+            if let background = line.background {
+                parts.append(contentsOf: background.map(\.text))
+            }
+            return parts
+        }.joined(separator: "\n")
+
+        guard !text.isEmpty else {
+            cache.missingLyricsKeys.insert(cacheKey)
+            return nil
+        }
+        cache.lyricsTextByKey[cacheKey] = text
+        return text
     }
 }
 
@@ -454,8 +586,7 @@ final class MusicLibrary {
     private(set) var visibleSongs: [Song] = []
     private(set) var visibleAlbums: [Album] = []
     private(set) var visibleArtists: [Artist] = []
-    private var lyricsSearchTextCache: [String: String] = [:]
-    private var lyricsSearchMissingKeys: Set<String> = []
+    private(set) var searchRevision: Int = 0
 
     private let snapshotURL: URL
     private let encoder = JSONEncoder()
@@ -485,8 +616,7 @@ final class MusicLibrary {
     }
 
     private func invalidateSearchCaches() {
-        lyricsSearchTextCache.removeAll()
-        lyricsSearchMissingKeys.removeAll()
+        searchRevision &+= 1
     }
 
     init(fileManager: FileManager = .default) {
@@ -723,51 +853,20 @@ final class MusicLibrary {
         songs.first(where: { $0.id == id })
     }
 
-    /// Search songs by metadata, pinyin/initials, fuzzy subsequence, and
-    /// locally-cached lyrics. Network/source lyrics are intentionally skipped
-    /// so typing stays responsive.
+    /// Backward-compatible synchronous search. Keep it metadata-only so older
+    /// call sites never perform disk-backed lyrics scans on the main actor.
+    /// The search tab uses `LibrarySearchWorker` in a detached task when it
+    /// wants lyrics matches.
     func searchResults(query: String, limit: Int = 120) -> [LibrarySearchResult] {
-        let matcher = LibrarySearchMatcher(query: query)
-        guard matcher.isValid else { return [] }
-
-        let results = visibleSongs.compactMap { song -> LibrarySearchResult? in
-            var bestScore = 0
-            var bestKind: LibrarySearchMatchKind?
-
-            func consider(_ candidate: String?, boost: Int) {
-                guard let candidate,
-                      let match = matcher.score(candidate: candidate) else { return }
-                let score = match.score + boost
-                if score > bestScore {
-                    bestScore = score
-                    bestKind = match.kind
-                }
-            }
-
-            consider(song.title, boost: 30)
-            consider(song.artistName, boost: 20)
-            consider(song.albumTitle, boost: 14)
-            consider(song.genre, boost: 6)
-            consider(song.fileFormat.rawValue, boost: 2)
-
-            if bestScore < 90,
-               let lyrics = searchableLyricsText(for: song),
-               matcher.matchesLyrics(lyrics) {
-                let score = 70
-                if score > bestScore {
-                    bestScore = score
-                    bestKind = .lyrics
-                }
-            }
-
-            guard let bestKind else { return nil }
-            return LibrarySearchResult(song: song, matchKind: bestKind, score: bestScore)
-        }
-
-        return Array(results.sorted { lhs, rhs in
-            if lhs.score != rhs.score { return lhs.score > rhs.score }
-            return lhs.song.title.localizedCaseInsensitiveCompare(rhs.song.title) == .orderedAscending
-        }.prefix(limit))
+        LibrarySearchWorker.compute(
+            query: query,
+            songs: visibleSongs,
+            albums: [],
+            cache: LibrarySearchCache(),
+            includeLyrics: false,
+            songLimit: limit,
+            albumLimit: 0
+        ).songResults
     }
 
     /// Backward-compatible song-only search API.
@@ -776,52 +875,15 @@ final class MusicLibrary {
     }
 
     func searchAlbums(query: String, limit: Int = 10) -> [Album] {
-        let matcher = LibrarySearchMatcher(query: query)
-        guard matcher.isValid else { return [] }
-        let ranked = visibleAlbums.compactMap { album -> (Album, Int)? in
-            var best = 0
-            if let score = matcher.score(candidate: album.title)?.score {
-                best = max(best, score + 20)
-            }
-            if let artist = album.artistName,
-               let score = matcher.score(candidate: artist)?.score {
-                best = max(best, score + 10)
-            }
-            return best > 0 ? (album, best) : nil
-        }
-        return Array(ranked.sorted { lhs, rhs in
-            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
-            return lhs.0.title.localizedCaseInsensitiveCompare(rhs.0.title) == .orderedAscending
-        }.map(\.0).prefix(limit))
-    }
-
-    private func searchableLyricsText(for song: Song) -> String? {
-        let cacheKey = "\(song.id)|\(song.lyricsFileName ?? "")"
-        if let cached = lyricsSearchTextCache[cacheKey] { return cached }
-        if lyricsSearchMissingKeys.contains(cacheKey) { return nil }
-
-        guard let lines = MetadataAssetStore.shared.cachedLyricsForSearch(
-            songID: song.id,
-            lyricsFileName: song.lyricsFileName
-        ) else {
-            lyricsSearchMissingKeys.insert(cacheKey)
-            return nil
-        }
-
-        let text = lines.flatMap { line -> [String] in
-            var parts = [line.text]
-            if let background = line.background {
-                parts.append(contentsOf: background.map(\.text))
-            }
-            return parts
-        }.joined(separator: "\n")
-
-        guard !text.isEmpty else {
-            lyricsSearchMissingKeys.insert(cacheKey)
-            return nil
-        }
-        lyricsSearchTextCache[cacheKey] = text
-        return text
+        LibrarySearchWorker.compute(
+            query: query,
+            songs: [],
+            albums: visibleAlbums,
+            cache: LibrarySearchCache(),
+            includeLyrics: false,
+            songLimit: 0,
+            albumLimit: limit
+        ).albumResults
     }
 
     func songs(forAlbum albumID: String) -> [Song] {

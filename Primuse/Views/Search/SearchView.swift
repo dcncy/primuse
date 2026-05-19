@@ -13,8 +13,10 @@ struct SearchView: View {
     @Environment(AppleMusicService.self) private var appleMusic
     @Binding var searchText: String
     @State private var searchResults: [LibrarySearchResult] = []
+    @State private var matchingAlbums: [PrimuseKit.Album] = []
     @State private var recentSearches: [String] = []
     @State private var searchTask: Task<Void, Never>?
+    @State private var lyricsSearchCache = LibrarySearchCache()
 
     var body: some View {
         NavigationStack {
@@ -34,7 +36,7 @@ struct SearchView: View {
                     } else {
                         recentSearchView
                     }
-                } else if searchResults.isEmpty {
+                } else if searchResults.isEmpty && matchingAlbums.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                 } else {
                     searchResultsView
@@ -57,6 +59,10 @@ struct SearchView: View {
             performSearch(query: newValue)
             // 同步触发 Apple Music 搜索, 服务内部自己 debounce + 鉴权
             appleMusic.search(query: newValue)
+        }
+        .onChange(of: library.searchRevision) { _, _ in
+            lyricsSearchCache = LibrarySearchCache()
+            performSearch(query: searchText)
         }
         .onDisappear {
             searchTask?.cancel()
@@ -107,7 +113,6 @@ struct SearchView: View {
     private var searchResultsView: some View {
         List {
             // Albums matching
-            let matchingAlbums = library.searchAlbums(query: searchText)
             if !matchingAlbums.isEmpty {
                 Section("tab_albums") {
                     ForEach(matchingAlbums.prefix(5)) { album in
@@ -217,16 +222,36 @@ struct SearchView: View {
         searchTask?.cancel()
         guard !query.isEmpty else {
             searchResults = []
+            matchingAlbums = []
             return
         }
+
+        let songsSnapshot = library.visibleSongs
+        let albumsSnapshot = library.visibleAlbums
+        let cacheSnapshot = lyricsSearchCache
 
         searchTask = Task {
             // Debounce 200ms
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
 
-            let results = library.searchResults(query: query)
-            searchResults = results
+            let worker = Task.detached(priority: .userInitiated) {
+                LibrarySearchWorker.compute(
+                    query: query,
+                    songs: songsSnapshot,
+                    albums: albumsSnapshot,
+                    cache: cacheSnapshot
+                )
+            }
+            let output = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            searchResults = output.songResults
+            matchingAlbums = output.albumResults
+            lyricsSearchCache = output.cache
         }
     }
 

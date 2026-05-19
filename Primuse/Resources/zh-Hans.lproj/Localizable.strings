@@ -768,6 +768,7 @@
 "home_settings_sections_label" = "显示板块";
 "home_settings_sections_footer" = "可以隐藏首页上不需要的板块。Hero 区域始终显示。";
 "similar_songs" = "相似歌曲";
+"start_song_radio" = "启动歌曲电台";
 "start_similar_mix" = "播放相似歌曲";
 "similar_songs_empty" = "暂时没有相似歌曲";
 "similar_songs_empty_desc" = "补充艺术家、专辑、流派或年份标签后，猿音就能找到更接近的歌曲。";

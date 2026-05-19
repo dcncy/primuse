@@ -396,6 +396,33 @@ private struct OfflineAudioStatusBadge: View {
     }
 }
 
+struct DiscoveryReasonsView: View {
+    let reasons: [MusicDiscoveryReason]
+    var maxCount: Int = 2
+
+    private var text: String {
+        let visible = reasons.prefix(maxCount)
+        guard !visible.isEmpty else {
+            return String(localized: "discovery_reason_libraryPick")
+        }
+        return visible
+            .map { String(localized: LocalizedStringResource(stringLiteral: $0.localizationKey)) }
+            .joined(separator: " · ")
+    }
+
+    var body: some View {
+        Label {
+            Text(text)
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: "sparkles")
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.tint)
+        .accessibilityLabel(text)
+    }
+}
+
 struct SimilarSongsSheet: View {
     let seed: Song
 
@@ -407,12 +434,22 @@ struct SimilarSongsSheet: View {
         MusicDiscoveryEngine.similarSongs(to: seed, in: library, limit: 30)
     }
 
+    private var radioQueue: [MusicDiscoveryResult] {
+        MusicDiscoveryEngine.songRadio(from: seed, in: library, limit: 48)
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     seedRow
                     if !results.isEmpty {
+                        Button {
+                            startSongRadio()
+                        } label: {
+                            Label(String(localized: "start_song_radio"), systemImage: "dot.radiowaves.left.and.right")
+                        }
+
                         Button {
                             startSimilarMix()
                         } label: {
@@ -484,6 +521,15 @@ struct SimilarSongsSheet: View {
         Task { await player.play(song: first) }
     }
 
+    private func startSongRadio() {
+        let queue = radioQueue.map(\.song).filteredPlayable()
+        guard let first = queue.first else { return }
+        player.shuffleEnabled = false
+        player.setQueue(queue, startAt: 0)
+        dismiss()
+        Task { await player.play(song: first) }
+    }
+
     private func play(_ song: Song) {
         let tail = results.map(\.song).filter { $0.id != song.id }
         let queue = ([song] + tail).filteredPlayable()
@@ -529,14 +575,7 @@ private struct SimilarSongResultRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-                Label {
-                    Text(LocalizedStringKey(result.primaryReason.localizationKey))
-                        .lineLimit(1)
-                } icon: {
-                    Image(systemName: "sparkles")
-                }
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.tint)
+                DiscoveryReasonsView(reasons: result.reasons, maxCount: 3)
             }
 
             Spacer(minLength: 0)

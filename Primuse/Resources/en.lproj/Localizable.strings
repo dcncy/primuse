@@ -767,6 +767,7 @@
 "home_settings_sections_label" = "Visible sections";
 "home_settings_sections_footer" = "Hide sections you don't use. The Hero area is always shown.";
 "similar_songs" = "Similar Songs";
+"start_song_radio" = "Start Song Radio";
 "start_similar_mix" = "Start Similar Mix";
 "similar_songs_empty" = "No similar songs yet";
 "similar_songs_empty_desc" = "Add artist, album, genre, or year tags to help Primuse find nearby tracks.";

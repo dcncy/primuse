@@ -379,6 +379,67 @@ enum MusicDiscoveryEngine {
         return unique
     }
 
+    static func dailyRecommendations(
+        in library: MusicLibrary,
+        history: PlayHistoryStore = .shared,
+        limit: Int = 12,
+        now: Date = Date()
+    ) -> [MusicDiscoveryResult] {
+        recommendations(in: library, history: history, limit: max(limit * 3, limit), now: now)
+            .sorted { lhs, rhs in
+                let left = lhs.score + stableDailyNoise(lhs.song.id, now: now) * 8
+                let right = rhs.score + stableDailyNoise(rhs.song.id, now: now) * 8
+                if left != right { return left > right }
+                return lhs.song.title.localizedCompare(rhs.song.title) == .orderedAscending
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    static func songRadio(
+        from seed: Song,
+        in library: MusicLibrary,
+        history: PlayHistoryStore = .shared,
+        limit: Int = 48,
+        now: Date = Date()
+    ) -> [MusicDiscoveryResult] {
+        guard seed.isPlayable else { return [] }
+
+        var output = [
+            MusicDiscoveryResult(song: seed, score: .greatestFiniteMagnitude, reasons: [.libraryPick])
+        ]
+        var usedIDs: Set<String> = [seed.id]
+        var cursor = seed
+
+        while output.count < limit {
+            let similar = similarSongs(to: cursor, in: library, history: history, limit: 40)
+                .filter { !usedIDs.contains($0.song.id) }
+                .sorted { lhs, rhs in
+                    let left = lhs.score + stableDailyNoise(lhs.song.id, now: now) * 3
+                    let right = rhs.score + stableDailyNoise(rhs.song.id, now: now) * 3
+                    if left != right { return left > right }
+                    return lhs.song.title.localizedCompare(rhs.song.title) == .orderedAscending
+                }
+
+            if let next = similar.first {
+                output.append(next)
+                usedIDs.insert(next.song.id)
+                cursor = next.song
+                continue
+            }
+
+            guard let fallback = dailyRecommendations(in: library, history: history, limit: 24, now: now)
+                .first(where: { !usedIDs.contains($0.song.id) }) else {
+                break
+            }
+            output.append(fallback)
+            usedIDs.insert(fallback.song.id)
+            cursor = fallback.song
+        }
+
+        return output
+    }
+
     private struct Match {
         var score: Double
         var reasons: [MusicDiscoveryReason]
@@ -500,6 +561,13 @@ enum MusicDiscoveryEngine {
 
     private static func stableNoise(_ id: String) -> Double {
         let sum = id.unicodeScalars.reduce(0) { ($0 &+ Int($1.value)) % 997 }
+        return Double(sum) / 997.0
+    }
+
+    private static func stableDailyNoise(_ id: String, now: Date) -> Double {
+        let day = Calendar.current.ordinality(of: .day, in: .era, for: now) ?? 0
+        let mixed = "\(id):\(day)"
+        let sum = mixed.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 997 }
         return Double(sum) / 997.0
     }
 }

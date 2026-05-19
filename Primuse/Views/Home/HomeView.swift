@@ -459,14 +459,7 @@ struct HomeView: View {
                                     .frame(width: 140, alignment: .leading)
                                 Text(song.artistName ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                     .frame(width: 140, alignment: .leading)
-                                Label {
-                                    Text(LocalizedStringKey(result.primaryReason.localizationKey))
-                                        .lineLimit(1)
-                                } icon: {
-                                    Image(systemName: "sparkles")
-                                }
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.tint)
+                                DiscoveryReasonsView(reasons: result.reasons, maxCount: 2)
                                 .frame(width: 140, alignment: .leading)
                             }
                             .padding(8)
@@ -483,7 +476,7 @@ struct HomeView: View {
     /// Build the recommendation pool from local metadata + playback history.
     /// No network calls; the same engine also powers "similar songs".
     private func refreshForYouPicks() {
-        forYouResults = MusicDiscoveryEngine.recommendations(in: library, limit: 12)
+        forYouResults = MusicDiscoveryEngine.dailyRecommendations(in: library, limit: 12)
     }
 
     // MARK: - Continue Listening (formerly Recently Played)

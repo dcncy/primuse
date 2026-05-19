@@ -76,10 +76,9 @@ struct HomeView: View {
                 statsGlimpseSection(summary)
             }
 
-            // For You — local recommendation engine fed by
-            // PlayHistoryStore. Hidden when no usable picks turn up
-            // (e.g. brand-new install with zero history AND library
-            // has no covered songs).
+            // For You — local recommendation engine fed by playback history
+            // and library metadata. Hidden only when the library has no
+            // playable discovery candidates.
             if showForYou, !forYouPicks.isEmpty {
                 forYouSection
             }
@@ -434,7 +433,8 @@ struct HomeView: View {
     /// re-render (which fires whenever currentSong / library changes)
     /// doesn't reshuffle the picks under the user. Refreshed on .task
     /// when the home view re-mounts.
-    @State private var forYouPicks: [Song] = []
+    @State private var forYouResults: [MusicDiscoveryResult] = []
+    private var forYouPicks: [Song] { forYouResults.map(\.song) }
 
     private var forYouSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -443,7 +443,8 @@ struct HomeView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
-                    ForEach(forYouPicks, id: \.id) { song in
+                    ForEach(forYouResults) { result in
+                        let song = result.song
                         Button { playSong(song) } label: {
                             VStack(alignment: .leading, spacing: 6) {
                                 CachedArtworkView(
@@ -458,6 +459,15 @@ struct HomeView: View {
                                     .frame(width: 140, alignment: .leading)
                                 Text(song.artistName ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                     .frame(width: 140, alignment: .leading)
+                                Label {
+                                    Text(LocalizedStringKey(result.primaryReason.localizationKey))
+                                        .lineLimit(1)
+                                } icon: {
+                                    Image(systemName: "sparkles")
+                                }
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.tint)
+                                .frame(width: 140, alignment: .leading)
                             }
                             .padding(8)
                             .background(tintedCardBackground(for: song))
@@ -470,59 +480,10 @@ struct HomeView: View {
         }
     }
 
-    /// Build the recommendation pool. Strategy:
-    /// 1. Take top 5 most-played artists in the last 30 days.
-    /// 2. For each, pick up to 2 of their songs the user *hasn't*
-    ///    played in the last 30 days, with cover art available.
-    /// 3. Cold start (no history yet, or not enough picks): top up
-    ///    with random library songs that have covers and haven't
-    ///    been played recently.
-    /// All inputs come from `PlayHistoryStore` and `MusicLibrary` —
-    /// no network calls.
+    /// Build the recommendation pool from local metadata + playback history.
+    /// No network calls; the same engine also powers "similar songs".
     private func refreshForYouPicks() {
-        let history = PlayHistoryStore.shared
-        let topArtists = history.topArtists(in: .month, limit: 5)
-        let recentlyPlayedIDs = Set(history.entries(in: .month).map(\.songID))
-
-        var picks: [Song] = []
-        var seen = Set<String>()
-        let target = 12
-
-        for ranked in topArtists {
-            let candidates = library.visibleSongs
-                .filter { song in
-                    song.artistName == ranked.title
-                        && !recentlyPlayedIDs.contains(song.id)
-                        && song.coverArtFileName?.isEmpty == false
-                }
-                .shuffled()
-            for song in candidates.prefix(2) where !seen.contains(song.id) {
-                picks.append(song)
-                seen.insert(song.id)
-                if picks.count >= target { break }
-            }
-            if picks.count >= target { break }
-        }
-
-        if picks.count < 6 {
-            // Cold-start / sparse-history fallback. Random covered
-            // songs not played in the last 30 days — gives the user
-            // something to explore even on day one.
-            let extras = library.visibleSongs
-                .filter {
-                    !recentlyPlayedIDs.contains($0.id)
-                        && $0.coverArtFileName?.isEmpty == false
-                        && !seen.contains($0.id)
-                }
-                .shuffled()
-            for song in extras {
-                picks.append(song)
-                seen.insert(song.id)
-                if picks.count >= target { break }
-            }
-        }
-
-        forYouPicks = picks
+        forYouResults = MusicDiscoveryEngine.recommendations(in: library, limit: 12)
     }
 
     // MARK: - Continue Listening (formerly Recently Played)
@@ -810,4 +771,3 @@ struct HomeView: View {
         Task { await player.play(song: firstSong) }
     }
 }
-

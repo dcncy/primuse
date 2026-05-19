@@ -35,6 +35,7 @@ struct SongRowView: View {
     @State private var showDeleteConfirm = false
     @State private var showBareAlert = false
     @State private var showTagEditor = false
+    @State private var showSimilarSongs = false
 
     /// Cloud songs added by Phase A scan stay non-playable until the
     /// backfill fills `duration` (needed for the progress bar / seek).
@@ -144,6 +145,12 @@ struct SongRowView: View {
                         }
 
                         Button {
+                            showSimilarSongs = true
+                        } label: {
+                            Label(String(localized: "similar_songs"), systemImage: "sparkles")
+                        }
+
+                        Button {
                             showSongInfo = true
                         } label: {
                             Label(String(localized: "song_info"), systemImage: "info.circle")
@@ -226,6 +233,12 @@ struct SongRowView: View {
                 }
 
                 Button {
+                    showSimilarSongs = true
+                } label: {
+                    Label(String(localized: "similar_songs"), systemImage: "sparkles")
+                }
+
+                Button {
                     showSongInfo = true
                 } label: {
                     Label(String(localized: "song_info"), systemImage: "info.circle")
@@ -268,6 +281,11 @@ struct SongRowView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showSimilarSongs) {
+            SimilarSongsSheet(seed: song)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: $showSongInfo) {
             SongInfoSheet(song: song)
                 .presentationDetents([.medium])
@@ -300,6 +318,156 @@ struct SongRowView: View {
 
     private func formatDuration(_ duration: TimeInterval) -> String {
         duration.formattedDuration
+    }
+}
+
+struct SimilarSongsSheet: View {
+    let seed: Song
+
+    @Environment(AudioPlayerService.self) private var player
+    @Environment(MusicLibrary.self) private var library
+    @Environment(\.dismiss) private var dismiss
+
+    private var results: [MusicDiscoveryResult] {
+        MusicDiscoveryEngine.similarSongs(to: seed, in: library, limit: 30)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    seedRow
+                    if !results.isEmpty {
+                        Button {
+                            startSimilarMix()
+                        } label: {
+                            Label(String(localized: "start_similar_mix"), systemImage: "play.circle.fill")
+                        }
+                    }
+                }
+
+                if results.isEmpty {
+                    ContentUnavailableView {
+                        Label(String(localized: "similar_songs_empty"), systemImage: "sparkles")
+                    } description: {
+                        Text(String(localized: "similar_songs_empty_desc"))
+                    }
+                    .listRowBackground(Color.clear)
+                } else {
+                    Section(String(localized: "similar_songs")) {
+                        ForEach(results) { result in
+                            Button {
+                                play(result.song)
+                            } label: {
+                                SimilarSongResultRow(result: result)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(String(localized: "similar_songs"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(String(localized: "done")) { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var seedRow: some View {
+        HStack(spacing: 10) {
+            CachedArtworkView(
+                coverRef: seed.coverArtFileName,
+                songID: seed.id,
+                size: 44,
+                cornerRadius: 6,
+                sourceID: seed.sourceID,
+                filePath: seed.filePath
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(seed.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(seed.artistName ?? seed.albumTitle ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func startSimilarMix() {
+        let queue = ([seed] + results.map(\.song)).filteredPlayable()
+        guard let first = queue.first else { return }
+        player.shuffleEnabled = false
+        player.setQueue(queue, startAt: 0)
+        dismiss()
+        Task { await player.play(song: first) }
+    }
+
+    private func play(_ song: Song) {
+        let tail = results.map(\.song).filter { $0.id != song.id }
+        let queue = ([song] + tail).filteredPlayable()
+        guard let first = queue.first else { return }
+        player.shuffleEnabled = false
+        player.setQueue(queue, startAt: 0)
+        dismiss()
+        Task { await player.play(song: first) }
+    }
+}
+
+private struct SimilarSongResultRow: View {
+    let result: MusicDiscoveryResult
+
+    var body: some View {
+        let song = result.song
+        HStack(spacing: 10) {
+            CachedArtworkView(
+                coverRef: song.coverArtFileName,
+                songID: song.id,
+                size: 44,
+                cornerRadius: 6,
+                sourceID: song.sourceID,
+                filePath: song.filePath
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                HStack(spacing: 4) {
+                    if let artist = song.artistName {
+                        Text(artist)
+                    }
+                    if let album = song.albumTitle {
+                        Text("·")
+                        Text(album)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+                Label {
+                    Text(LocalizedStringKey(result.primaryReason.localizationKey))
+                        .lineLimit(1)
+                } icon: {
+                    Image(systemName: "sparkles")
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.tint)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 

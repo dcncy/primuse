@@ -105,6 +105,273 @@ private struct LibrarySearchMatcher {
     }
 }
 
+enum MusicDiscoveryReason: String, Sendable {
+    case sameArtist
+    case sameAlbum
+    case sameGenre
+    case sameEra
+    case similarDuration
+    case sameFolder
+    case recentFavorite
+    case notRecentlyPlayed
+    case newToLibrary
+    case libraryPick
+
+    var localizationKey: String { "discovery_reason_\(rawValue)" }
+}
+
+struct MusicDiscoveryResult: Identifiable, Sendable {
+    let song: Song
+    let score: Double
+    let reasons: [MusicDiscoveryReason]
+
+    var id: String { song.id }
+    var primaryReason: MusicDiscoveryReason { reasons.first ?? .libraryPick }
+}
+
+@MainActor
+enum MusicDiscoveryEngine {
+    static func similarSongs(
+        to seed: Song,
+        in library: MusicLibrary,
+        history: PlayHistoryStore = .shared,
+        limit: Int = 24
+    ) -> [MusicDiscoveryResult] {
+        let recentIDs = Set(history.entries(in: .month).map(\.songID))
+        return library.visibleSongs
+            .filteredPlayable()
+            .compactMap { candidate -> MusicDiscoveryResult? in
+                guard candidate.id != seed.id else { return nil }
+                var match = similarity(between: seed, and: candidate)
+                guard match.score > 0 else { return nil }
+
+                if !recentIDs.contains(candidate.id) {
+                    match.score += 4
+                    append(.notRecentlyPlayed, to: &match.reasons)
+                }
+
+                return MusicDiscoveryResult(
+                    song: candidate,
+                    score: match.score,
+                    reasons: match.reasons
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.song.title.localizedCompare(rhs.song.title) == .orderedAscending
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    static func recommendations(
+        in library: MusicLibrary,
+        history: PlayHistoryStore = .shared,
+        limit: Int = 12,
+        now: Date = Date()
+    ) -> [MusicDiscoveryResult] {
+        let songs = library.visibleSongs.filteredPlayable()
+        guard !songs.isEmpty else { return [] }
+
+        let byID = Dictionary(uniqueKeysWithValues: songs.map { ($0.id, $0) })
+        let recentWeekIDs = Set(history.entries(in: .week, now: now).map(\.songID))
+        let recentMonthIDs = Set(history.entries(in: .month, now: now).map(\.songID))
+        let topArtists = Set(history.topArtists(in: .month, limit: 6).map { normalized($0.title) })
+
+        var seeds: [Song] = []
+        var seedIDs = Set<String>()
+        for item in history.topSongs(in: .year, limit: 12) {
+            if let song = byID[item.id], seedIDs.insert(song.id).inserted {
+                seeds.append(song)
+            }
+        }
+        for song in library.recentlyPlayedSongs(limit: 12) where seedIDs.insert(song.id).inserted {
+            seeds.append(song)
+        }
+
+        guard !seeds.isEmpty else {
+            return coldStartRecommendations(from: songs, excluding: [], limit: limit, now: now)
+        }
+
+        var results = songs.compactMap { candidate -> MusicDiscoveryResult? in
+            guard !recentWeekIDs.contains(candidate.id) else { return nil }
+
+            var best = Match(score: 0, reasons: [])
+            for seed in seeds where seed.id != candidate.id {
+                let match = similarity(between: seed, and: candidate)
+                if match.score > best.score { best = match }
+            }
+
+            var score = best.score
+            var reasons = best.reasons
+
+            if let artist = candidate.artistName, topArtists.contains(normalized(artist)) {
+                score += 18
+                append(.recentFavorite, to: &reasons)
+            }
+
+            if !recentMonthIDs.contains(candidate.id) {
+                score += 12
+                append(.notRecentlyPlayed, to: &reasons)
+            }
+
+            if now.timeIntervalSince(candidate.dateAdded) <= 30 * 24 * 60 * 60 {
+                score += 8
+                append(.newToLibrary, to: &reasons)
+            }
+
+            if candidate.coverArtFileName?.isEmpty == false {
+                score += 3
+            }
+
+            guard score >= 16 else { return nil }
+            if reasons.isEmpty { reasons = [.libraryPick] }
+            return MusicDiscoveryResult(song: candidate, score: score, reasons: reasons)
+        }
+
+        results.sort { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.song.dateAdded > rhs.song.dateAdded
+        }
+
+        var unique = uniqued(results).prefix(limit).map { $0 }
+        if unique.count < limit {
+            let excluded = Set(unique.map(\.song.id)).union(recentWeekIDs)
+            unique.append(contentsOf: coldStartRecommendations(
+                from: songs,
+                excluding: excluded,
+                limit: limit - unique.count,
+                now: now
+            ))
+        }
+        return unique
+    }
+
+    private struct Match {
+        var score: Double
+        var reasons: [MusicDiscoveryReason]
+    }
+
+    private static func similarity(between seed: Song, and candidate: Song) -> Match {
+        var score: Double = 0
+        var reasons: [MusicDiscoveryReason] = []
+
+        if nonEmptyEqual(seed.albumID, candidate.albumID)
+            || nonEmptyEqual(seed.albumTitle, candidate.albumTitle) {
+            score += 46
+            append(.sameAlbum, to: &reasons)
+        }
+
+        if nonEmptyEqual(seed.artistID, candidate.artistID)
+            || nonEmptyEqual(seed.artistName, candidate.artistName) {
+            score += 40
+            append(.sameArtist, to: &reasons)
+        }
+
+        if nonEmptyEqual(seed.genre, candidate.genre) {
+            score += 30
+            append(.sameGenre, to: &reasons)
+        }
+
+        if let seedYear = seed.year, let candidateYear = candidate.year {
+            let delta = abs(seedYear - candidateYear)
+            if delta <= 2 {
+                score += 10
+                append(.sameEra, to: &reasons)
+            } else if delta <= 6 {
+                score += 5
+                append(.sameEra, to: &reasons)
+            }
+        }
+
+        if seed.duration > 30, candidate.duration > 30 {
+            let delta = abs(seed.duration - candidate.duration)
+            let ratio = delta / max(seed.duration, candidate.duration)
+            if ratio <= 0.12 {
+                score += 7
+                append(.similarDuration, to: &reasons)
+            } else if ratio <= 0.22 {
+                score += 3
+            }
+        }
+
+        if seed.sourceID == candidate.sourceID,
+           !parentFolder(seed.filePath).isEmpty,
+           parentFolder(seed.filePath) == parentFolder(candidate.filePath) {
+            score += 12
+            append(.sameFolder, to: &reasons)
+        }
+
+        return Match(score: score, reasons: reasons)
+    }
+
+    private static func coldStartRecommendations(
+        from songs: [Song],
+        excluding excludedIDs: Set<String>,
+        limit: Int,
+        now: Date
+    ) -> [MusicDiscoveryResult] {
+        songs
+            .filter { !excludedIDs.contains($0.id) }
+            .map { song -> MusicDiscoveryResult in
+                var score = song.coverArtFileName?.isEmpty == false ? 12.0 : 0.0
+                score += max(0, 10 - now.timeIntervalSince(song.dateAdded) / (7 * 24 * 60 * 60))
+                if song.artistName?.isEmpty == false { score += 3 }
+                if song.albumTitle?.isEmpty == false { score += 3 }
+                if song.genre?.isEmpty == false { score += 2 }
+                score += stableNoise(song.id)
+
+                let reason: MusicDiscoveryReason = now.timeIntervalSince(song.dateAdded) <= 30 * 24 * 60 * 60
+                    ? .newToLibrary
+                    : .libraryPick
+                return MusicDiscoveryResult(song: song, score: score, reasons: [reason])
+            }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.song.dateAdded > rhs.song.dateAdded
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    private static func uniqued(_ results: [MusicDiscoveryResult]) -> [MusicDiscoveryResult] {
+        var seen = Set<String>()
+        var output: [MusicDiscoveryResult] = []
+        for result in results where seen.insert(result.song.id).inserted {
+            output.append(result)
+        }
+        return output
+    }
+
+    private static func nonEmptyEqual(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs, let rhs else { return false }
+        let left = normalized(lhs)
+        return !left.isEmpty && left == normalized(rhs)
+    }
+
+    private static func parentFolder(_ path: String) -> String {
+        let folder = (path as NSString).deletingLastPathComponent
+        guard folder != "." else { return "" }
+        return normalized(folder)
+    }
+
+    private static func normalized(_ text: String) -> String {
+        text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func append(_ reason: MusicDiscoveryReason, to reasons: inout [MusicDiscoveryReason]) {
+        if !reasons.contains(reason) { reasons.append(reason) }
+    }
+
+    private static func stableNoise(_ id: String) -> Double {
+        let sum = id.unicodeScalars.reduce(0) { ($0 &+ Int($1.value)) % 997 }
+        return Double(sum) / 997.0
+    }
+}
+
 /// Global in-memory music library shared across the app
 @MainActor
 @Observable

@@ -998,6 +998,7 @@ struct SongInfoSheet: View {
     let song: Song
     @Environment(\.dismiss) private var dismiss
     @Environment(SourcesStore.self) private var sourcesStore
+    @State private var showSimilarSongs = false
 
     var body: some View {
         NavigationStack {
@@ -1022,6 +1023,14 @@ struct SongInfoSheet: View {
                         infoRow(String(localized: "source_label"), source.name)
                     }
                 }
+
+                Section {
+                    Button {
+                        showSimilarSongs = true
+                    } label: {
+                        Label(String(localized: "similar_songs"), systemImage: "sparkles")
+                    }
+                }
             }
             .navigationTitle(String(localized: "song_info"))
             .navigationBarTitleDisplayMode(.inline)
@@ -1029,6 +1038,11 @@ struct SongInfoSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(String(localized: "done")) { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showSimilarSongs) {
+                SimilarSongsSheet(seed: song)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
         }
     }

@@ -113,8 +113,22 @@ struct PlaybackSettings: Codable, Sendable {
 @MainActor
 @Observable
 final class PlaybackSettingsStore {
-    var gaplessEnabled: Bool { didSet { persist() } }
-    var crossfadeEnabled: Bool { didSet { persist() } }
+    var gaplessEnabled: Bool {
+        didSet {
+            if gaplessEnabled, crossfadeEnabled {
+                crossfadeEnabled = false
+            }
+            persist()
+        }
+    }
+    var crossfadeEnabled: Bool {
+        didSet {
+            if crossfadeEnabled, gaplessEnabled {
+                gaplessEnabled = false
+            }
+            persist()
+        }
+    }
     var crossfadeDuration: Double { didSet { persist() } }
     var replayGainEnabled: Bool { didSet { persist() } }
     var replayGainMode: ReplayGainMode { didSet { persist() } }

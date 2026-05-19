@@ -632,18 +632,19 @@ struct PlaybackSettingsView: View {
 
         Form {
             Section {
-                // The playback pipeline still has unfinished gapless preloading
-                // code, but it is not wired safely enough to expose as a user
-                // setting. Keep the row visible as a capability marker without
-                // binding to persisted state that may be stale from older builds.
-                Toggle("gapless_playback", isOn: .constant(false))
-                    .disabled(true)
+                Toggle("gapless_playback", isOn: $settings.gaplessEnabled)
+                    .onChange(of: settings.gaplessEnabled) { _, enabled in
+                        if enabled { settings.crossfadeEnabled = false }
+                    }
             } footer: {
-                Text("gapless_not_available")
+                Text("gapless_desc")
             }
 
             Section {
                 Toggle("crossfade", isOn: $settings.crossfadeEnabled)
+                    .onChange(of: settings.crossfadeEnabled) { _, enabled in
+                        if enabled { settings.gaplessEnabled = false }
+                    }
 
                 if settings.crossfadeEnabled {
                     VStack(alignment: .leading) {

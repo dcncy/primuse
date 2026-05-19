@@ -404,7 +404,7 @@
 "playback_error_format" = "不支持的音频格式";
 
 // MARK: - Gapless
-"gapless_not_available" = "无缝播放仍在计划中，暂未开放；当前可使用淡入淡出获得平滑过渡。";
+"gapless_not_available" = "无缝播放已可用于队列曲目；开启淡入淡出会自动关闭它。";
 
 // MARK: - Metadata
 "clear_metadata" = "清除封面与歌词";

@@ -42,6 +42,29 @@ private struct PCMBufferBox: @unchecked Sendable {
     let value: AVAudioPCMBuffer?
 }
 
+/// Mutable handoff state for one gapless boundary. The audio scheduling
+/// callback and decoder task both touch it, but all mutations are routed
+/// back through `AudioPlayerService` on MainActor.
+private final class GaplessTransitionState: @unchecked Sendable {
+    let queueGeneration: Int
+    var prepared: GaplessPreparedTrack?
+    var didBoundaryFire = false
+    var shouldCancelPreparation = false
+    var isFullyScheduled = false
+    var didFail = false
+
+    init(queueGeneration: Int) {
+        self.queueGeneration = queueGeneration
+    }
+}
+
+private struct GaplessPreparedTrack: @unchecked Sendable {
+    let song: Song
+    let url: URL
+    let decoderKind: AudioPlayerService.DecoderKind
+    let followingTransition: GaplessTransitionState
+}
+
 /// One slot in the play queue. Wraps a `Song` with a per-slot UUID so
 /// the queue can hold the same song multiple times without ID
 /// collisions in SwiftUI ForEach. The id stays put across metadata
@@ -114,7 +137,10 @@ final class AudioPlayerService {
     var queue: [Song] { queueEntries.map(\.song) }
     var currentIndex: Int = 0
     var shuffleEnabled = false {
-        didSet { rebuildShuffleOrder() }
+        didSet {
+            queueGeneration += 1
+            rebuildShuffleOrder()
+        }
     }
     var repeatMode: RepeatMode = .off
 
@@ -127,6 +153,8 @@ final class AudioPlayerService {
     /// on what plays next at the boundary. Cleared on any structural
     /// change to `queue` / shuffle state.
     private var pendingNextShuffleIndices: [Int]?
+    /// Invalidates prepared gapless transitions when queue order changes.
+    private var queueGeneration = 0
 
     // MARK: - Decoder Tracking (for seek)
     /// Tracks which decoder pipeline produced the currently-playing audio
@@ -136,7 +164,7 @@ final class AudioPlayerService {
     /// requires building a NEW `InputSource` — feeding the
     /// `primuse-stream://` URL to SFB's URL-based opener fails because
     /// the scheme isn't registered with the file system.
-    private enum DecoderKind { case native, streaming, httpStream, cloudStream, assetReader }
+    fileprivate enum DecoderKind: Sendable, Equatable { case native, streaming, httpStream, cloudStream, assetReader }
     private var activeDecoderKind: DecoderKind = .native
 
     // MARK: - Sleep Timer
@@ -153,6 +181,8 @@ final class AudioPlayerService {
     private let streamingDecoder = StreamingDownloadDecoder()
     private var decodingTask: Task<Void, Never>?
     private var prefetchTask: Task<Void, Never>?
+    private var gaplessPreparationTask: Task<Void, Never>?
+    private var gaplessFollowupTask: Task<Void, Never>?
     private var crossfadeDecodingTask: Task<Void, Never>?
     private var crossfadeTimer: Timer?
     private var crossfadeTriggered = false
@@ -273,6 +303,7 @@ final class AudioPlayerService {
         // Stop current playback
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         crossfadeDecodingTask?.cancel()
         crossfadeDecodingTask = nil
         audioEngine.stopPlayback()
@@ -308,6 +339,7 @@ final class AudioPlayerService {
         clearPendingPlaybackRecovery()
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         audioEngine.stopPlayback()
         stopTimeUpdater()
         await playFromURL(song: song, url: url, playID: id)
@@ -556,7 +588,7 @@ final class AudioPlayerService {
                     }
                 } else if let finalBuffer = lastBuffer {
                     // Natural EOF — schedule with track-end completion.
-                    self.scheduleLastBuffer(finalBuffer, playID: id)
+                    await self.scheduleDecodedFinalBuffer(finalBuffer, playID: id)
                 }
             }
         } catch {
@@ -651,7 +683,7 @@ final class AudioPlayerService {
                 }
                 if let finalBuffer = lastBuffer {
                     guard !Task.isCancelled, self.playID == id else { return }
-                    self.scheduleLastBuffer(finalBuffer, playID: id)
+                    await self.scheduleDecodedFinalBuffer(finalBuffer, playID: id)
                 }
             }
         } catch {
@@ -962,13 +994,48 @@ final class AudioPlayerService {
 
                 if let finalBuffer = lastBuffer {
                     guard !Task.isCancelled, self.playID == id else { return }
-                    self.scheduleLastBuffer(finalBuffer, playID: id)
+                    await self.scheduleDecodedFinalBuffer(finalBuffer, playID: id)
                 }
             }
         } catch {
             plog("⚠️ AssetReader fallback also failed: \(error.localizedDescription)")
             isLoading = false
             await autoAdvanceAfterFailure()
+        }
+    }
+
+    private func scheduleDecodedFinalBuffer(_ buffer: AVAudioPCMBuffer, playID id: UUID) async {
+        guard shouldAttemptGapless(settings: playbackSettings.snapshot()),
+              nextSongInQueue() != nil else {
+            scheduleLastBuffer(buffer, playID: id)
+            return
+        }
+
+        let transition = GaplessTransitionState(queueGeneration: queueGeneration)
+        audioEngine.scheduleBuffer(
+            buffer,
+            completionCallbackType: .dataPlayedBack
+        ) { [weak self, transition] _ in
+            plog("🔔 gapless boundary fired playID=\(id.uuidString.prefix(8))")
+            Task { @MainActor [weak self] in
+                guard let self, self.playID == id else { return }
+                await self.handleGaplessBoundary(transition: transition, playID: id)
+            }
+        }
+
+        startGaplessPreparation(playID: id, transition: transition)
+    }
+
+    private func shouldAttemptGapless(settings: PlaybackSettings) -> Bool {
+        guard settings.gaplessEnabled,
+              !settings.crossfadeEnabled,
+              repeatMode != .one else { return false }
+
+        switch activeDecoderKind {
+        case .native, .httpStream, .cloudStream:
+            return true
+        case .streaming, .assetReader:
+            return false
         }
     }
 
@@ -1008,6 +1075,13 @@ final class AudioPlayerService {
                 await self.autoAdvanceAfterFailure()
             }
         }
+    }
+
+    private func cancelGaplessTasks() {
+        gaplessPreparationTask?.cancel()
+        gaplessPreparationTask = nil
+        gaplessFollowupTask?.cancel()
+        gaplessFollowupTask = nil
     }
 
     func pause() {
@@ -1056,6 +1130,7 @@ final class AudioPlayerService {
         }
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         crossfadeDecodingTask?.cancel()
         crossfadeDecodingTask = nil
         crossfadeTimer?.invalidate()
@@ -1090,6 +1165,7 @@ final class AudioPlayerService {
         }
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         crossfadeDecodingTask?.cancel()
         crossfadeDecodingTask = nil
         crossfadeTimer?.invalidate()
@@ -1171,6 +1247,7 @@ final class AudioPlayerService {
         // currentSong, and other state that stop() would tear down.
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         crossfadeDecodingTask?.cancel()
         crossfadeDecodingTask = nil
         audioEngine.stopPlayback()
@@ -1322,7 +1399,7 @@ final class AudioPlayerService {
 
                     if let finalBuffer = lastBuffer {
                         guard !Task.isCancelled, self.playID == id else { return }
-                        self.scheduleLastBuffer(finalBuffer, playID: id)
+                        await self.scheduleDecodedFinalBuffer(finalBuffer, playID: id)
                     }
                 }
             } catch {
@@ -1359,6 +1436,7 @@ final class AudioPlayerService {
     }
 
     func setQueue(_ songs: [Song], startAt index: Int = 0) {
+        queueGeneration += 1
         queueEntries = songs.map { QueueEntry(song: $0) }
         currentIndex = min(index, songs.count - 1)
         // Drop any pre-built next round — the queue itself changed, so
@@ -1371,6 +1449,8 @@ final class AudioPlayerService {
     /// Wipe the queue. Replaces the legacy `player.queue = []` setter,
     /// which is no longer accessible since `queue` is now computed.
     func clearQueue() {
+        queueGeneration += 1
+        cancelGaplessTasks()
         queueEntries = []
         currentIndex = 0
         pendingNextShuffleIndices = nil
@@ -1384,6 +1464,7 @@ final class AudioPlayerService {
     /// raw queue offsets, so a manual reorder makes those offsets
     /// point at the wrong songs unless we regenerate them.
     func moveQueueItems(fromOffsets source: IndexSet, toOffset destination: Int) {
+        queueGeneration += 1
         queueEntries.move(fromOffsets: source, toOffset: destination)
         pendingNextShuffleIndices = nil
         if shuffleEnabled {
@@ -1407,137 +1488,229 @@ final class AudioPlayerService {
 
     // MARK: - Gapless Playback
 
-    /// After current track's buffers are all scheduled, preload ONE next track's
-    /// buffers into the SAME playerNode. Uses a completion callback on the last
-    /// buffer to chain the next preload — no recursion.
-    private func gaplessPreloadNext(id: UUID) async {
-        guard self.playID == id else {
-            plog("🔄 gaplessPreload: ABORTED (playID mismatch)")
-            return
+    private func startGaplessPreparation(playID id: UUID, transition: GaplessTransitionState) {
+        gaplessPreparationTask?.cancel()
+        gaplessPreparationTask = Task { [id, transition] in
+            await self.prepareGaplessNextTrack(playID: id, transition: transition)
         }
-        guard var nextSong = nextSongInQueue() else {
-            // No next song — use completion callback to detect track end
-            scheduleEndDetection(id: id)
+    }
+
+    private func handleGaplessBoundary(
+        transition: GaplessTransitionState,
+        playID id: UUID
+    ) async {
+        transition.didBoundaryFire = true
+
+        if let lockedID = sleepStopAfterSongID, currentSong?.id == lockedID {
+            sleepStopAfterSongID = nil
+            transition.shouldCancelPreparation = true
+            cancelGaplessTasks()
+            stopAtTrackEnd()
             return
         }
 
-        // For repeat-one, don't gapless-chain (use normal replay via callback)
-        if repeatMode == .one {
-            scheduleEndDetection(id: id)
+        guard shouldAttemptGapless(settings: playbackSettings.snapshot()),
+              queueGeneration == transition.queueGeneration,
+              let prepared = transition.prepared,
+              nextSongInQueue()?.id == prepared.song.id else {
+            transition.shouldCancelPreparation = true
+            gaplessPreparationTask?.cancel()
+            gaplessPreparationTask = nil
+            await handleTrackEnd()
             return
         }
 
-        // 跳过相邻同 title+artist 重复 (NAS 上同首歌的多版本)。
-        // gapless 路径 bypass 了 next() 函数, 所以这里也要 dedup。
-        if let cur = currentSong, queue.count > 2,
-           nextSong.title == cur.title, nextSong.artistName == cur.artistName {
-            plog("🔄 gaplessPreload: skip duplicate '\(nextSong.title)', advance one more")
-            advanceToNextIndex()
-            guard let after = nextSongInQueue() else {
-                scheduleEndDetection(id: id)
-                return
+        activateGaplessTrack(prepared, completedTransition: transition, playID: id)
+    }
+
+    private func activateGaplessTrack(
+        _ prepared: GaplessPreparedTrack,
+        completedTransition: GaplessTransitionState,
+        playID id: UUID
+    ) {
+        guard playID == id else { return }
+
+        if let previous = currentSong {
+            sourceManager?.finalizeStreamingSession(for: previous)
+        }
+
+        audioEngine.markTrackBoundary()
+        advanceToNextIndex()
+        currentSong = prepared.song
+        duration = prepared.song.duration.sanitizedDuration
+        currentTime = 0
+        isLoading = false
+        isPlaying = true
+        isAtTrackEnd = false
+        crossfadeTriggered = false
+        isCrossfading = false
+        activeDecoderKind = prepared.decoderKind
+        library?.recordPlayback(of: prepared.song.id)
+        ScrobbleService.shared.handlePlaybackStarted(song: prepared.song)
+        PlayHistoryStore.shared.beginSession(song: prepared.song)
+
+        let settings = playbackSettings.snapshot()
+        if settings.replayGainEnabled {
+            Task { [id] in
+                await self.applyReplayGain(
+                    for: prepared.song,
+                    url: prepared.url,
+                    mode: settings.replayGainMode,
+                    allowFileRead: prepared.decoderKind != .cloudStream && prepared.decoderKind != .httpStream
+                )
+                guard self.playID == id else { return }
             }
-            nextSong = after
+        } else {
+            audioEngine.resetPlayerVolume()
+        }
+
+        if duration <= 0,
+           prepared.decoderKind != .cloudStream,
+           prepared.decoderKind != .httpStream {
+            Task { [id] in
+                if let info = try? await self.nativeDecoder.fileInfo(for: prepared.url) {
+                    guard self.playID == id, self.currentSong?.id == prepared.song.id else { return }
+                    self.duration = info.duration.sanitizedDuration
+                    self.updateNowPlayingInfo()
+                }
+            }
+        }
+
+        startTimeUpdater()
+        updateNowPlayingInfo()
+        updateNowPlayingArtworkIfNeeded()
+        updatePlaybackState()
+        prefetchNextSong()
+        startGaplessFollowupPreparation(
+            playID: id,
+            after: completedTransition,
+            followingTransition: prepared.followingTransition
+        )
+    }
+
+    private func startGaplessFollowupPreparation(
+        playID id: UUID,
+        after completedTransition: GaplessTransitionState,
+        followingTransition: GaplessTransitionState
+    ) {
+        gaplessFollowupTask?.cancel()
+        gaplessFollowupTask = Task { [id, completedTransition, followingTransition] in
+            while !Task.isCancelled {
+                guard self.playID == id,
+                      self.queueGeneration == completedTransition.queueGeneration,
+                      !completedTransition.shouldCancelPreparation,
+                      !completedTransition.didFail else { return }
+                if completedTransition.isFullyScheduled { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+
+            guard !Task.isCancelled,
+                  self.playID == id,
+                  self.queueGeneration == followingTransition.queueGeneration else { return }
+            self.startGaplessPreparation(playID: id, transition: followingTransition)
+        }
+    }
+
+    private func prepareGaplessNextTrack(
+        playID id: UUID,
+        transition: GaplessTransitionState
+    ) async {
+        guard playID == id,
+              queueGeneration == transition.queueGeneration,
+              !transition.shouldCancelPreparation,
+              shouldAttemptGapless(settings: playbackSettings.snapshot()),
+              let nextSong = nextSongInQueue() else { return }
+
+        var nextURL: URL
+        var nextDecoderKind: DecoderKind
+        do {
+            nextURL = try await resolvedURL(for: nextSong)
+            nextDecoderKind = decoderKind(for: nextSong, url: nextURL)
+        } catch {
+            plog("Gapless prepare URL error: \(error.localizedDescription)")
+            return
+        }
+
+        guard playID == id,
+              queueGeneration == transition.queueGeneration,
+              !transition.shouldCancelPreparation,
+              nextDecoderKind == .native || nextDecoderKind == .httpStream || nextDecoderKind == .cloudStream,
+              nextDecoderKind != .native || nativeDecoder.canDecode(url: nextURL),
+              let outputFormat = audioEngine.outputFormat else { return }
+
+        guard let stream = await decodeStream(for: nextSong, url: nextURL, outputFormat: outputFormat) else {
+            return
+        }
+
+        let followingTransition = GaplessTransitionState(queueGeneration: queueGeneration)
+        var lastBuffer: AVAudioPCMBuffer?
+        var didMarkPrepared = false
+
+        func markPreparedIfNeeded() {
+            guard !didMarkPrepared else { return }
+            didMarkPrepared = true
+            transition.prepared = GaplessPreparedTrack(
+                song: nextSong,
+                url: nextURL,
+                decoderKind: nextDecoderKind,
+                followingTransition: followingTransition
+            )
+            plog("🔄 gapless prepared next track '\(nextSong.title)'")
         }
 
         do {
-            let nextURL = try await resolvedURL(for: nextSong)
-            let nextDecoderKind = decoderKind(for: nextSong, url: nextURL)
-            guard nativeDecoder.canDecode(url: nextURL),
-                  let outputFormat = audioEngine.outputFormat else {
-                scheduleEndDetection(id: id)
-                return
-            }
-
-            // Mark the sample boundary for time tracking
-            audioEngine.markTrackBoundary()
-
-            // Update state for the new track
-            advanceToNextIndex()
-            plog("🔄 gaplessPreload: currentSong → \(nextSong.title)")
-            currentSong = nextSong
-            duration = nextSong.duration
-            currentTime = 0
-            crossfadeTriggered = false; isCrossfading = false
-            activeDecoderKind = nextDecoderKind
-            library?.recordPlayback(of: nextSong.id)
-
-            // Apply ReplayGain for next track
-            let settings = playbackSettings.snapshot()
-            if settings.replayGainEnabled {
-                await applyReplayGain(
-                    for: nextSong,
-                    url: nextURL,
-                    mode: settings.replayGainMode,
-                    allowFileRead: nextDecoderKind != .cloudStream && nextDecoderKind != .httpStream
-                )
-            }
-
-            // Decode and schedule next track's buffers (only this one track)
-            guard let stream = await decodeStream(for: nextSong, url: nextURL, outputFormat: outputFormat) else {
-                scheduleEndDetection(id: id)
-                return
-            }
-            var isFirst = true
-            var lastBuffer: AVAudioPCMBuffer?
-
             for try await buffer in stream {
-                guard !Task.isCancelled, self.playID == id else { return }
+                guard !Task.isCancelled,
+                      playID == id,
+                      queueGeneration == transition.queueGeneration,
+                      !transition.shouldCancelPreparation else { return }
 
                 if let prev = lastBuffer {
                     audioEngine.scheduleBuffer(prev)
+                    markPreparedIfNeeded()
                 }
                 lastBuffer = buffer
-
-                if isFirst {
-                    isFirst = false
-                    if nextDecoderKind != .cloudStream,
-                       nextDecoderKind != .httpStream,
-                       nextDecoderKind != .streaming {
-                        Task {
-                            if let info = try? await nativeDecoder.fileInfo(for: nextURL) {
-                                self.duration = info.duration.sanitizedDuration
-                            }
-                        }
-                    }
-                    updateNowPlayingInfo()
-                    updateNowPlayingArtworkIfNeeded()
-                    updatePlaybackState()
-                }
             }
-
-            // Schedule the last buffer with completion → chain next preload
-            if let finalBuffer = lastBuffer {
-                guard !Task.isCancelled, self.playID == id else { return }
+        } catch {
+            guard !Task.isCancelled,
+                  playID == id,
+                  queueGeneration == transition.queueGeneration,
+                  !transition.shouldCancelPreparation else { return }
+            transition.didFail = true
+            plog("Gapless prepare decode error: \(error.localizedDescription)")
+            if let tailBuffer = lastBuffer {
                 audioEngine.scheduleBuffer(
-                    finalBuffer,
+                    tailBuffer,
                     completionCallbackType: .dataPlayedBack
                 ) { [weak self] _ in
                     Task { @MainActor [weak self] in
                         guard let self, self.playID == id else { return }
-                        // Chain: preload the NEXT track when this one finishes playing
-                        await self.gaplessPreloadNext(id: id)
+                        await self.autoAdvanceAfterFailure()
                     }
                 }
+                markPreparedIfNeeded()
+                transition.isFullyScheduled = true
             }
-        } catch {
-            plog("Gapless preload error: \(error)")
-            scheduleEndDetection(id: id)
+            return
         }
-    }
 
-    /// Schedule a silent buffer with completion callback to detect when all audio finishes.
-    private func scheduleEndDetection(id: UUID) {
-        guard let silence = createSilentBuffer(frameCount: 1) else { return }
+        guard !Task.isCancelled,
+              playID == id,
+              queueGeneration == transition.queueGeneration,
+              !transition.shouldCancelPreparation,
+              let finalBuffer = lastBuffer else { return }
+
         audioEngine.scheduleBuffer(
-            silence,
+            finalBuffer,
             completionCallbackType: .dataPlayedBack
-        ) { [weak self] _ in
+        ) { [weak self, followingTransition] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.playID == id else { return }
-                await self.handleTrackEnd()
+                await self.handleGaplessBoundary(transition: followingTransition, playID: id)
             }
         }
+        markPreparedIfNeeded()
+        transition.isFullyScheduled = true
     }
 
     // MARK: - Crossfade
@@ -1960,16 +2133,6 @@ final class AudioPlayerService {
             order.swapAt(0, otherPos)
         }
         return order
-    }
-
-    private func createSilentBuffer(frameCount: AVAudioFrameCount) -> AVAudioPCMBuffer? {
-        guard let format = audioEngine.outputFormat,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            return nil
-        }
-        buffer.frameLength = frameCount
-        // Buffer is zero-initialized by default — silence
-        return buffer
     }
 
     // MARK: - URL Resolution

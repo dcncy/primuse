@@ -1500,6 +1500,17 @@ final class AudioPlayerService {
         playID id: UUID
     ) async {
         transition.didBoundaryFire = true
+        let settings = playbackSettings.snapshot()
+
+        // The user can switch Crossfade on after the gapless final buffer
+        // has already been scheduled. In that race, the crossfade path owns
+        // the transition and will swap nodes; do not also advance here.
+        if settings.crossfadeEnabled, crossfadeTriggered {
+            transition.shouldCancelPreparation = true
+            gaplessPreparationTask?.cancel()
+            gaplessPreparationTask = nil
+            return
+        }
 
         if let lockedID = sleepStopAfterSongID, currentSong?.id == lockedID {
             sleepStopAfterSongID = nil
@@ -1509,7 +1520,7 @@ final class AudioPlayerService {
             return
         }
 
-        guard shouldAttemptGapless(settings: playbackSettings.snapshot()),
+        guard shouldAttemptGapless(settings: settings),
               queueGeneration == transition.queueGeneration,
               let prepared = transition.prepared,
               nextSongInQueue()?.id == prepared.song.id else {

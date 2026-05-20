@@ -2,6 +2,607 @@ import Foundation
 import PrimuseKit
 import CryptoKit
 
+enum LibrarySearchMatchKind: Sendable {
+    case metadata
+    case lyrics
+    case fuzzy
+}
+
+struct LibrarySearchResult: Identifiable, Sendable {
+    let song: Song
+    let matchKind: LibrarySearchMatchKind
+    let score: Int
+    let lyricSnippet: String?
+
+    var id: String { song.id }
+}
+
+private struct LibrarySearchMatcher {
+    let rawQuery: String
+    let normalizedQuery: String
+
+    var isValid: Bool { !normalizedQuery.isEmpty }
+    var normalizedLength: Int { normalizedQuery.count }
+
+    init(query: String) {
+        rawQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalizedQuery = Self.normalized(rawQuery)
+    }
+
+    func score(candidate: String) -> (score: Int, kind: LibrarySearchMatchKind)? {
+        guard !candidate.isEmpty else { return nil }
+
+        if candidate.localizedCaseInsensitiveContains(rawQuery) {
+            return (120, .metadata)
+        }
+
+        let normalizedCandidate = Self.normalized(candidate)
+        guard !normalizedCandidate.isEmpty else { return nil }
+
+        if normalizedCandidate.contains(normalizedQuery) {
+            return (110, .metadata)
+        }
+
+        let initials = Self.initials(candidate)
+        if !initials.isEmpty, initials.contains(normalizedQuery) {
+            return (100, .metadata)
+        }
+
+        if normalizedQuery.count >= 3,
+           Self.isSubsequence(normalizedQuery, of: normalizedCandidate) {
+            return (55, .fuzzy)
+        }
+
+        return nil
+    }
+
+    func matchesLyrics(_ lyrics: String) -> Bool {
+        guard !lyrics.isEmpty else { return false }
+        if lyrics.localizedCaseInsensitiveContains(rawQuery) { return true }
+        return Self.normalized(lyrics).contains(normalizedQuery)
+    }
+
+    func lyricsSnippet(in lyrics: String, contextLines: Int = 1) -> String? {
+        let lines = lyrics
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return nil }
+
+        let matchIndex = lines.firstIndex { line in
+            line.localizedCaseInsensitiveContains(rawQuery)
+                || Self.normalized(line).contains(normalizedQuery)
+        }
+
+        guard let matchIndex else { return nil }
+        let lowerBound = max(0, matchIndex - contextLines)
+        let upperBound = min(lines.count - 1, matchIndex + contextLines)
+        var snippetLines = Array(lines[lowerBound...upperBound])
+        if lowerBound > 0 { snippetLines[0] = "..." + snippetLines[0] }
+        if upperBound < lines.count - 1 {
+            snippetLines[snippetLines.count - 1] += "..."
+        }
+        return snippetLines.joined(separator: "\n")
+    }
+
+    private static func normalized(_ text: String) -> String {
+        let latin = text
+            .applyingTransform(.mandarinToLatin, reverse: false)?
+            .applyingTransform(.stripDiacritics, reverse: false)
+            ?? text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+
+        let allowed = CharacterSet.alphanumerics
+        let scalars = latin.lowercased().unicodeScalars.filter { allowed.contains($0) }
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    private static func initials(_ text: String) -> String {
+        let latin = text
+            .applyingTransform(.mandarinToLatin, reverse: false)?
+            .applyingTransform(.stripDiacritics, reverse: false)
+            ?? text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+
+        let allowed = CharacterSet.alphanumerics
+        var result = String.UnicodeScalarView()
+        var shouldTakeNext = true
+        for scalar in latin.lowercased().unicodeScalars {
+            if allowed.contains(scalar) {
+                if shouldTakeNext {
+                    result.append(scalar)
+                    shouldTakeNext = false
+                }
+            } else {
+                shouldTakeNext = true
+            }
+        }
+        return String(result)
+    }
+
+    private static func isSubsequence(_ needle: String, of haystack: String) -> Bool {
+        var remaining = needle[...]
+        for char in haystack {
+            if remaining.first == char {
+                remaining.removeFirst()
+                if remaining.isEmpty { return true }
+            }
+        }
+        return remaining.isEmpty
+    }
+}
+
+struct LibrarySearchCache: Sendable {
+    var lyricsTextByKey: [String: String] = [:]
+    var missingLyricsKeys: Set<String> = []
+}
+
+struct LibrarySearchOutput: Sendable {
+    var songResults: [LibrarySearchResult]
+    var albumResults: [Album]
+    var cache: LibrarySearchCache
+}
+
+enum LibrarySearchWorker {
+    /// Lyrics search is intentionally held back for short queries. One- and
+    /// two-character searches match too much text, and normal metadata search
+    /// covers that interaction much more cheaply.
+    private static let minimumLyricsQueryLength = 3
+
+    static func compute(
+        query: String,
+        songs: [Song],
+        albums: [Album],
+        cache: LibrarySearchCache,
+        includeLyrics: Bool = true,
+        songLimit: Int = 120,
+        albumLimit: Int = 10
+    ) -> LibrarySearchOutput {
+        let matcher = LibrarySearchMatcher(query: query)
+        guard matcher.isValid else {
+            return LibrarySearchOutput(songResults: [], albumResults: [], cache: cache)
+        }
+
+        var cache = cache
+        let shouldSearchLyrics = includeLyrics && matcher.normalizedLength >= minimumLyricsQueryLength
+
+        let rankedSongs = songs.compactMap { song -> LibrarySearchResult? in
+            if Task.isCancelled { return nil }
+            var bestScore = 0
+            var bestKind: LibrarySearchMatchKind?
+            var lyricSnippet: String?
+
+            func consider(_ candidate: String?, boost: Int) {
+                guard let candidate,
+                      let match = matcher.score(candidate: candidate) else { return }
+                let score = match.score + boost
+                if score > bestScore {
+                    bestScore = score
+                    bestKind = match.kind
+                }
+            }
+
+            consider(song.title, boost: 30)
+            consider(song.artistName, boost: 20)
+            consider(song.albumTitle, boost: 14)
+            consider(song.genre, boost: 6)
+            consider(song.fileFormat.rawValue, boost: 2)
+
+            if shouldSearchLyrics,
+               bestScore < 90,
+               let lyrics = searchableLyricsText(for: song, cache: &cache),
+               matcher.matchesLyrics(lyrics) {
+                let score = 70
+                if score > bestScore {
+                    bestScore = score
+                    bestKind = .lyrics
+                    lyricSnippet = matcher.lyricsSnippet(in: lyrics)
+                }
+            }
+
+            guard let bestKind else { return nil }
+            return LibrarySearchResult(
+                song: song,
+                matchKind: bestKind,
+                score: bestScore,
+                lyricSnippet: lyricSnippet
+            )
+        }
+
+        let songResults = Array(rankedSongs.sorted { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.song.title.localizedCaseInsensitiveCompare(rhs.song.title) == .orderedAscending
+        }.prefix(songLimit))
+
+        let albumResults = searchAlbums(query: query, albums: albums, limit: albumLimit)
+
+        return LibrarySearchOutput(songResults: songResults, albumResults: albumResults, cache: cache)
+    }
+
+    private static func searchAlbums(query: String, albums: [Album], limit: Int) -> [Album] {
+        let matcher = LibrarySearchMatcher(query: query)
+        guard matcher.isValid else { return [] }
+        let ranked = albums.compactMap { album -> (Album, Int)? in
+            if Task.isCancelled { return nil }
+            var best = 0
+            if let score = matcher.score(candidate: album.title)?.score {
+                best = max(best, score + 20)
+            }
+            if let artist = album.artistName,
+               let score = matcher.score(candidate: artist)?.score {
+                best = max(best, score + 10)
+            }
+            return best > 0 ? (album, best) : nil
+        }
+        return Array(ranked.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.0.title.localizedCaseInsensitiveCompare(rhs.0.title) == .orderedAscending
+        }.map(\.0).prefix(limit))
+    }
+
+    private static func searchableLyricsText(for song: Song, cache: inout LibrarySearchCache) -> String? {
+        let cacheKey = "\(song.id)|\(song.lyricsFileName ?? "")"
+        if let cached = cache.lyricsTextByKey[cacheKey] { return cached }
+        if cache.missingLyricsKeys.contains(cacheKey) { return nil }
+
+        guard let lines = MetadataAssetStore.shared.cachedLyricsForSearch(
+            songID: song.id,
+            lyricsFileName: song.lyricsFileName
+        ) else {
+            cache.missingLyricsKeys.insert(cacheKey)
+            return nil
+        }
+
+        let text = lines.flatMap { line -> [String] in
+            var parts = [line.text]
+            if let background = line.background {
+                parts.append(contentsOf: background.map(\.text))
+            }
+            return parts
+        }.joined(separator: "\n")
+
+        guard !text.isEmpty else {
+            cache.missingLyricsKeys.insert(cacheKey)
+            return nil
+        }
+        cache.lyricsTextByKey[cacheKey] = text
+        return text
+    }
+}
+
+enum MusicDiscoveryReason: String, Sendable {
+    case sameArtist
+    case sameAlbum
+    case sameGenre
+    case sameEra
+    case similarDuration
+    case sameFolder
+    case recentFavorite
+    case notRecentlyPlayed
+    case newToLibrary
+    case libraryPick
+
+    var localizationKey: String { "discovery_reason_\(rawValue)" }
+}
+
+struct MusicDiscoveryResult: Identifiable, Sendable {
+    let song: Song
+    let score: Double
+    let reasons: [MusicDiscoveryReason]
+
+    var id: String { song.id }
+    var primaryReason: MusicDiscoveryReason { reasons.first ?? .libraryPick }
+}
+
+@MainActor
+enum MusicDiscoveryEngine {
+    static func similarSongs(
+        to seed: Song,
+        in library: MusicLibrary,
+        history: PlayHistoryStore = .shared,
+        limit: Int = 24
+    ) -> [MusicDiscoveryResult] {
+        let recentIDs = Set(history.entries(in: .month).map(\.songID))
+        return library.visibleSongs
+            .filteredPlayable()
+            .compactMap { candidate -> MusicDiscoveryResult? in
+                guard candidate.id != seed.id else { return nil }
+                var match = similarity(between: seed, and: candidate)
+                guard match.score > 0 else { return nil }
+
+                if !recentIDs.contains(candidate.id) {
+                    match.score += 4
+                    append(.notRecentlyPlayed, to: &match.reasons)
+                }
+
+                return MusicDiscoveryResult(
+                    song: candidate,
+                    score: match.score,
+                    reasons: match.reasons
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.song.title.localizedCompare(rhs.song.title) == .orderedAscending
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    static func recommendations(
+        in library: MusicLibrary,
+        history: PlayHistoryStore = .shared,
+        limit: Int = 12,
+        now: Date = Date()
+    ) -> [MusicDiscoveryResult] {
+        let songs = library.visibleSongs.filteredPlayable()
+        guard !songs.isEmpty else { return [] }
+
+        let byID = Dictionary(uniqueKeysWithValues: songs.map { ($0.id, $0) })
+        let recentWeekIDs = Set(history.entries(in: .week, now: now).map(\.songID))
+        let recentMonthIDs = Set(history.entries(in: .month, now: now).map(\.songID))
+        let topArtists = Set(history.topArtists(in: .month, limit: 6).map { normalized($0.title) })
+
+        var seeds: [Song] = []
+        var seedIDs = Set<String>()
+        for item in history.topSongs(in: .year, limit: 12) {
+            if let song = byID[item.id], seedIDs.insert(song.id).inserted {
+                seeds.append(song)
+            }
+        }
+        for song in library.recentlyPlayedSongs(limit: 12) where seedIDs.insert(song.id).inserted {
+            seeds.append(song)
+        }
+
+        guard !seeds.isEmpty else {
+            return coldStartRecommendations(from: songs, excluding: [], limit: limit, now: now)
+        }
+
+        var results = songs.compactMap { candidate -> MusicDiscoveryResult? in
+            guard !recentWeekIDs.contains(candidate.id) else { return nil }
+
+            var best = Match(score: 0, reasons: [])
+            for seed in seeds where seed.id != candidate.id {
+                let match = similarity(between: seed, and: candidate)
+                if match.score > best.score { best = match }
+            }
+
+            var score = best.score
+            var reasons = best.reasons
+
+            if let artist = candidate.artistName, topArtists.contains(normalized(artist)) {
+                score += 18
+                append(.recentFavorite, to: &reasons)
+            }
+
+            if !recentMonthIDs.contains(candidate.id) {
+                score += 12
+                append(.notRecentlyPlayed, to: &reasons)
+            }
+
+            if now.timeIntervalSince(candidate.dateAdded) <= 30 * 24 * 60 * 60 {
+                score += 8
+                append(.newToLibrary, to: &reasons)
+            }
+
+            if candidate.coverArtFileName?.isEmpty == false {
+                score += 3
+            }
+
+            guard score >= 16 else { return nil }
+            if reasons.isEmpty { reasons = [.libraryPick] }
+            return MusicDiscoveryResult(song: candidate, score: score, reasons: reasons)
+        }
+
+        results.sort { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.song.dateAdded > rhs.song.dateAdded
+        }
+
+        var unique = uniqued(results).prefix(limit).map { $0 }
+        if unique.count < limit {
+            let excluded = Set(unique.map(\.song.id)).union(recentWeekIDs)
+            unique.append(contentsOf: coldStartRecommendations(
+                from: songs,
+                excluding: excluded,
+                limit: limit - unique.count,
+                now: now
+            ))
+        }
+        return unique
+    }
+
+    static func dailyRecommendations(
+        in library: MusicLibrary,
+        history: PlayHistoryStore = .shared,
+        limit: Int = 12,
+        now: Date = Date()
+    ) -> [MusicDiscoveryResult] {
+        recommendations(in: library, history: history, limit: max(limit * 3, limit), now: now)
+            .sorted { lhs, rhs in
+                let left = lhs.score + stableDailyNoise(lhs.song.id, now: now) * 8
+                let right = rhs.score + stableDailyNoise(rhs.song.id, now: now) * 8
+                if left != right { return left > right }
+                return lhs.song.title.localizedCompare(rhs.song.title) == .orderedAscending
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    static func songRadio(
+        from seed: Song,
+        in library: MusicLibrary,
+        history: PlayHistoryStore = .shared,
+        limit: Int = 48,
+        now: Date = Date()
+    ) -> [MusicDiscoveryResult] {
+        guard seed.isPlayable else { return [] }
+
+        var output = [
+            MusicDiscoveryResult(song: seed, score: .greatestFiniteMagnitude, reasons: [.libraryPick])
+        ]
+        var usedIDs: Set<String> = [seed.id]
+        var cursor = seed
+
+        while output.count < limit {
+            let similar = similarSongs(to: cursor, in: library, history: history, limit: 40)
+                .filter { !usedIDs.contains($0.song.id) }
+                .sorted { lhs, rhs in
+                    let left = lhs.score + stableDailyNoise(lhs.song.id, now: now) * 3
+                    let right = rhs.score + stableDailyNoise(rhs.song.id, now: now) * 3
+                    if left != right { return left > right }
+                    return lhs.song.title.localizedCompare(rhs.song.title) == .orderedAscending
+                }
+
+            if let next = similar.first {
+                output.append(next)
+                usedIDs.insert(next.song.id)
+                cursor = next.song
+                continue
+            }
+
+            guard let fallback = dailyRecommendations(in: library, history: history, limit: 24, now: now)
+                .first(where: { !usedIDs.contains($0.song.id) }) else {
+                break
+            }
+            output.append(fallback)
+            usedIDs.insert(fallback.song.id)
+            cursor = fallback.song
+        }
+
+        return output
+    }
+
+    private struct Match {
+        var score: Double
+        var reasons: [MusicDiscoveryReason]
+    }
+
+    private static func similarity(between seed: Song, and candidate: Song) -> Match {
+        var score: Double = 0
+        var reasons: [MusicDiscoveryReason] = []
+
+        if nonEmptyEqual(seed.albumID, candidate.albumID)
+            || nonEmptyEqual(seed.albumTitle, candidate.albumTitle) {
+            score += 46
+            append(.sameAlbum, to: &reasons)
+        }
+
+        if nonEmptyEqual(seed.artistID, candidate.artistID)
+            || nonEmptyEqual(seed.artistName, candidate.artistName) {
+            score += 40
+            append(.sameArtist, to: &reasons)
+        }
+
+        if nonEmptyEqual(seed.genre, candidate.genre) {
+            score += 30
+            append(.sameGenre, to: &reasons)
+        }
+
+        if let seedYear = seed.year, let candidateYear = candidate.year {
+            let delta = abs(seedYear - candidateYear)
+            if delta <= 2 {
+                score += 10
+                append(.sameEra, to: &reasons)
+            } else if delta <= 6 {
+                score += 5
+                append(.sameEra, to: &reasons)
+            }
+        }
+
+        if seed.duration > 30, candidate.duration > 30 {
+            let delta = abs(seed.duration - candidate.duration)
+            let ratio = delta / max(seed.duration, candidate.duration)
+            if ratio <= 0.12 {
+                score += 7
+                append(.similarDuration, to: &reasons)
+            } else if ratio <= 0.22 {
+                score += 3
+            }
+        }
+
+        if seed.sourceID == candidate.sourceID,
+           !parentFolder(seed.filePath).isEmpty,
+           parentFolder(seed.filePath) == parentFolder(candidate.filePath) {
+            score += 12
+            append(.sameFolder, to: &reasons)
+        }
+
+        return Match(score: score, reasons: reasons)
+    }
+
+    private static func coldStartRecommendations(
+        from songs: [Song],
+        excluding excludedIDs: Set<String>,
+        limit: Int,
+        now: Date
+    ) -> [MusicDiscoveryResult] {
+        songs
+            .filter { !excludedIDs.contains($0.id) }
+            .map { song -> MusicDiscoveryResult in
+                var score = song.coverArtFileName?.isEmpty == false ? 12.0 : 0.0
+                score += max(0, 10 - now.timeIntervalSince(song.dateAdded) / (7 * 24 * 60 * 60))
+                if song.artistName?.isEmpty == false { score += 3 }
+                if song.albumTitle?.isEmpty == false { score += 3 }
+                if song.genre?.isEmpty == false { score += 2 }
+                score += stableNoise(song.id)
+
+                let reason: MusicDiscoveryReason = now.timeIntervalSince(song.dateAdded) <= 30 * 24 * 60 * 60
+                    ? .newToLibrary
+                    : .libraryPick
+                return MusicDiscoveryResult(song: song, score: score, reasons: [reason])
+            }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.song.dateAdded > rhs.song.dateAdded
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    private static func uniqued(_ results: [MusicDiscoveryResult]) -> [MusicDiscoveryResult] {
+        var seen = Set<String>()
+        var output: [MusicDiscoveryResult] = []
+        for result in results where seen.insert(result.song.id).inserted {
+            output.append(result)
+        }
+        return output
+    }
+
+    private static func nonEmptyEqual(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs, let rhs else { return false }
+        let left = normalized(lhs)
+        return !left.isEmpty && left == normalized(rhs)
+    }
+
+    private static func parentFolder(_ path: String) -> String {
+        let folder = (path as NSString).deletingLastPathComponent
+        guard folder != "." else { return "" }
+        return normalized(folder)
+    }
+
+    private static func normalized(_ text: String) -> String {
+        text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func append(_ reason: MusicDiscoveryReason, to reasons: inout [MusicDiscoveryReason]) {
+        if !reasons.contains(reason) { reasons.append(reason) }
+    }
+
+    private static func stableNoise(_ id: String) -> Double {
+        let sum = id.unicodeScalars.reduce(0) { ($0 &+ Int($1.value)) % 997 }
+        return Double(sum) / 997.0
+    }
+
+    private static func stableDailyNoise(_ id: String, now: Date) -> Double {
+        let day = Calendar.current.ordinality(of: .day, in: .era, for: now) ?? 0
+        let mixed = "\(id):\(day)"
+        let sum = mixed.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 997 }
+        return Double(sum) / 997.0
+    }
+}
+
 /// Global in-memory music library shared across the app
 @MainActor
 @Observable
@@ -18,6 +619,16 @@ final class MusicLibrary {
     /// Deleted" recovery panel.
     var recentlyDeletedPlaylists: [Playlist] {
         allPlaylists
+            .filter { $0.isDeleted }
+            .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
+    }
+    /// 智能歌单 ── 跟普通 playlist 共用 soft-delete + snapshot 持久化模型。
+    /// 只存定义 (规则 / 排序 / 上限), 不缓存匹配结果 ── 每次 query 实时算,
+    /// 避免不同设备 PlayHistoryStore 不一致导致显示错位。
+    private(set) var allSmartPlaylists: [SmartPlaylist] = []
+    var smartPlaylists: [SmartPlaylist] { allSmartPlaylists.filter { !$0.isDeleted } }
+    var recentlyDeletedSmartPlaylists: [SmartPlaylist] {
+        allSmartPlaylists
             .filter { $0.isDeleted }
             .sorted { ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast) }
     }
@@ -69,12 +680,12 @@ final class MusicLibrary {
         return "\(prefix):\(song.filePath)"
     }
     private(set) var disabledSourceIDs: Set<String> = []
-    private(set) var activeSourceIDs: Set<String>?
 
     /// Cached filtered views — rebuilt only when songs/disabled state change
     private(set) var visibleSongs: [Song] = []
     private(set) var visibleAlbums: [Album] = []
     private(set) var visibleArtists: [Artist] = []
+    private(set) var searchRevision: Int = 0
 
     private let snapshotURL: URL
     private let encoder = JSONEncoder()
@@ -85,27 +696,26 @@ final class MusicLibrary {
         rebuildVisibleCache()
     }
 
-    func updateSourceVisibility(activeSourceIDs: Set<String>, disabledSourceIDs: Set<String>) {
-        self.activeSourceIDs = activeSourceIDs
-        self.disabledSourceIDs = disabledSourceIDs
-        rebuildVisibleCache()
-    }
-
     var songCount: Int { visibleSongs.count }
     var albumCount: Int { visibleAlbums.count }
     var artistCount: Int { visibleArtists.count }
 
     private func rebuildVisibleCache() {
-        visibleSongs = songs.filter { song in
-            let sourceExists = activeSourceIDs?.contains(song.sourceID) ?? true
-            return sourceExists && !disabledSourceIDs.contains(song.sourceID)
+        if disabledSourceIDs.isEmpty {
+            visibleSongs = songs
+            visibleAlbums = albums
+            visibleArtists = artists
+        } else {
+            visibleSongs = songs.filter { !disabledSourceIDs.contains($0.sourceID) }
+            let visibleAlbumIDs = Set(visibleSongs.compactMap(\.albumID))
+            visibleAlbums = albums.filter { visibleAlbumIDs.contains($0.id) }
+            let visibleArtistIDs = Set(visibleSongs.compactMap(\.artistID))
+            visibleArtists = artists.filter { visibleArtistIDs.contains($0.id) }
         }
+    }
 
-        let visibleAlbumIDs = Set(visibleSongs.compactMap(\.albumID))
-        visibleAlbums = albums.filter { visibleAlbumIDs.contains($0.id) }
-
-        let visibleArtistIDs = Set(visibleSongs.compactMap(\.artistID))
-        visibleArtists = artists.filter { visibleArtistIDs.contains($0.id) }
+    private func invalidateSearchCaches() {
+        searchRevision &+= 1
     }
 
     init(fileManager: FileManager = .default) {
@@ -121,8 +731,18 @@ final class MusicLibrary {
         loadSnapshot()
     }
 
-    /// Add songs from a scan result and rebuild albums/artists
-    func addSongs(_ newSongs: [Song]) {
+    /// Add songs from a scan result and rebuild albums/artists.
+    ///
+    /// `notifyRemovals` 控制是否在发现"affected source 里有歌不在 incoming 里"
+    /// 时发出 `primuseSongsRemoved` 通知。完整扫描结束 (completeScan) 应当
+    /// 传 true (远端真的少了一首歌, listener 应当清缓存); 中间 flush 应当
+    /// 传 false ── 因为中间 flush 拿到的是部分扫描结果, 还没扫到的歌会被
+    /// line 164 临时移除, 下次 flush 又补回, 这种"伪移除"不应触发缓存清理。
+    func addSongs(
+        _ newSongs: [Song],
+        affectedSourceIDs explicitAffectedSourceIDs: Set<String>? = nil,
+        notifyRemovals: Bool = true
+    ) {
         // Merge semantics:
         //
         // - Drop songs from the affected sources that the new scan didn't
@@ -144,10 +764,20 @@ final class MusicLibrary {
         // same upstream account mints a new mount.id but the path is
         // unchanged, and we want the tombstone to keep working. The
         // user can reverse the tombstone via `restoreDeletedSong`.
-        let filteredNewSongs = newSongs.filter { !deletedSongIdentities.contains(identityKey(for: $0)) }
+        // 给每首新歌就近填 albumID/artistID。这样后台 rebuildIndex 不需要回头
+        // mutate songs 数组, 1w+ 首库扫描时 main actor 不会被全表 ID 重赋值
+        // 卡到。计算成本 = SHA256(string) × 2 per song, 1w 首约 5ms 总。
+        let filteredNewSongs = newSongs
+            .filter { !deletedSongIdentities.contains(identityKey(for: $0)) }
+            .map { song -> Song in
+                var s = song
+                MusicLibrary.fillDerivedIDs(&s)
+                return s
+            }
         let incomingIDs = Set(filteredNewSongs.map(\.id))
-        let sourceIDs = Set(filteredNewSongs.map(\.sourceID))
+        let sourceIDs = explicitAffectedSourceIDs ?? Set(filteredNewSongs.map(\.sourceID))
 
+        let removedSongs = songs.filter { sourceIDs.contains($0.sourceID) && !incomingIDs.contains($0.id) }
         songs.removeAll { sourceIDs.contains($0.sourceID) && !incomingIDs.contains($0.id) }
 
         var existingIndexByID: [String: Int] = [:]
@@ -228,6 +858,7 @@ final class MusicLibrary {
         // Newly-added songs may resolve identities that were stashed when
         // a CloudKit playlist/history record arrived before the local scan.
         flushPendingIdentities()
+        invalidateSearchCaches()
         rebuildIndex()
         persistSnapshot()
 
@@ -236,6 +867,13 @@ final class MusicLibrary {
                 name: .primuseSongContentChanged,
                 object: nil,
                 userInfo: ["songs": contentChanged]
+            )
+        }
+        if notifyRemovals && !removedSongs.isEmpty {
+            NotificationCenter.default.post(
+                name: .primuseSongsRemoved,
+                object: nil,
+                userInfo: ["songs": removedSongs]
             )
         }
     }
@@ -252,7 +890,28 @@ final class MusicLibrary {
         cleanPlaybackHistoryEntries()
         rebuildIndex()
         persistSnapshot()
+        postSongsRemoved([song])
         return songs.filter { $0.sourceID == song.sourceID }.count
+    }
+
+    /// Batch delete. Calling `deleteSong` in a 3000-song loop did
+    /// `removeAll`/clean*/`rebuildIndex` once per song — O(N) each, so
+    /// O(N×K) on the main actor, plus K Observable mutations triggering
+    /// view rebuilds; on a 10K-song library with 3K duplicates the
+    /// watchdog killed the app. Doing the bulk operations once amortizes
+    /// the work to a single O(N) pass.
+    func deleteSongs(_ songsToDelete: [Song]) {
+        guard !songsToDelete.isEmpty else { return }
+        let idsToDelete = Set(songsToDelete.map(\.id))
+        for song in songsToDelete {
+            deletedSongIdentities.insert(identityKey(for: song))
+        }
+        songs.removeAll { idsToDelete.contains($0.id) }
+        cleanPlaylistEntries()
+        cleanPlaybackHistoryEntries()
+        rebuildIndex()
+        persistSnapshot()
+        postSongsRemoved(songsToDelete)
     }
 
     /// Reverse a previous `deleteSong` so the next scan can re-add the
@@ -265,23 +924,19 @@ final class MusicLibrary {
         persistSnapshot()
     }
 
+    private func postSongsRemoved(_ songs: [Song]) {
+        guard songs.isEmpty == false else { return }
+        NotificationCenter.default.post(
+            name: .primuseSongsRemoved,
+            object: nil,
+            userInfo: ["songs": songs]
+        )
+    }
+
     /// Remove all songs for a given source
     func removeSongsForSource(_ sourceID: String) {
         songs.removeAll { $0.sourceID == sourceID }
-        cleanPlaylistEntries()
-        cleanPlaybackHistoryEntries()
-        rebuildIndex()
-        persistSnapshot()
-    }
-
-    /// Remove cached song/index data whose source no longer exists.
-    func removeSongsExcludingSources(_ activeSourceIDs: Set<String>) {
-        let oldCount = songs.count
-        songs.removeAll { !activeSourceIDs.contains($0.sourceID) }
-        guard songs.count != oldCount else {
-            rebuildVisibleCache()
-            return
-        }
+        invalidateSearchCaches()
         cleanPlaylistEntries()
         cleanPlaybackHistoryEntries()
         rebuildIndex()
@@ -297,15 +952,37 @@ final class MusicLibrary {
         songs.first(where: { $0.id == id })
     }
 
-    /// Search songs by query
+    /// Backward-compatible synchronous search. Keep it metadata-only so older
+    /// call sites never perform disk-backed lyrics scans on the main actor.
+    /// The search tab uses `LibrarySearchWorker` in a detached task when it
+    /// wants lyrics matches.
+    func searchResults(query: String, limit: Int = 120) -> [LibrarySearchResult] {
+        LibrarySearchWorker.compute(
+            query: query,
+            songs: visibleSongs,
+            albums: [],
+            cache: LibrarySearchCache(),
+            includeLyrics: false,
+            songLimit: limit,
+            albumLimit: 0
+        ).songResults
+    }
+
+    /// Backward-compatible song-only search API.
     func search(query: String) -> [Song] {
-        guard !query.isEmpty else { return [] }
-        let q = query.lowercased()
-        return visibleSongs.filter {
-            $0.title.lowercased().contains(q)
-            || ($0.artistName?.lowercased().contains(q) ?? false)
-            || ($0.albumTitle?.lowercased().contains(q) ?? false)
-        }
+        searchResults(query: query).map(\.song)
+    }
+
+    func searchAlbums(query: String, limit: Int = 10) -> [Album] {
+        LibrarySearchWorker.compute(
+            query: query,
+            songs: [],
+            albums: visibleAlbums,
+            cache: LibrarySearchCache(),
+            includeLyrics: false,
+            songLimit: 0,
+            albumLimit: limit
+        ).albumResults
     }
 
     func songs(forAlbum albumID: String) -> [Song] {
@@ -408,6 +1085,61 @@ final class MusicLibrary {
         }
     }
 
+    // MARK: - Smart Playlists
+
+    /// 创建 / 更新一份智能歌单。Caller 自己构造 SmartPlaylist (含 rules), 这里
+    /// 只负责存进 allSmartPlaylists 并刷新 updatedAt + 触发同步。
+    func saveSmartPlaylist(_ smart: SmartPlaylist) {
+        var stored = smart
+        stored.updatedAt = Date()
+        if let idx = allSmartPlaylists.firstIndex(where: { $0.id == smart.id }) {
+            allSmartPlaylists[idx] = stored
+        } else {
+            allSmartPlaylists.append(stored)
+        }
+        sortSmartPlaylists()
+        persistSnapshot()
+        notifySmartPlaylistsChanged([stored.id])
+    }
+
+    /// Soft-delete: 跟 Playlist 一致, mark deleted 并保留 30 天给 CloudKit
+    /// 多设备收敛时间窗。
+    func deleteSmartPlaylist(id: String) {
+        guard let idx = allSmartPlaylists.firstIndex(where: { $0.id == id }) else { return }
+        allSmartPlaylists[idx].isDeleted = true
+        allSmartPlaylists[idx].deletedAt = Date()
+        allSmartPlaylists[idx].updatedAt = Date()
+        persistSnapshot()
+        notifySmartPlaylistsChanged([id])
+    }
+
+    func restoreSmartPlaylist(id: String) {
+        guard let idx = allSmartPlaylists.firstIndex(where: { $0.id == id }) else { return }
+        allSmartPlaylists[idx].isDeleted = false
+        allSmartPlaylists[idx].deletedAt = nil
+        allSmartPlaylists[idx].updatedAt = Date()
+        persistSnapshot()
+        notifySmartPlaylistsChanged([id])
+    }
+
+    func permanentlyDeleteSmartPlaylist(id: String) {
+        allSmartPlaylists.removeAll { $0.id == id }
+        persistSnapshot()
+        notifySmartPlaylistDeleted(id)
+    }
+
+    func pruneSmartPlaylists(deletedBefore threshold: Date) {
+        let toPrune = allSmartPlaylists.filter { $0.isDeleted && ($0.deletedAt ?? .distantFuture) < threshold }
+        guard !toPrune.isEmpty else { return }
+        for smart in toPrune {
+            permanentlyDeleteSmartPlaylist(id: smart.id)
+        }
+    }
+
+    private func sortSmartPlaylists() {
+        allSmartPlaylists.sort { $0.updatedAt > $1.updatedAt }
+    }
+
     func add(songID: String, toPlaylist playlistID: String) {
         guard songs.contains(where: { $0.id == songID }),
               let existingIndex = allPlaylists.firstIndex(where: { $0.id == playlistID }) else {
@@ -478,18 +1210,8 @@ final class MusicLibrary {
         identities: [SongIdentity]? = nil
     ) {
         if let index = allPlaylists.firstIndex(where: { $0.id == playlist.id }) {
-            // Tombstone wins: 本地已软删除的歌单不允许被远端 alive 版本
-            // 复活,跟 SourcesStore.upsertFromRemote 保持同样的同步语义。
-            // 否则在另一台设备改动同名 playlist 时,modifiedAt 永远比这边
-            // 删除时刻新 → 反向覆盖,删了又拉回来。
-            let existing = allPlaylists[index]
-            if existing.isDeleted && !playlist.isDeleted {
-                return
-            }
             allPlaylists[index] = playlist
         } else {
-            // 远端拉到的就是 tombstone? 那本地也不要再创建出来了。
-            if playlist.isDeleted { return }
             allPlaylists.append(playlist)
         }
 
@@ -516,14 +1238,8 @@ final class MusicLibrary {
         additionalIdentities: [SongIdentity]
     ) {
         if let index = allPlaylists.firstIndex(where: { $0.id == playlist.id }) {
-            // 同 applyRemotePlaylist: 本地墓碑不允许被远端 alive 版本复活。
-            let existing = allPlaylists[index]
-            if existing.isDeleted && !playlist.isDeleted {
-                return
-            }
             allPlaylists[index] = playlist
         } else {
-            if playlist.isDeleted { return }
             allPlaylists.append(playlist)
         }
 
@@ -731,6 +1447,41 @@ final class MusicLibrary {
         )
     }
 
+    private func notifySmartPlaylistsChanged(_ ids: [String]) {
+        NotificationCenter.default.post(
+            name: .primuseSmartPlaylistsDidChange,
+            object: nil,
+            userInfo: ["ids": ids]
+        )
+    }
+
+    private func notifySmartPlaylistDeleted(_ id: String) {
+        NotificationCenter.default.post(
+            name: .primuseSmartPlaylistDidDelete,
+            object: nil,
+            userInfo: ["id": id]
+        )
+    }
+
+    /// 删除来自远端 (CloudKit) 的智能歌单。不触发 changed notification 避免
+    /// 回声同步。
+    func deleteSmartPlaylistFromRemote(id: String) {
+        allSmartPlaylists.removeAll { $0.id == id }
+        persistSnapshot()
+    }
+
+    /// 应用来自远端 (CloudKit) 的智能歌单更新。比 Playlist 简单很多 ── 没有
+    /// songID 解析问题, 因为 SmartPlaylist 只存规则定义不存歌曲列表。
+    func applyRemoteSmartPlaylist(_ smart: SmartPlaylist) {
+        if let idx = allSmartPlaylists.firstIndex(where: { $0.id == smart.id }) {
+            allSmartPlaylists[idx] = smart
+        } else {
+            allSmartPlaylists.append(smart)
+        }
+        sortSmartPlaylists()
+        persistSnapshot()
+    }
+
     /// Most recently replaced song — observable so consumers (e.g. player) can sync.
     /// Use songReplacementToken for onChange triggers (it changes on every replace, even same song).
     private(set) var lastReplacedSong: Song?
@@ -744,10 +1495,13 @@ final class MusicLibrary {
 
     func replaceSong(_ updatedSong: Song) {
         guard let index = songs.firstIndex(where: { $0.id == updatedSong.id }) else { return }
-        songs[index] = updatedSong
-        lastReplacedSong = updatedSong
-        lastReplacedSongIDs = [updatedSong.id]
+        var s = updatedSong
+        MusicLibrary.fillDerivedIDs(&s)
+        songs[index] = s
+        lastReplacedSong = s
+        lastReplacedSongIDs = [s.id]
         songReplacementToken = UUID()
+        invalidateSearchCaches()
         rebuildIndex()
         cleanPlaylistEntries()
         cleanPlaybackHistoryEntries()
@@ -777,15 +1531,18 @@ final class MusicLibrary {
                 missedIDs.append(updated.id)
                 continue
             }
-            songs[index] = updated
-            lastApplied = updated
-            appliedIDs.insert(updated.id)
+            var s = updated
+            MusicLibrary.fillDerivedIDs(&s)
+            songs[index] = s
+            lastApplied = s
+            appliedIDs.insert(s.id)
         }
         plog("📚 replaceSongs: requested=\(updatedSongs.count) applied=\(appliedIDs.count) missed=\(missedIDs.count) librarySongs=\(songs.count) missedSampleID=\(missedIDs.first ?? "-") sampleLibID=\(songs.first?.id ?? "-")")
         guard let lastApplied else { return }
         lastReplacedSong = lastApplied
         lastReplacedSongIDs = appliedIDs
         songReplacementToken = UUID()
+        invalidateSearchCaches()
         rebuildIndex()
         cleanPlaylistEntries()
         cleanPlaybackHistoryEntries()
@@ -798,67 +1555,46 @@ final class MusicLibrary {
 
     // MARK: - Index Rebuild
 
+    /// 后台重建 albums / artists 集合。songs 上的 albumID / artistID 在
+    /// addSongs / replaceSong 同步路径里就近填好 (`fillDerivedIDs`), rebuildIndex
+    /// 不再 mutate songs ── 它只 derive 集合, 可以扔到背景 executor 算, 算完
+    /// hop 回 main actor 替换。
+    ///
+    /// 1w+ 首库 scale 时 main actor 几乎不阻塞: 之前 1000 次同步 rebuildIndex
+    /// 累计 main thread 阻塞 ~10s, 现在 0s (后台 thread 算, main 只做数组替换)。
+    ///
+    /// generation 检查防止 stale 结果覆盖最新数据 ── 短时间多次 rebuildIndex
+    /// 时只有最后一次的结果会 apply。
+    private var rebuildIndexTask: Task<Void, Never>?
+    private var rebuildIndexGeneration: Int = 0
+
     private func rebuildIndex() {
-        // Build albums — only group songs that have an actual album title
-        // Songs without album title get no albumID (treated as singles)
-        let unknownArtist = String(localized: "unknown_artist")
-        let songsWithAlbum = songs.filter { $0.albumTitle != nil && !$0.albumTitle!.isEmpty }
-        let albumGroups = Dictionary(grouping: songsWithAlbum) { song -> String in
-            let artist = song.artistName ?? unknownArtist
-            let album = song.albumTitle!
-            return "\(artist)\0\(album)"
-        }
+        rebuildIndexGeneration &+= 1
+        let myGen = rebuildIndexGeneration
+        let snapshot = songs
 
-        albums = albumGroups.map { key, songs in
-            let parts = key.split(separator: "\0", maxSplits: 1)
-            let artistName = parts.count > 0 ? String(parts[0]) : unknownArtist
-            let albumTitle = parts.count > 1 ? String(parts[1]) : unknownArtist
-            let id = hashID("\(artistName):\(albumTitle)")
-
-            let artistID = hashID(artistName.lowercased())
-            return Album(
-                id: id,
-                title: albumTitle,
-                artistID: artistID,
-                artistName: artistName,
-                year: songs.first?.year,
-                genre: songs.first?.genre,
-                songCount: songs.count,
-                totalDuration: songs.reduce(0) { $0 + $1.duration.sanitizedDuration },
-                sourceID: songs.first?.sourceID
-            )
-        }.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
-
-        // Update albumID on songs — nil for songs without album
-        for i in songs.indices {
-            if let album = songs[i].albumTitle, !album.isEmpty {
-                let artist = songs[i].artistName ?? unknownArtist
-                songs[i].albumID = hashID("\(artist):\(album)")
-            } else {
-                songs[i].albumID = nil
+        rebuildIndexTask?.cancel()
+        rebuildIndexTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let result = MusicLibrary.computeAlbumsAndArtists(songs: snapshot)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                // generation 校验: 期间又有新的 rebuildIndex 调度过, 当前结果
+                // 已经 stale, 丢弃。
+                guard self.rebuildIndexGeneration == myGen else { return }
+                self.albums = result.albums
+                self.artists = result.artists
+                self.rebuildVisibleCache()
             }
         }
+    }
 
-        // Build artists
-        let artistGroups = Dictionary(grouping: songs) { $0.artistName ?? unknownArtist }
-
-        artists = artistGroups.map { name, songs in
-            let id = hashID(name.lowercased())
-            let albumCount = Set(songs.compactMap(\.albumTitle)).count
-            return Artist(
-                id: id,
-                name: name,
-                albumCount: albumCount,
-                songCount: songs.count
-            )
-        }.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
-
-        // Update artistID on songs
-        for i in songs.indices {
-            let name = songs[i].artistName ?? unknownArtist
-            songs[i].artistID = hashID(name.lowercased())
-        }
-
+    /// 启动 / 测试场景下需要"调用即生效"的同步重建。比异步版本贵 (会卡
+    /// main actor 一下), 但只在 init / migration 等 UI 还没起来的路径用。
+    private func rebuildIndexSync() {
+        let result = MusicLibrary.computeAlbumsAndArtists(songs: songs)
+        albums = result.albums
+        artists = result.artists
         rebuildVisibleCache()
     }
 
@@ -869,7 +1605,9 @@ final class MusicLibrary {
         }
 
         songs = snapshot.songs
+        let repairedLegacyTextCount = repairLegacyChineseMetadataTextInSnapshot()
         allPlaylists = snapshot.playlists
+        allSmartPlaylists = snapshot.smartPlaylists ?? []
         playlistSongIDs = snapshot.playlistSongIDs ?? [:]
         recentPlaybackSongIDs = snapshot.recentPlaybackSongIDs ?? []
         // Old `deletedSongIDs` field stored mount-UUID-derived song.id
@@ -884,7 +1622,57 @@ final class MusicLibrary {
         // previous launch (e.g. user added the right cloud source between
         // sessions). Try resolving them once on load.
         flushPendingIdentities()
-        rebuildIndex()
+        // 启动时给所有歌就近填 albumID/artistID, 之后 mutation 路径自维护。
+        // 老的 snapshot 里如果 ID 已存在, 重填一遍也无妨 (deterministic hash)。
+        for i in songs.indices {
+            MusicLibrary.fillDerivedIDs(&songs[i])
+        }
+        // init 阶段直接同步 rebuild ── UI 还没起来, 不需要走异步 schedule。
+        rebuildIndexSync()
+        if repairedLegacyTextCount > 0 {
+            plog("📚 repaired legacy Chinese metadata text for \(repairedLegacyTextCount) song(s)")
+            persistNow()
+        }
+    }
+
+    private func repairLegacyChineseMetadataTextInSnapshot() -> Int {
+        var repairedCount = 0
+
+        for index in songs.indices {
+            var song = songs[index]
+            if Self.repairLegacyChineseMetadataText(in: &song) {
+                MusicLibrary.fillDerivedIDs(&song)
+                songs[index] = song
+                repairedCount += 1
+            }
+        }
+
+        return repairedCount
+    }
+
+    private static func repairLegacyChineseMetadataText(in song: inout Song) -> Bool {
+        var changed = false
+        changed = repairLegacyChineseText(&song.title) || changed
+        changed = repairLegacyChineseText(&song.artistName) || changed
+        changed = repairLegacyChineseText(&song.albumTitle) || changed
+        changed = repairLegacyChineseText(&song.genre) || changed
+        return changed
+    }
+
+    private static func repairLegacyChineseText(_ text: inout String) -> Bool {
+        let repaired = FileMetadataReader.repairLegacyChineseMojibake(text)
+        guard repaired != text else { return false }
+        text = repaired
+        return true
+    }
+
+    private static func repairLegacyChineseText(_ text: inout String?) -> Bool {
+        guard var value = text else { return false }
+        let repaired = FileMetadataReader.repairLegacyChineseMojibake(value)
+        guard repaired != value else { return false }
+        value = repaired
+        text = value
+        return true
     }
 
     private var persistTask: Task<Void, Never>?
@@ -903,6 +1691,7 @@ final class MusicLibrary {
         let snapshot = Snapshot(
             songs: songs,
             playlists: allPlaylists,
+            smartPlaylists: allSmartPlaylists.isEmpty ? nil : allSmartPlaylists,
             playlistSongIDs: playlistSongIDs,
             recentPlaybackSongIDs: recentPlaybackSongIDs,
             deletedSongIdentities: Array(deletedSongIdentities),
@@ -937,14 +1726,76 @@ final class MusicLibrary {
         recentPlaybackSongIDs = recentPlaybackSongIDs.filter { validSongIDs.contains($0) }
     }
 
-    private func hashID(_ input: String) -> String {
+    /// 纯函数, 可跨 actor 调用 ── rebuildIndex 后台化时 nonisolated
+    /// computeAlbumsAndArtists 也要用。
+    nonisolated static func hashID(_ input: String) -> String {
         let hash = SHA256.hash(data: Data(input.utf8))
         return hash.prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// 给单首歌就近填好 albumID / artistID, 不依赖整库 rebuildIndex。这样
+    /// addSongs / replaceSong 同步路径里, song 加入 library 时 IDs 立刻
+    /// 可读, 后台 rebuildIndex 只负责 derive albums/artists 集合。
+    nonisolated static func fillDerivedIDs(_ song: inout Song) {
+        let unknownArtist = String(localized: "unknown_artist")
+        let artist = song.artistName ?? unknownArtist
+        song.artistID = hashID(artist.lowercased())
+        if let album = song.albumTitle, !album.isEmpty {
+            song.albumID = hashID("\(artist):\(album)")
+        } else {
+            song.albumID = nil
+        }
+    }
+
+    /// 后台 derive albums / artists 集合。纯函数 ── 给定 songs 数组, 算出
+    /// 派生集合, 不操作 self。
+    nonisolated static func computeAlbumsAndArtists(songs: [Song]) -> (albums: [Album], artists: [Artist]) {
+        let unknownArtist = String(localized: "unknown_artist")
+
+        // Albums ── 只 group 有 albumTitle 的歌曲
+        let songsWithAlbum = songs.filter { $0.albumTitle != nil && !$0.albumTitle!.isEmpty }
+        let albumGroups = Dictionary(grouping: songsWithAlbum) { song -> String in
+            let artist = song.artistName ?? unknownArtist
+            let album = song.albumTitle!
+            return "\(artist)\0\(album)"
+        }
+        let albums = albumGroups.map { key, songs -> Album in
+            let parts = key.split(separator: "\0", maxSplits: 1)
+            let artistName = parts.count > 0 ? String(parts[0]) : unknownArtist
+            let albumTitle = parts.count > 1 ? String(parts[1]) : unknownArtist
+            return Album(
+                id: hashID("\(artistName):\(albumTitle)"),
+                title: albumTitle,
+                artistID: hashID(artistName.lowercased()),
+                artistName: artistName,
+                year: songs.first?.year,
+                genre: songs.first?.genre,
+                songCount: songs.count,
+                totalDuration: songs.reduce(0) { $0 + $1.duration.sanitizedDuration },
+                sourceID: songs.first?.sourceID
+            )
+        }.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+
+        // Artists ── 全 songs 都参与 group
+        let artistGroups = Dictionary(grouping: songs) { $0.artistName ?? unknownArtist }
+        let artists = artistGroups.map { name, songs -> Artist in
+            let albumCount = Set(songs.compactMap(\.albumTitle)).count
+            return Artist(
+                id: hashID(name.lowercased()),
+                name: name,
+                albumCount: albumCount,
+                songCount: songs.count
+            )
+        }.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+
+        return (albums, artists)
     }
 
     private struct Snapshot: Codable {
         var songs: [Song]
         var playlists: [Playlist]
+        /// 智能歌单。Optional 让旧 snapshot decode 不报错。
+        var smartPlaylists: [SmartPlaylist]?
         var playlistSongIDs: [String: [String]]?
         var recentPlaybackSongIDs: [String]?
         /// Account-or-source-prefixed identity keys ("<id>:<filePath>").
@@ -961,6 +1812,8 @@ final class MusicLibrary {
 extension Notification.Name {
     static let primusePlaylistsDidChange = Notification.Name("primuse.playlistsDidChange")
     static let primusePlaylistDidDelete = Notification.Name("primuse.playlistDidDelete")
+    static let primuseSmartPlaylistsDidChange = Notification.Name("primuse.smartPlaylistsDidChange")
+    static let primuseSmartPlaylistDidDelete = Notification.Name("primuse.smartPlaylistDidDelete")
     static let primusePlaybackHistoryDidChange = Notification.Name("primuse.playbackHistoryDidChange")
     static let primuseSourcesDidChange = Notification.Name("primuse.sourcesDidChange")
     static let primuseSourceDidDelete = Notification.Name("primuse.sourceDidDelete")
@@ -972,10 +1825,10 @@ extension Notification.Name {
     /// listeners (SourceManager, MetadataBackfillService) drop stale audio
     /// caches and clear failed-backfill marks for these IDs.
     static let primuseSongContentChanged = Notification.Name("primuse.songContentChanged")
-    /// Posted when lyrics for a song are replaced by a user action such as
-    /// manual scraping. Current playback surfaces should reload their in-memory
-    /// lyric state because the song id usually stays the same.
-    static let primuseLyricsDidChange = Notification.Name("primuse.lyricsDidChange")
+    /// Posted when songs leave the library because the user deleted them or a
+    /// complete re-scan no longer sees their source files. `userInfo["songs"]`
+    /// is the removed `[Song]`; listeners drop audio/artwork/lyrics caches.
+    static let primuseSongsRemoved = Notification.Name("primuse.songsRemoved")
     /// Posted in addition to `primuseSourcesDidChange` when a source is
     /// soft-deleted locally. CloudKitSyncService listens to this and
     /// enqueues a real `deleteRecord` instead of pushing the soft-delete

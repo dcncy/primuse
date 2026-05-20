@@ -1,27 +1,23 @@
-import Foundation
-import PrimuseKit
-#if os(iOS)
 import ActivityKit
-#endif
-#if canImport(UIKit)
+import Foundation
 import UIKit
-#endif
+import PrimuseKit
 
 @MainActor
 @Observable
 final class LiveActivityManager {
-#if os(iOS)
     private var currentActivity: Activity<PlaybackActivityAttributes>?
-#endif
 
     /// App Group shared container URL
     private static let containerURL: URL? = {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: PrimuseConstants.appGroupIdentifier)
     }()
 
+    // MARK: - Cover directory (via MetadataAssetStore)
+
+
     // MARK: - Public API
 
-#if os(iOS)
     func startActivity(song: Song, isPlaying: Bool) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
@@ -158,11 +154,4 @@ final class LiveActivityManager {
         let fileURL = containerURL.appendingPathComponent("live_activity_cover.png")
         try? FileManager.default.removeItem(at: fileURL)
     }
-#else
-    // macOS has no ActivityKit / Live Activities — keep the call surface
-    // so player code can fire-and-forget without `#if` at every site.
-    func startActivity(song: Song, isPlaying: Bool) {}
-    func updateActivity(isPlaying: Bool, elapsedTime: TimeInterval, nextSong: String? = nil) async {}
-    func endActivity() async {}
-#endif
 }

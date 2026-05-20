@@ -1,0 +1,85 @@
+// French — high-priority strings. Keys not present here fall back to English.
+// Native-speaker review recommended before App Store submission.
+
+// Tabs / Sections
+"home_title" = "Accueil";
+"library_title" = "Bibliothèque";
+"search_title" = "Rechercher";
+"settings_title" = "Réglages";
+"tab_songs" = "Morceaux";
+"tab_albums" = "Albums";
+"tab_artists" = "Artistes";
+"tab_playlists" = "Listes de lecture";
+"recently_added" = "Ajoutés récemment";
+"see_all" = "Tout afficher";
+
+// Greetings
+"greeting_morning" = "Bonjour";
+"greeting_afternoon" = "Bon après-midi";
+"greeting_evening" = "Bonsoir";
+"greeting_night" = "Bonne nuit";
+
+// Common actions
+"cancel" = "Annuler";
+"done" = "Terminé";
+"save" = "Enregistrer";
+"skip" = "Passer";
+"delete" = "Supprimer";
+"share" = "Partager";
+"later" = "Plus tard";
+
+// NowPlaying / Player
+"add_to_playlist" = "Ajouter à la liste de lecture";
+"scrape_song" = "Récupérer les métadonnées";
+"song_info" = "Informations du morceau";
+"delete_song" = "Supprimer le morceau";
+"queue" = "File d'attente";
+
+// Onboarding
+"onboarding_welcome_title" = "Votre musique, vos serveurs";
+"onboarding_welcome_subtitle" = "Primuse lit la musique depuis votre NAS, vos services cloud et votre réseau domestique, sans envoyer aucun fichier à qui que ce soit.";
+"onboarding_sources_title" = "Connectez n'importe quelle source";
+"onboarding_sources_nas" = "Synology, QNAP, Ugreen et partages SMB / NFS";
+"onboarding_sources_cloud" = "Baidu Pan, OneDrive, Google Drive, Dropbox";
+"onboarding_sources_webdav" = "WebDAV, FTP, SFTP — même protégés par mot de passe";
+"onboarding_sources_dlna" = "Serveurs multimédias UPnP / DLNA de votre réseau";
+"onboarding_sources_footer" = "Vous pouvez en ajouter autant que vous voulez, à tout moment.";
+"onboarding_privacy_title" = "Entièrement à vous";
+"onboarding_privacy_no_tracking" = "Aucune analyse, aucune publicité, aucun traceur tiers";
+"onboarding_privacy_icloud" = "Les réglages de la bibliothèque sont synchronisés uniquement via votre iCloud";
+"onboarding_privacy_local" = "Les fichiers audio ne quittent jamais vos sources";
+"onboarding_next" = "Continuer";
+"onboarding_add_first_source" = "Ajouter votre première source";
+"onboarding_later" = "Peut-être plus tard";
+
+// Tag Editor
+"tag_editor_menu" = "Modifier les tags";
+"tag_editor_title_navigation" = "Modifier les tags";
+"tag_editor_basic_section" = "Informations de base";
+"tag_editor_extra_section" = "Détails";
+"tag_editor_title" = "Titre";
+"tag_editor_artist" = "Artiste";
+"tag_editor_album" = "Album";
+"tag_editor_genre" = "Genre";
+"tag_editor_year" = "Année";
+"tag_editor_track" = "N° de piste";
+"tag_editor_disc" = "N° de disque";
+"tag_editor_reset" = "Rétablir l'original";
+"tag_editor_reset_confirm" = "Abandonner vos modifications ?";
+"tag_editor_footer" = "Les modifications restent dans Primuse et sont synchronisées via iCloud. Le fichier source n'est pas modifié.";
+
+// VoiceOver / a11y
+"a11y_shuffle" = "Aléatoire";
+"a11y_repeat" = "Répéter";
+"a11y_button_generic" = "Bouton";
+"a11y_value_on" = "Activé";
+"a11y_value_off" = "Désactivé";
+"a11y_play" = "Lecture";
+"a11y_pause" = "Pause";
+"a11y_previous_track" = "Morceau précédent";
+"a11y_next_track" = "Morceau suivant";
+"a11y_queue" = "File de lecture";
+"a11y_open_lyrics" = "Afficher les paroles";
+"a11y_close_lyrics" = "Masquer les paroles";
+"a11y_favorite_add" = "Ajouter à la liste de lecture";
+"a11y_more_actions" = "Plus d'actions";

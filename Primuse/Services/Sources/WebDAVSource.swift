@@ -135,6 +135,21 @@ actor WebDAVSource: MusicSourceConnector {
         }
     }
 
+    func deleteFile(at path: String) async throws {
+        guard let provider else { throw SourceError.connectionFailed("Not connected") }
+
+        let providerPath = providerRelativePath(path)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            provider.removeItem(path: providerPath) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
     func streamData(for path: String) async throws -> AsyncThrowingStream<Data, Error> {
         let localURL = try await localURL(for: path)
         return AsyncThrowingStream { continuation in

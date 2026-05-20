@@ -1,44 +1,9 @@
-// MARK: - 本地文件夹源（macOS）
-"local_folder" = "本地文件夹";
-"choose_folder" = "选择文件夹";
-"no_folder_selected" = "未选择文件夹";
-"apple_music_library_hint" = "保存后将请求访问您的 Apple Music / iTunes 资料库，并将其中的本机音乐导入为播放源。";
-
-// MARK: - 系统通知
-"notify_long_tasks" = "长任务完成时通知";
-"notify_long_tasks_hint" = "刮削、整库重刮等耗时任务完成后弹出系统通知。错误通知不受此开关影响。";
-"notify_scrape_missing_done_title" = "元数据补全完成";
-"notify_rescrape_done_title" = "整库重新刮削完成";
-"notify_scrape_done_body" = "已更新 %d 首歌曲的元数据";
-"notify_scrape_done_body_with_failures" = "已更新 %d 首 · %d 首失败";
-"notify_scan_failed_title" = "扫描失败";
-"notify_scan_failed_body" = "音乐源 \"%@\" 扫描失败：%@";
-"notify_cloud_sync_failed_title" = "iCloud 同步失败";
-"icloud_quota_exceeded" = "iCloud 存储空间不足，请清理后重试。";
-
-// MARK: - 菜单栏 / 桌面歌词（macOS）
-"open_main_window" = "打开主窗口";
-"quit_app" = "退出";
-"show_desktop_lyrics" = "显示桌面歌词";
-"hide_desktop_lyrics" = "隐藏桌面歌词";
-"close" = "关闭";
-"trusted_domains_desc" = "下列域名在连接时将跳过 SSL 证书校验。";
-"domain" = "域名";
-"metadata_scraping_desc" = "从在线音乐数据库自动补全歌曲的元数据、封面与歌词。";
-"reset" = "重置";
-"home_empty_mac_hint" = "前往「设置 → 音乐源管理」连接 NAS、WebDAV、本地文件夹或网盘。";
-"sources_count_format" = "共 %d 个";
-"songs_count_inline" = "%d 首";
-"keychain_sync_hint_title" = "音乐源密码通过 iCloud 钥匙串单独同步";
-"keychain_sync_hint_body" = "为安全起见，源密码不随源信息一起同步，而是走 iCloud 钥匙串。如果新设备首次连接时仍提示输密码，请确认「系统设置 → Apple ID → iCloud → 钥匙串」已开启，并等待几分钟同步。";
-"open_keychain_settings" = "打开钥匙串设置";
-
 // MARK: - 标签栏
 "library_title" = "资料库";
 "sources_title" = "音乐源";
 "settings_title" = "设置";
 "search_title" = "搜索";
-"search_prompt" = "歌曲、艺术家、专辑";
+"search_prompt" = "歌曲、艺术家、专辑、歌词";
 
 // MARK: - 问候语
 "greeting_morning" = "早上好";
@@ -173,13 +138,12 @@
 "cat_local" = "本地";
 "edit_source" = "编辑音乐源";
 "edit" = "编辑";
-"export" = "导出";
 "delete" = "删除";
 "disable" = "禁用";
 "enable" = "启用";
 "disabled" = "已禁用";
 "delete_song" = "从资料库删除";
-"delete_song_message" = "歌曲、封面和歌词缓存将被同步删除";
+"delete_song_message" = "支持删除的音乐源会同步删除源歌曲；同名封面/歌词没有其他歌曲使用时才会删除，并清除本地缓存。";
 "scan" = "扫描";
 "password_edit_hint" = "留空则保持当前密码不变";
 "anonymous_login_hint" = "账号和密码留空以匿名方式连接";
@@ -286,11 +250,16 @@
 "seconds" = "秒";
 "replay_gain" = "回放增益";
 "replay_gain_desc" = "根据音频文件中嵌入的 ReplayGain 标签自动调整音量。";
+"spatial_audio" = "空间音频";
+"spatial_audio_desc" = "通过 Apple 的空间音频渲染器，把播放声场放在前方的虚拟舞台中。";
+"spatial_head_tracking" = "头部追踪";
+"spatial_head_tracking_desc" = "使用支持的 AirPods 时，转动头部也能保持声场锚定。";
 "rg_mode" = "模式";
 "rg_mode_track" = "单曲";
 "rg_mode_album" = "专辑";
 "audio_cache_enabled" = "音频缓存";
 "audio_cache_desc" = "启用后，播放过的歌曲将被缓存到本地，下次播放时无需重新下载。关闭后不保留缓存文件。";
+"audio_cache_limit" = "音频缓存上限";
 "network" = "网络";
 "cloud_scan_wifi_only" = "仅在 Wi-Fi 下加载云盘详情";
 "cloud_scan_wifi_only_footer" = "扫描云盘时只读取文件名，详情（歌手/专辑/封面/时长）会在后台分批加载。一首歌大约消耗 256KB 流量。开启此项后，遇到蜂窝网络会自动暂停，连上 Wi-Fi 自动继续。";
@@ -400,6 +369,9 @@
 "sleep_timer" = "睡眠定时器";
 "sleep_timer_active" = "定时器已开启";
 "cancel_timer" = "取消定时器";
+"sleep_at_track_end" = "当前曲目结束后停止";
+"lyrics_translation_on" = "开启歌词翻译";
+"lyrics_translation_off" = "关闭歌词翻译";
 "minutes" = "分钟";
 "song_info" = "歌曲信息";
 "share" = "分享";
@@ -437,7 +409,7 @@
 "playback_error_format" = "不支持的音频格式";
 
 // MARK: - Gapless
-"gapless_not_available" = "无缝播放功能暂不可用。";
+"gapless_not_available" = "无缝播放已可用于队列曲目；开启淡入淡出会自动关闭它。";
 
 // MARK: - Metadata
 "clear_metadata" = "清除封面与歌词";
@@ -449,6 +421,7 @@
 "cache" = "缓存";
 "persistent_data" = "持久化数据";
 "cache_clear_footer" = "缓存可安全清除。音频将在播放时重新加载，图片将按需重新下载。";
+"cache_pinned" = "离线固定";
 "cache_completed" = "已完整缓存";
 "cache_active" = "正在播放/缓存中";
 "cache_prewarm_seed" = "预热种子 (head+tail)";
@@ -560,55 +533,6 @@
 "carplay_search_no_results" = "无匹配结果";
 "carplay_play_failed_format" = "无法播放 %@";
 "carplay_ok" = "好";
-"welcome_back" = "欢迎回来";
-"lyrics_font_smaller" = "缩小歌词";
-"lyrics_font_larger" = "放大歌词";
-
-// MARK: - macOS desktop & menu bar
-"more" = "更多";
-"play" = "播放";
-"pause" = "暂停";
-"previous_song" = "上一首";
-"next_song" = "下一首";
-"single_line_lyrics" = "单行歌词";
-"dual_line_lyrics" = "双行歌词";
-"lock_desktop_lyrics" = "锁定桌面歌词";
-"desktop_lyrics_locked" = "桌面歌词已锁定";
-"desktop_lyrics_unlocked" = "桌面歌词可拖动";
-"menu_bar_show_title" = "状态栏显示歌名";
-"eq_preset" = "预设";
-"audio_output_follow_system" = "跟随系统";
-"repeat_all" = "循环播放";
-"repeat_one" = "单曲循环";
-"repeat" = "循环播放";
-"mini_player" = "迷你播放程序";
-"full_screen_player" = "全屏幕";
-"exit_mini_player" = "退出迷你播放";
-"lyrics_color" = "歌词颜色";
-"toggle_desktop_lyrics_lock" = "锁定/解锁桌面歌词";
-"password_required_title" = "请输入密码";
-"password_wrong_hint" = "账号或密码错误,请重新输入";
-"desktop_widgets" = "桌面小组件";
-"desktop_widget_sync_enabled" = "同步到桌面小组件";
-"desktop_widget_sync_footer" = "开启后,猿音会把当前播放、进度和封面写入共享容器,让桌面小组件读取。关闭时 Mac 版不会访问这块共享数据。";
-"desktop_widget_sync_status_enabled" = "已开启";
-"desktop_widget_sync_status_disabled" = "未开启";
-"desktop_widget_sync_update_now" = "立即同步当前播放";
-"desktop_widget_sync_privacy_footer" = "macOS 可能会显示系统权限弹框,提示猿音想访问其他 App 的数据。这是 App Group 共享容器,仅用于猿音和它的小组件之间传递播放信息。";
-"desktop_widget_sync_explanation_title" = "允许桌面小组件读取播放信息?";
-"desktop_widget_sync_explanation_message" = "为了让桌面小组件显示当前歌曲、播放进度和封面,猿音需要访问 App Group 共享容器。接下来 macOS 可能会询问是否允许访问“其他 App 的数据”,这是系统对共享容器的提示。";
-"desktop_widget_sync_continue" = "继续开启";
-
-// MARK: - 资料库内搜索
-"search_songs_prompt" = "搜索歌曲";
-"search_albums_prompt" = "搜索专辑";
-"search_artists_prompt" = "搜索艺术家";
-
-// MARK: - 桌面歌词
-"vertical_lyrics" = "纵向歌词";
-"hide_lyrics_background" = "隐藏背景";
-"show_lyrics_background" = "显示背景";
-"desktop_lyrics_no_song" = "暂无播放";
 
 // MARK: - Scrobble (听歌记录上报)
 "scrobble_title" = "听歌记录";
@@ -631,7 +555,7 @@
 "scrobble_lastfm_signout_confirm" = "断开 Last.fm 连接? API Key/Secret 会保留, 重新连接不用再粘。";
 "scrobble_lastfm_register_app" = "去 last.fm 注册一个 application 拿 key";
 "scrobble_lastfm_setup_footer" = "首次使用请到 last.fm/api/account/create 注册一个 application (Callback URL 随便填一个 https, 比如你的仓库地址 — Primuse 走 desktop auth flow 不需要回调)。粘 API Key + Shared Secret 后点连接。";
-"scrobble_lastfm_default_footer" = "首次必须先点「先登录 Last.fm」在 Safari 里登录账号 (没登录的话授权页会被 Cloudflare 直接 403), 再回来点「连接 Last.fm 帐号」走授权。";
+"scrobble_lastfm_default_footer" = "点击连接后会在应用内打开 Last.fm。登录并点 Allow 后, 轻点 Done 返回猿音, 应用会自动完成连接。";
 "scrobble_lastfm_open_login" = "先登录 Last.fm";
 "scrobble_lastfm_advanced_title" = "使用我自己的 application";
 "scrobble_lastfm_advanced_hint" = "想用自己注册的 Last.fm application (独立配额) 在这里粘 API Key + Shared Secret, 留空就用 app 内置的。";
@@ -639,9 +563,10 @@
 "scrobble_lastfm_err_missing_creds" = "请先填写 API Key 和 API Secret。";
 "scrobble_lastfm_err_token_format" = "拿不到 token: %@";
 "scrobble_lastfm_err_not_authorized_format" = "授权未完成, 请在浏览器里点 Allow 后再试: %@";
-"scrobble_lastfm_err_not_authorized" = "授权未完成 — 请确认在 Safari 里点了 Allow 后再点「我已授权」。";
-"scrobble_lastfm_pending_hint" = "Safari 已打开 Last.fm 授权页, 点 Allow 后回 app 继续。";
-"scrobble_lastfm_confirm_authorized" = "我已授权";
+"scrobble_lastfm_err_not_authorized" = "授权未完成 — 请确认在 Last.fm 页面点了 Allow, 然后点 Done 返回猿音。";
+"scrobble_lastfm_pending_hint" = "Last.fm 授权进行中。登录并点 Allow 后, 点 Done 返回猿音即可自动完成。";
+"scrobble_lastfm_reopen_authorization" = "重新打开授权页";
+"scrobble_lastfm_confirm_authorized" = "检查授权状态";
 "scrobble_lastfm_cancel_pending" = "取消";
 "scrobble_queue_section" = "失败队列";
 "scrobble_pending_count" = "待重试";
@@ -680,10 +605,10 @@
 "dup_none_desc" = "library 里同首歌只有一个版本,无需清理。";
 "dup_groups_count" = "重复分组";
 "dup_redundant_count" = "可删除冗余";
-"dup_summary_footer" = "按标题 + 艺术家 + 时长±1s 分组,标记最高音质版本为推荐保留。删除仅从 library 移除,不影响 NAS 上的源文件。";
+"dup_summary_footer" = "按标题 + 艺术家 + 时长±1s 分组,标记最高音质版本为推荐保留。清理重复项只删冗余音频；同名歌词/封面仍被保留版本使用时不会删除。";
 "dup_clean_all_action" = "一键智能保留 (删除所有冗余)";
 "dup_clean_all_confirm" = "确定一键清理所有冗余?";
-"dup_clean_all_message_format" = "将从 library 移除 %d 首冗余歌曲,只保留每组最高音质版本。NAS 上的源文件不受影响。";
+"dup_clean_all_message_format" = "将删除 %d 首冗余歌曲,只保留每组最高音质版本。同名歌词/封面仍被保留版本使用时不会删除。";
 "dup_keep_best_action_short" = "保留最佳";
 "dup_keep_best_action_format" = "保留最佳,删除其余 %d 个版本";
 "dup_best_badge" = "推荐";
@@ -724,28 +649,288 @@
 "password_show" = "显示密码";
 "password_hide" = "隐藏密码";
 "password_ascii_hint" = "建议使用英文/半角输入,避免全角符号导致认证失败。";
-"mac_sidebar_tools" = "工具";
-"home_dashboard_title" = "你的音乐资料库";
-"home_dashboard_subtitle" = "音乐源、元数据、封面、歌词和收听状态集中管理。";
-"home_health_title" = "资料库健康度";
-"home_sources_title" = "音乐源状态";
-"home_cover_art" = "封面";
-"home_lyrics" = "歌词";
-"home_playable" = "可播放";
-"home_enabled_sources" = "已启用";
-"home_active_scans" = "扫描";
-"home_pending_details" = "待补全";
-"home_no_scans" = "当前没有扫描任务";
-"home_source_pipeline" = "资料库流程";
-"home_pipeline_sources" = "来源";
-"home_pipeline_scan" = "扫描";
-"home_pipeline_metadata" = "元数据";
-"home_pipeline_listen" = "播放";
-"player_empty_title" = "暂无播放";
-"player_empty_message" = "从资料库选择一首歌后,这里会显示播放信息。";
-"settings_overview_subtitle" = "调整播放、资料库元数据、同步和本地工具。";
-"notifications" = "通知";
 "source_auth_failed_title" = "音乐源登录失败";
 "source_auth_failed_re_enter" = "重新输入密码";
 "source_auth_failed_message_generic" = "登录失败,请检查账号密码或 NAS 状态。";
 "later" = "稍后";
+
+// MARK: - 智能歌单
+"smart_playlists_section" = "智能歌单";
+"playlists_section" = "歌单";
+"new_smart_playlist" = "新建智能歌单";
+"smart_playlist_new" = "新建智能歌单";
+"smart_playlist_edit" = "编辑智能歌单";
+"smart_playlist_name" = "名称";
+"rules_count" = "条规则";
+"smart_rules_section" = "规则";
+"smart_rule_add" = "添加规则";
+"smart_combinator_section" = "组合方式";
+"smart_combinator" = "组合方式";
+"smart_combinator_and" = "全部满足";
+"smart_combinator_or" = "任一满足";
+"smart_combinator_and_desc" = "歌曲必须满足所有规则才会出现在列表里。";
+"smart_combinator_or_desc" = "歌曲只要满足任一规则就会出现在列表里。";
+"smart_sort_section" = "排序与上限";
+"smart_sort_field" = "排序字段";
+"smart_sort_direction" = "方向";
+"smart_sort_ascending" = "升序";
+"smart_sort_descending" = "降序";
+"smart_limit" = "数量上限";
+"smart_limit_placeholder" = "无限制";
+"smart_limit_footer" = "留空表示不限。命中过多时按排序截断。";
+"smart_value_placeholder" = "输入值";
+"smart_value_playlist" = "选择歌单";
+"smart_value_playlist_none" = "未选择";
+"smart_date_recent_days" = "最近 N 天内";
+"smart_rule_group" = "规则组";
+"smart_rule_group_excluded" = "排除规则组";
+"smart_rule_group_exclude" = "排除这个规则组";
+"smart_rule_group_add" = "添加规则组";
+"smart_rule_group_delete" = "删除规则组";
+"smart_rule_group_footer" = "多个规则组之间会同时生效；开启排除后，该组命中的歌曲会被排除。";
+"smart_playlist_no_rules" = "暂无规则";
+"smart_playlist_no_matches" = "没有匹配的歌曲";
+"smart_playlist_no_matches_desc" = "调整规则后再来看看。";
+"smart_playlist_unavailable" = "智能歌单已被删除";
+"smart_playlist_delete_confirm" = "删除这个智能歌单?";
+
+// 字段
+"smart_field_title" = "歌曲名";
+"smart_field_artistName" = "艺术家";
+"smart_field_albumTitle" = "专辑";
+"smart_field_genre" = "流派";
+"smart_field_year" = "年份";
+"smart_field_fileFormat" = "格式";
+"smart_field_dateAdded" = "添加时间";
+"smart_field_durationSec" = "时长(秒)";
+"smart_field_fileSize" = "文件大小";
+"smart_field_bitRate" = "码率";
+"smart_field_sourceID" = "音乐源";
+"smart_field_playCount" = "播放次数";
+"smart_field_lastPlayedAt" = "最近播放";
+"smart_field_isInPlaylist" = "属于歌单";
+
+// 操作符
+"smart_op_equals" = "等于";
+"smart_op_notEquals" = "不等于";
+"smart_op_contains" = "包含";
+"smart_op_notContains" = "不包含";
+"smart_op_greaterThan" = "大于";
+"smart_op_lessThan" = "小于";
+"smart_op_between" = "介于";
+
+// 排序字段
+"smart_sort_field_title" = "歌曲名";
+"smart_sort_field_artistName" = "艺术家";
+"smart_sort_field_albumTitle" = "专辑";
+"smart_sort_field_dateAdded" = "添加时间";
+"smart_sort_field_lastPlayedAt" = "最近播放";
+"smart_sort_field_playCount" = "播放次数";
+"smart_sort_field_duration" = "时长";
+"smart_sort_field_random" = "随机";
+
+// MARK: - 后台扫描 / 标签提示
+"scan_runs_in_background_hint" = "可以离开此页继续使用，扫描会在后台进行";
+"backfill_runs_in_background_hint" = "标签会在后台读取，不影响播放和浏览";
+
+// MARK: - Backfill 完成通知 + 保活提示
+"backfill_done_title" = "标签读取完成";
+"backfill_done_body" = "已为 %d 首歌读取完整标签。";
+"backfill_keep_app_alive_hint" = "播放任意一首歌曲可让标签持续读取";
+"notify_backfill_complete" = "标签读取完成时通知我";
+"notify_permission_denied_hint" = "通知权限已被拒绝。请到系统「设置 → 猿音」中允许通知。";
+
+// MARK: - 年度音乐报告
+"yearly_report_title" = "年度音乐报告";
+"yearly_report_entry_title" = "%d 年度音乐报告";
+"yearly_report_entry_subtitle" = "看看今年你和音乐发生了什么";
+
+// MARK: - App Store update banner
+"update_banner_title" = "猿音有新版本可更新";
+"update_banner_version_format" = "App Store 最新版本：%@";
+"update_banner_now" = "立即更新";
+"update_banner_later" = "稍后提醒";
+"update_banner_skip" = "跳过此版本";
+"check_for_updates" = "检查更新";
+"check_for_updates_up_to_date" = "已是最新版本";
+"check_for_updates_available_format" = "发现新版本 %@，点击前往 App Store";
+
+// MARK: - 首页推荐 / 常听 / 继续听
+"home_for_you_title" = "为你推荐";
+"home_top_artists_title" = "常听艺术家";
+"home_continue_listening" = "继续听";
+"home_todays_pick_title" = "今日精选";
+"home_stats_glimpse_format" = "本周已听 %1$d 首 · %2$@ · %3$d 天";
+"home_section_for_you" = "为你推荐";
+"home_section_top_artists" = "常听艺术家";
+"home_section_recently_added" = "最近添加";
+"home_section_continue_listening" = "继续听";
+"home_settings_title" = "首页";
+"home_settings_sections_label" = "显示板块";
+"home_settings_sections_footer" = "可以隐藏首页上不需要的板块。Hero 区域始终显示。";
+"similar_songs" = "相似歌曲";
+"start_song_radio" = "启动歌曲电台";
+"start_similar_mix" = "播放相似歌曲";
+"similar_songs_empty" = "暂时没有相似歌曲";
+"similar_songs_empty_desc" = "补充艺术家、专辑、流派或年份标签后，猿音就能找到更接近的歌曲。";
+"discovery_reason_sameArtist" = "同一艺术家";
+"discovery_reason_sameAlbum" = "同一专辑";
+"discovery_reason_sameGenre" = "同一流派";
+"discovery_reason_sameEra" = "相近年代";
+"discovery_reason_similarDuration" = "相近时长";
+"discovery_reason_sameFolder" = "同一目录";
+"discovery_reason_recentFavorite" = "来自最近偏好";
+"discovery_reason_notRecentlyPlayed" = "最近没听过";
+"discovery_reason_newToLibrary" = "新加入资料库";
+"discovery_reason_libraryPick" = "资料库推荐";
+"update_modal_title_format" = "猿音 %@ 已发布";
+"update_modal_subtitle" = "立即升级体验最新功能与改进";
+"spotlight_artist_subtitle" = "猿音内的艺术家";
+"spotlight_playlist_subtitle_format" = "猿音歌单 · %d 首";
+"smart_value_format_none" = "不限格式";
+"smart_value_source_none" = "不限音乐源";
+"tag_editor_menu" = "编辑标签";
+"tag_editor_title_navigation" = "编辑标签";
+"tag_editor_basic_section" = "基本信息";
+"tag_editor_extra_section" = "细节";
+"tag_editor_title" = "标题";
+"tag_editor_artist" = "艺术家";
+"tag_editor_album" = "专辑";
+"tag_editor_genre" = "流派";
+"tag_editor_year" = "年份";
+"tag_editor_track" = "曲目号";
+"tag_editor_disc" = "碟片号";
+"tag_editor_reset" = "恢复为原始信息";
+"tag_editor_reset_confirm" = "放弃你的修改？";
+"tag_editor_footer" = "编辑仅在猿音内生效并通过 iCloud 同步，不会修改原始文件。";
+"tag_editor_cover_section" = "封面";
+"tag_editor_pick_cover" = "从相册中选择…";
+"tag_editor_cover_revert" = "保留原封面";
+"onboarding_welcome_title" = "你的音乐，存在你的服务器";
+"onboarding_welcome_subtitle" = "猿音从你自己的 NAS、云盘和家里的网络播放音乐 —— 不上传任何文件到任何人。";
+"onboarding_sources_title" = "支持任意音乐源";
+"onboarding_sources_nas" = "群晖、威联通、绿联，以及 SMB / NFS 共享";
+"onboarding_sources_cloud" = "百度网盘、OneDrive、Google Drive、Dropbox";
+"onboarding_sources_webdav" = "WebDAV、FTP、SFTP，支持加密验证";
+"onboarding_sources_dlna" = "局域网内的 UPnP / DLNA 媒体服务器";
+"onboarding_sources_footer" = "随时可以再添加多个，没有数量限制。";
+"onboarding_privacy_title" = "完全属于你";
+"onboarding_privacy_no_tracking" = "没有分析、没有广告、没有第三方追踪";
+"onboarding_privacy_icloud" = "资料库设置仅通过你自己的 iCloud 同步";
+"onboarding_privacy_local" = "音频文件永远不会离开你的音乐源";
+"onboarding_next" = "继续";
+"onboarding_add_first_source" = "添加第一个音乐源";
+"onboarding_later" = "稍后再说";
+"skip" = "跳过";
+"a11y_shuffle" = "随机播放";
+"a11y_repeat" = "循环模式";
+"a11y_button_generic" = "按钮";
+"a11y_value_on" = "已开启";
+"a11y_value_off" = "已关闭";
+"a11y_play" = "播放";
+"a11y_pause" = "暂停";
+"a11y_previous_track" = "上一首";
+"a11y_next_track" = "下一首";
+"a11y_queue" = "播放队列";
+"a11y_open_lyrics" = "显示歌词";
+"a11y_close_lyrics" = "隐藏歌词";
+"a11y_favorite_add" = "加入歌单";
+"a11y_more_actions" = "更多操作";
+"offline_download" = "离线下载";
+"offline_downloading" = "正在下载";
+"offline_keep_cached" = "固定为离线可用";
+"offline_remove_download" = "移除离线下载";
+"offline_retry_download" = "重试离线下载";
+"offline_available" = "离线可用";
+"offline_download_failed" = "离线下载失败";
+"search_section_apple_music" = "Apple Music";
+"search_apple_music_loading" = "正在搜索 Apple Music…";
+"search_match_lyrics" = "命中歌词";
+"search_match_fuzzy" = "模糊匹配";
+"settings_apple_music_section" = "Apple Music";
+"settings_apple_music_connect" = "连接 Apple Music";
+"settings_apple_music_connected" = "已连接 Apple Music";
+"settings_apple_music_denied" = "Apple Music 访问被拒。请到系统设置 → 猿音 中开启。";
+"settings_apple_music_footer" = "授权后猿音可以搜索 Apple Music 曲库;若你已订阅,点搜索结果会调用系统 Music 播放器播放。";
+"settings_dlna_section" = "DLNA 接收";
+"settings_dlna_enable" = "接受同一 Wi-Fi 的投送";
+"settings_dlna_footer" = "同 Wi-Fi 下的其它设备(VLC、群晖音频中心、Plex、Hi-Fi Cast 等)可以发现猿音并把音频推过来播放。";
+"dlna_status_listening" = "等待发现";
+"dlna_status_playing_format" = "正在播放: %@";
+"dlna_status_error_format" = "错误: %@";
+"dlna_stream_title_fallback" = "流媒体";
+"settings_dlna_devices_section" = "连接设备";
+"settings_dlna_devices_empty" = "暂无连接设备。请在同一 Wi-Fi 的控制点 app 里选择猿音。";
+"dlna_device_casting" = "正在投送";
+"settings_dlna_log_section" = "实时活动";
+"settings_dlna_log_empty" = "暂无事件。打开控制点 app,在其设备列表里找猿音以验证发现是否生效。";
+"diagnostics_title" = "诊断报告";
+"diagnostics_empty_title" = "暂无诊断报告";
+"diagnostics_empty_subtitle" = "猿音崩溃或卡顿时，iOS 会在此留下报告供你分享给开发者。";
+"diagnostics_footer" = "报告仅保存在本机。点击通过邮件 / AirDrop 分享给开发者。";
+"diagnostics_clear" = "清空全部报告";
+"diagnostics_clear_confirm" = "确定要删除所有报告吗？";
+"source_diagnostics" = "音乐源体检";
+"source_diagnostics_short" = "体检";
+"source_diag_running" = "正在检查连接和扫描条件...";
+"source_diag_run_again" = "重新体检";
+"source_diag_checks" = "检查项";
+"source_diag_summary_ok" = "可以扫描";
+"source_diag_summary_warning" = "可用但有提醒";
+"source_diag_summary_failed" = "需要处理";
+"source_diag_summary_detail_format" = "%@ · %@";
+"source_diag_preparing_scan" = "扫描前正在检查音乐源...";
+"source_diag_config_title" = "配置";
+"source_diag_config_ok" = "必要配置已填写。";
+"source_diag_config_missing_host" = "缺少主机地址。";
+"source_diag_config_missing_host_suggestion" = "编辑音乐源，填写服务器 IP、域名或 .local 主机名。";
+"source_diag_config_missing_local_path" = "缺少本地文件夹路径。";
+"source_diag_config_missing_local_path_suggestion" = "编辑音乐源，重新选择本地文件夹。";
+"source_diag_config_missing_share" = "SMB 共享目录还没有固定。";
+"source_diag_config_missing_share_suggestion" = "先连接并选择共享目录，后续扫描会更稳定。";
+"source_diag_config_missing_export" = "NFS 导出路径还没有固定。";
+"source_diag_config_missing_export_suggestion" = "先连接并选择导出路径，再开始扫描。";
+"source_diag_config_missing_bucket" = "缺少 S3 bucket。";
+"source_diag_config_missing_bucket_suggestion" = "编辑音乐源，把 bucket 名称填到路径字段。";
+"source_diag_auth_title" = "凭据";
+"source_diag_auth_ok" = "凭据可用。";
+"source_diag_auth_missing_username" = "缺少用户名。";
+"source_diag_auth_missing_username_suggestion" = "编辑音乐源并填写账号。";
+"source_diag_auth_missing_secret" = "缺少密码、密钥或令牌。";
+"source_diag_auth_missing_secret_suggestion" = "编辑音乐源并重新保存凭据。";
+"source_diag_connection_title" = "连接";
+"source_diag_connection_ok" = "服务器握手成功。";
+"source_diag_directory_title" = "目录访问";
+"source_diag_directory_ok_format" = "目录读取成功，发现 %d 个可见项目。";
+"source_diag_directory_empty_format" = "目录读取成功，但只发现 %d 个可见项目。";
+"source_diag_directory_empty_suggestion" = "可能是空文件夹、被过滤的视图，或当前账号没有足够权限。";
+"source_diag_select_dirs" = "还没有选择扫描目录。";
+"source_diag_select_dirs_suggestion" = "点击连接 / 管理目录，选择包含音乐的文件夹。";
+"source_diag_scan_ready_title" = "扫描就绪";
+"source_diag_scan_ready_ok" = "这个音乐源现在可以扫描。";
+"source_diag_scan_ready_warning" = "音乐源可以访问，但建议先处理上面的提醒。";
+"source_diag_advice_auth_title" = "认证问题";
+"source_diag_advice_auth_message" = "服务器拒绝了当前凭据。";
+"source_diag_advice_auth_suggestion" = "重新输入密码、API Key 或令牌；如果启用了两步验证，请先重新连接。";
+"source_diag_advice_timeout_title" = "连接超时";
+"source_diag_advice_timeout_message" = "音乐源没有在限定时间内响应。";
+"source_diag_advice_timeout_suggestion" = "检查 Wi-Fi/VPN、服务器是否休眠、端口转发和 NAS 唤醒状态。";
+"source_diag_advice_network_title" = "网络不可达";
+"source_diag_advice_network_message" = "猿音在当前网络下无法访问这个音乐源。";
+"source_diag_advice_network_suggestion" = "确认手机和音乐源在同一局域网或 VPN 下，并检查主机和端口。";
+"source_diag_advice_path_title" = "路径问题";
+"source_diag_advice_path_message" = "所选路径无法打开。";
+"source_diag_advice_path_message_format" = "所选路径无法打开：%@";
+"source_diag_advice_path_suggestion" = "重新选择文件夹，或确认当前账号有读取权限。";
+"source_diag_advice_oauth_title" = "云盘授权过期";
+"source_diag_advice_oauth_message" = "云盘令牌缺失或已过期。";
+"source_diag_advice_oauth_suggestion" = "重新连接这个云盘，并再次授权猿音访问。";
+"source_diag_advice_rate_title" = "服务限流";
+"source_diag_advice_rate_message" = "服务方正在临时限制请求。";
+"source_diag_advice_rate_suggestion" = "等待几分钟再重试；大曲库建议先分目录扫描。";
+"source_diag_advice_certificate_title" = "证书问题";
+"source_diag_advice_certificate_message" = "HTTPS 证书无法被信任。";
+"source_diag_advice_certificate_suggestion" = "先确认这是你自己的服务器证书，再决定是否信任。";
+"source_diag_advice_server_title" = "音乐源响应异常";
+"source_diag_advice_server_suggestion" = "检查服务器状态后重试；如果持续失败，可以在存储管理里导出日志。";
+"source_diag_advice_invalid_response" = "音乐源返回了无法解析的响应。";

@@ -32,9 +32,17 @@ enum LibrarySection: String, CaseIterable, Hashable {
     }
 }
 
+enum LibraryDeepLink: Equatable, Sendable {
+    case album(Album)
+    case artist(Artist)
+    case playlist(Playlist)
+}
+
 struct LibraryView: View {
     @Environment(AudioPlayerService.self) private var player
     @Environment(MusicLibrary.self) private var library
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Binding private var deepLink: LibraryDeepLink?
     @State private var navigationPath = NavigationPath()
 
     private var songs: [Song] { library.visibleSongs }
@@ -42,6 +50,10 @@ struct LibraryView: View {
     private var artists: [Artist] { library.visibleArtists }
     private var playlists: [Playlist] { library.playlists }
     private var hasContent: Bool { !songs.isEmpty }
+
+    init(deepLink: Binding<LibraryDeepLink?> = .constant(nil)) {
+        self._deepLink = deepLink
+    }
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -74,11 +86,18 @@ struct LibraryView: View {
                             }
                         }
 
-                        // 2-column grid of recent songs/albums (no NavigationLink to avoid arrows)
-                        LazyVGrid(columns: [
-                            GridItem(.flexible(), spacing: 12),
-                            GridItem(.flexible(), spacing: 12)
-                        ], spacing: 14) {
+                        // iPad regular size class 上自适应多列 —— 横屏可以排
+                        // 4-5 张卡, 竖屏 3 张; iPhone / Stage Manager 小窗保持
+                        // 原本 2 列固定宽。
+                        LazyVGrid(
+                            columns: sizeClass == .regular
+                                ? [GridItem(.adaptive(minimum: 160), spacing: 12)]
+                                : [
+                                    GridItem(.flexible(), spacing: 12),
+                                    GridItem(.flexible(), spacing: 12)
+                                ],
+                            spacing: 14
+                        ) {
                             ForEach(recentItems) { item in
                                 RecentItemCard(item: item)
                                     .contentShape(Rectangle())
@@ -147,6 +166,8 @@ struct LibraryView: View {
             .navigationDestination(for: Album.self) { AlbumDetailView(album: $0) }
             .navigationDestination(for: Artist.self) { ArtistDetailView(artist: $0) }
             .navigationDestination(for: Playlist.self) { PlaylistDetailView(playlist: $0) }
+            .onAppear { applyDeepLink(deepLink) }
+            .onChange(of: deepLink) { _, newValue in applyDeepLink(newValue) }
         }
     }
 
@@ -206,6 +227,24 @@ struct LibraryView: View {
         guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
         player.setQueue(queue, startAt: index)
         Task { await player.play(song: song) }
+    }
+
+    private func applyDeepLink(_ link: LibraryDeepLink?) {
+        guard let link else { return }
+        var path = NavigationPath()
+        switch link {
+        case .album(let album):
+            path.append(LibrarySection.albums)
+            path.append(album)
+        case .artist(let artist):
+            path.append(LibrarySection.artists)
+            path.append(artist)
+        case .playlist(let playlist):
+            path.append(LibrarySection.playlists)
+            path.append(playlist)
+        }
+        navigationPath = path
+        deepLink = nil
     }
 }
 

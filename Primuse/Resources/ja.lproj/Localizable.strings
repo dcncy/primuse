@@ -1,0 +1,86 @@
+// Japanese — high-priority strings. Keys not present here fall back to English
+// (CFBundleDevelopmentRegion). Native-speaker review recommended before App
+// Store submission.
+
+// Tabs / Sections
+"home_title" = "ホーム";
+"library_title" = "ライブラリ";
+"search_title" = "検索";
+"settings_title" = "設定";
+"tab_songs" = "曲";
+"tab_albums" = "アルバム";
+"tab_artists" = "アーティスト";
+"tab_playlists" = "プレイリスト";
+"recently_added" = "最近追加";
+"see_all" = "すべて表示";
+
+// Greetings
+"greeting_morning" = "おはようございます";
+"greeting_afternoon" = "こんにちは";
+"greeting_evening" = "こんばんは";
+"greeting_night" = "おやすみなさい";
+
+// Common actions
+"cancel" = "キャンセル";
+"done" = "完了";
+"save" = "保存";
+"skip" = "スキップ";
+"delete" = "削除";
+"share" = "共有";
+"later" = "後で";
+
+// NowPlaying / Player
+"add_to_playlist" = "プレイリストに追加";
+"scrape_song" = "メタデータを取得";
+"song_info" = "曲の情報";
+"delete_song" = "曲を削除";
+"queue" = "キュー";
+
+// Onboarding
+"onboarding_welcome_title" = "あなたの音楽、あなたのサーバー";
+"onboarding_welcome_subtitle" = "Primuse はあなた自身の NAS、クラウドドライブ、ホームネットワークから音楽を再生します。ファイルをアップロードする必要はありません。";
+"onboarding_sources_title" = "あらゆるソースに対応";
+"onboarding_sources_nas" = "Synology、QNAP、Ugreen、SMB / NFS 共有";
+"onboarding_sources_cloud" = "Baidu Pan、OneDrive、Google Drive、Dropbox";
+"onboarding_sources_webdav" = "WebDAV、FTP、SFTP — パスワード保護にも対応";
+"onboarding_sources_dlna" = "ネットワーク上の UPnP / DLNA メディアサーバー";
+"onboarding_sources_footer" = "いつでも追加できます。数に制限はありません。";
+"onboarding_privacy_title" = "完全にあなたのもの";
+"onboarding_privacy_no_tracking" = "アナリティクスなし、広告なし、サードパーティトラッカーなし";
+"onboarding_privacy_icloud" = "ライブラリ設定はあなたの iCloud のみで同期";
+"onboarding_privacy_local" = "オーディオファイルはソースから出ません";
+"onboarding_next" = "次へ";
+"onboarding_add_first_source" = "最初のソースを追加";
+"onboarding_later" = "あとで";
+
+// Tag Editor
+"tag_editor_menu" = "タグを編集";
+"tag_editor_title_navigation" = "タグを編集";
+"tag_editor_basic_section" = "基本情報";
+"tag_editor_extra_section" = "詳細";
+"tag_editor_title" = "タイトル";
+"tag_editor_artist" = "アーティスト";
+"tag_editor_album" = "アルバム";
+"tag_editor_genre" = "ジャンル";
+"tag_editor_year" = "年";
+"tag_editor_track" = "曲番号";
+"tag_editor_disc" = "ディスク番号";
+"tag_editor_reset" = "元に戻す";
+"tag_editor_reset_confirm" = "編集内容を破棄しますか？";
+"tag_editor_footer" = "編集内容は Primuse 内のみで有効で、iCloud で同期されます。元のファイルは変更されません。";
+
+// VoiceOver / a11y
+"a11y_shuffle" = "シャッフル";
+"a11y_repeat" = "リピート";
+"a11y_button_generic" = "ボタン";
+"a11y_value_on" = "オン";
+"a11y_value_off" = "オフ";
+"a11y_play" = "再生";
+"a11y_pause" = "一時停止";
+"a11y_previous_track" = "前の曲";
+"a11y_next_track" = "次の曲";
+"a11y_queue" = "再生キュー";
+"a11y_open_lyrics" = "歌詞を表示";
+"a11y_close_lyrics" = "歌詞を非表示";
+"a11y_favorite_add" = "プレイリストに追加";
+"a11y_more_actions" = "その他の操作";

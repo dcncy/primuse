@@ -11,6 +11,7 @@ struct SourcesView: View {
     @State private var showAddSource = false
     @State private var editingSource: MusicSource?
     @State private var connectingSource: MusicSource?
+    @State private var diagnosingSource: MusicSource?
     @State private var cloudDirectoryNameRefreshID = UUID()
 
     var body: some View {
@@ -38,6 +39,9 @@ struct SourcesView: View {
             }
             .sheet(item: $connectingSource) { source in
                 connectionSheet(for: source)
+            }
+            .sheet(item: $diagnosingSource) { source in
+                SourceDiagnosticsView(source: source)
             }
             .onReceive(NotificationCenter.default.publisher(for: CloudDirectoryNameStore.didChangeNotification)) { _ in
                 cloudDirectoryNameRefreshID = UUID()
@@ -148,6 +152,10 @@ struct SourcesView: View {
                         }
                     }
                     .font(.caption2).foregroundStyle(.secondary)
+                    // 安抚: 让用户明确知道扫描在后台跑, 可以离开当前页面继续用 app。
+                    Text("scan_runs_in_background_hint")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             } else {
                 // Phase A finished. If there are still bare songs from this source
@@ -158,22 +166,38 @@ struct SourcesView: View {
                 // with the global "remaining" in StorageManagementView.
                 let bare = backfill.remainingCount(forSource: source.id)
                 if bare > 0 {
-                    HStack(spacing: 8) {
-                        ProgressView().scaleEffect(0.7).tint(.secondary)
-                        Text("backfill_in_progress").font(.caption2)
-                        Spacer()
-                        Text(String(format: String(localized: "backfill_remaining"), bare))
-                            .font(.caption2).monospacedDigit()
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            ProgressView().scaleEffect(0.7).tint(.secondary)
+                            Text("backfill_in_progress").font(.caption2)
+                            Spacer()
+                            Text(String(format: String(localized: "backfill_remaining"), bare))
+                                .font(.caption2).monospacedDigit()
+                        }
+                        Text("backfill_runs_in_background_hint")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text("backfill_keep_app_alive_hint")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                     .foregroundStyle(.secondary)
                 }
             }
 
             HStack(spacing: 10) {
-                if source.type.scansEntireLibrary {
-                    // Whole-library sources (media servers, local folder, Apple Music
-                    // library) skip the connect/pick-directory flow and scan directly.
-                    Button {
+                if source.type.isMediaServer {
+                    // Media servers scan all libraries directly — no directory selection needed
+                    sourceActionButton("source_diagnostics_short", systemImage: "stethoscope") {
+                        diagnosingSource = source
+                    }
+
+                    sourceActionButton(
+                        scanning?.canResume == true ? "resume_scan" : "scan",
+                        systemImage: scanning?.canResume == true ? "arrow.clockwise.circle" : "waveform.badge.magnifyingglass",
+                        prominence: .success,
+                        isDisabled: scanning?.isScanning == true
+                    ) {
                         scanService.scanSource(
                             source,
                             sourceManager: sourceManager,
@@ -181,28 +205,27 @@ struct SourcesView: View {
                             sourceStore: sourceStore,
                             scraperService: scraperService
                         )
-                    } label: {
-                        Label(scanning?.canResume == true ? "resume_scan" : "scan",
-                              systemImage: scanning?.canResume == true ? "arrow.clockwise.circle" : "waveform.badge.magnifyingglass")
-                            .font(.caption).fontWeight(.medium)
-                            .frame(maxWidth: .infinity).padding(.vertical, 7)
                     }
-                    .buttonStyle(.bordered).tint(.green)
-                    .disabled(scanning?.isScanning == true)
                 } else {
-                    Button { connectingSource = source } label: {
-                        Label(
-                            dirs.isEmpty ? String(localized: "connect_select_dirs") : String(localized: "manage_dirs"),
-                            systemImage: dirs.isEmpty ? "link" : "folder.badge.gear"
-                        )
-                        .font(.caption).fontWeight(.medium)
-                        .frame(maxWidth: .infinity).padding(.vertical, 7)
+                    sourceActionButton(
+                        dirs.isEmpty ? "connect_select_dirs" : "manage_dirs",
+                        systemImage: dirs.isEmpty ? "link" : "folder.badge.gear",
+                        prominence: dirs.isEmpty ? .accent : .neutral
+                    ) {
+                        connectingSource = source
                     }
-                    .buttonStyle(.bordered)
-                    .tint(dirs.isEmpty ? .accentColor : .secondary)
+
+                    sourceActionButton("source_diagnostics_short", systemImage: "stethoscope") {
+                        diagnosingSource = source
+                    }
 
                     if !dirs.isEmpty {
-                        Button {
+                        sourceActionButton(
+                            scanning?.canResume == true ? "resume_scan" : "scan",
+                            systemImage: scanning?.canResume == true ? "arrow.clockwise.circle" : "waveform.badge.magnifyingglass",
+                            prominence: .success,
+                            isDisabled: scanning?.isScanning == true
+                        ) {
                             scanService.scanSource(
                                 source,
                                 sourceManager: sourceManager,
@@ -210,14 +233,7 @@ struct SourcesView: View {
                                 sourceStore: sourceStore,
                                 scraperService: scraperService
                             )
-                        } label: {
-                            Label(scanning?.canResume == true ? "resume_scan" : "scan",
-                                  systemImage: scanning?.canResume == true ? "arrow.clockwise.circle" : "waveform.badge.magnifyingglass")
-                                .font(.caption).fontWeight(.medium)
-                                .frame(maxWidth: .infinity).padding(.vertical, 7)
                         }
-                        .buttonStyle(.bordered).tint(.green)
-                        .disabled(scanning?.isScanning == true)
                     }
                 }
             }
@@ -235,12 +251,14 @@ struct SourcesView: View {
                 )
             }
             Button { editingSource = source } label: { Label("edit", systemImage: "pencil") }
+            Button { diagnosingSource = source } label: { Label("source_diagnostics", systemImage: "stethoscope") }
             Divider()
             Button(role: .destructive) { deleteSource(source) } label: { Label("delete", systemImage: "trash") }
         }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) { deleteSource(source) } label: { Label("delete", systemImage: "trash") }
             Button { editingSource = source } label: { Label("edit", systemImage: "pencil") }.tint(.orange)
+            Button { diagnosingSource = source } label: { Label("source_diagnostics_short", systemImage: "stethoscope") }.tint(.blue)
             Button {
                 toggleSourceEnabled(source)
             } label: {
@@ -254,6 +272,73 @@ struct SourcesView: View {
     }
 
     // MARK: - Helpers
+
+    private enum SourceActionProminence {
+        case neutral
+        case accent
+        case success
+    }
+
+    private func sourceActionButton(
+        _ title: LocalizedStringKey,
+        systemImage: String,
+        prominence: SourceActionProminence = .neutral,
+        isDisabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: 18)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .allowsTightening(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .padding(.horizontal, 8)
+            .foregroundStyle(sourceActionForeground(for: prominence))
+            .background {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(sourceActionBackground(for: prominence))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(sourceActionStroke(for: prominence), lineWidth: 0.8)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.55 : 1)
+    }
+
+    private func sourceActionForeground(for prominence: SourceActionProminence) -> Color {
+        switch prominence {
+        case .neutral: .secondary
+        case .accent: .accentColor
+        case .success: .green
+        }
+    }
+
+    private func sourceActionBackground(for prominence: SourceActionProminence) -> Color {
+        switch prominence {
+        case .neutral: Color(.tertiarySystemFill)
+        case .accent: Color.accentColor.opacity(0.14)
+        case .success: Color.green.opacity(0.16)
+        }
+    }
+
+    private func sourceActionStroke(for prominence: SourceActionProminence) -> Color {
+        switch prominence {
+        case .neutral: Color.white.opacity(0.04)
+        case .accent: Color.accentColor.opacity(0.20)
+        case .success: Color.green.opacity(0.24)
+        }
+    }
 
     private var sources: [MusicSource] {
         sourceStore.sources
@@ -314,10 +399,7 @@ struct SourcesView: View {
 
     private func toggleSourceEnabled(_ source: MusicSource) {
         updateSource(source.id) { $0.isEnabled.toggle() }
-        library.updateSourceVisibility(
-            activeSourceIDs: Set(sourceStore.sources.map(\.id)),
-            disabledSourceIDs: disabledSourceIDs
-        )
+        library.updateDisabledSourceIDs(disabledSourceIDs)
     }
 
     private var disabledSourceIDs: Set<String> {
@@ -331,10 +413,6 @@ struct SourcesView: View {
         library.removeSongsForSource(source.id)
         sourceStore.remove(id: source.id)
         scanService.removeSynologyAPI(for: source.id)
-        sourceManager.deleteSourceCaches(sourceID: source.id)
-        #if os(macOS)
-        LocalBookmarkStore.remove(sourceID: source.id)
-        #endif
         KeychainService.deletePassword(for: source.id)
         if source.type.isCloudDrive {
             Task {
@@ -378,5 +456,142 @@ struct SourcesView: View {
 
     private func encodeDirs(_ dirs: [String]) -> String? {
         (try? JSONEncoder().encode(dirs)).flatMap { String(data: $0, encoding: .utf8) }
+    }
+}
+
+private struct SourceDiagnosticsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(SourceManager.self) private var sourceManager
+
+    let source: MusicSource
+    @State private var report: SourceDiagnosticReport?
+    @State private var isRunning = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if isRunning {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text("source_diag_running")
+                                .font(.body)
+                        }
+                        .padding(.vertical, 4)
+                    } else if let report {
+                        summaryRow(report)
+                    }
+                }
+
+                if let report {
+                    Section("source_diag_checks") {
+                        ForEach(report.checks) { check in
+                            diagnosticRow(check)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("source_diagnostics")
+            .toolbarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("done") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await runDiagnostics() }
+                    } label: {
+                        Label("source_diag_run_again", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isRunning)
+                }
+            }
+            .task {
+                if report == nil {
+                    await runDiagnostics()
+                }
+            }
+            .refreshable {
+                await runDiagnostics()
+            }
+        }
+    }
+
+    private func summaryRow(_ report: SourceDiagnosticReport) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: iconName(for: report.summaryStatus))
+                .font(.title3)
+                .foregroundStyle(tint(for: report.summaryStatus))
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(summaryTitle(for: report.summaryStatus))
+                    .font(.headline)
+                Text(String(format: String(localized: "source_diag_summary_detail_format"), report.sourceName, elapsedText(report)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func diagnosticRow(_ check: SourceDiagnosticCheck) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: iconName(for: check.status))
+                .font(.body)
+                .foregroundStyle(tint(for: check.status))
+                .frame(width: 24)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(check.title)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Text(check.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !check.suggestion.isEmpty {
+                    Text(check.suggestion)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func runDiagnostics() async {
+        isRunning = true
+        defer { isRunning = false }
+        report = await sourceManager.diagnose(source: source)
+    }
+
+    private func elapsedText(_ report: SourceDiagnosticReport) -> String {
+        let elapsed = max(0.1, report.finishedAt.timeIntervalSince(report.startedAt))
+        return String(format: "%.1fs", elapsed)
+    }
+
+    private func summaryTitle(for status: SourceDiagnosticStatus) -> String {
+        switch status {
+        case .passed: String(localized: "source_diag_summary_ok")
+        case .warning: String(localized: "source_diag_summary_warning")
+        case .failed: String(localized: "source_diag_summary_failed")
+        }
+    }
+
+    private func iconName(for status: SourceDiagnosticStatus) -> String {
+        switch status {
+        case .passed: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .failed: "xmark.octagon.fill"
+        }
+    }
+
+    private func tint(for status: SourceDiagnosticStatus) -> Color {
+        switch status {
+        case .passed: .green
+        case .warning: .orange
+        case .failed: .red
+        }
     }
 }

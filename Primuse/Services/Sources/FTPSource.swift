@@ -130,6 +130,20 @@ actor FTPSource: MusicSourceConnector {
         }
     }
 
+    func deleteFile(at path: String) async throws {
+        guard let provider else { throw SourceError.connectionFailed("Not connected") }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            provider.removeItem(path: path) { error in
+                if let error {
+                    continuation.resume(throwing: SourceError.connectionFailed(error.localizedDescription))
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
     /// FTP REST + RETR via FilesProvider's `contents(path:offset:length:)`。
     /// FTP 协议支持 REST 命令断点续传, FilesProvider 内部用 REST + RETR
     /// 实现 byte range, 让 CloudPlaybackSource 边下边播替代整文件下载。

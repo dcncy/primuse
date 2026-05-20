@@ -2,8 +2,8 @@ name: Primuse
 options:
   bundleIdPrefix: com.welape
   deploymentTarget:
-    iOS: "26.1"
-    macOS: "26.0"
+    iOS: "18.0"
+    watchOS: "10.0"
   xcodeVersion: "16.0"
   defaultConfig: Debug
   groupSortPosition: top
@@ -12,8 +12,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "1.2.0"
-    CURRENT_PROJECT_VERSION: "8"
+    MARKETING_VERSION: "1.3.0"
+    CURRENT_PROJECT_VERSION: "9"
     DEVELOPMENT_TEAM: "2U97K3U27A"
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: YES
@@ -52,22 +52,19 @@ schemes:
         PrimuseKit: all
         PrimuseWidgetExtension: all
         PrimuseActivityExtension: all
+        # PrimuseWatchWidgets 仅 build 不参与 archive ── 它通过 PrimuseWatchApp
+        # 的 embed 嵌入, 跟着 watch app 一起进 archive, 不需要顶层入口。
+        # 顶层放它会跟 watch app 一样, 让 archive 退化成 Generic Archive。
+        PrimuseWatchWidgets: [test, run, profile, analyze]
+        # PrimuseWatchApp 不列入顶层 scheme buildable ── 它是 Primuse iOS
+        # app 的 embed dependency (project.yml 里通过 `embed: true` 声明),
+        # implicitDependencies=YES 会让 archive 自动带上它。
+        # 如果显式列成 scheme 顶层 buildable, archive 时 Xcode 会把它
+        # 当作独立 application 产品, 跟 Primuse.app 并列, 导致整个
+        # .xcarchive 类型变成 "Generic Xcode Archive" 进 Organizer 的
+        # Other Items, 不能直接 distribute 上 App Store。
     run:
       config: Debug
-    archive:
-      config: Release
-
-  PrimuseMac:
-    build:
-      targets:
-        PrimuseMac: all
-        PrimuseKit: all
-    run:
-      config: Debug
-      executable: PrimuseMac
-    profile:
-      config: Release
-      executable: PrimuseMac
     archive:
       config: Release
 
@@ -82,9 +79,6 @@ targets:
       - path: Primuse
         excludes:
           - "**/.DS_Store"
-          # 防御性 exclude:同样的逻辑反过来,避免 macOS 的 plist 被复制进 iOS bundle。
-          - "Info.plist"
-          - "Info-macOS.plist"
           - "**/AppSecrets.example.swift"
     resources:
       - path: Primuse/Resources
@@ -108,6 +102,8 @@ targets:
       - target: PrimuseKit
       - target: PrimuseWidgetExtension
       - target: PrimuseActivityExtension
+      - target: PrimuseWatchApp
+        embed: true
     info:
       path: Primuse/Info.plist
       properties:
@@ -131,9 +127,7 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        # Default (English) — overridden per-locale in InfoPlist.strings:
-        # zh-Hans users see "猿音", everyone else falls back to "Primuse".
-        CFBundleDisplayName: "Primuse"
+        CFBundleDisplayName: "猿音"
         CFBundleName: "Primuse"
         LSApplicationCategoryType: "public.app-category.music"
         CFBundleURLTypes:
@@ -153,10 +147,11 @@ targets:
         PrimuseGoogleClientID: "$(GOOGLE_CLIENT_ID)"
         PrimuseGoogleReversedClientID: "$(GOOGLE_REVERSED_CLIENT_ID)"
         PrimuseOneDriveClientID: "$(ONEDRIVE_CLIENT_ID)"
+        PrimuseLastFmAPIKey: "$(LASTFM_API_KEY)"
+        PrimuseLastFmAPISecret: "$(LASTFM_API_SECRET)"
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
-        # English defaults — overridden per-locale in InfoPlist.strings.
-        NSSiriUsageDescription: "Used to start playback and control Primuse with Siri voice commands."
+        NSSiriUsageDescription: "用 Siri 语音点播、控制猿音播放。"
         NSUserActivityTypes:
           - INPlayMediaIntent
         UIApplicationSceneManifest:
@@ -169,7 +164,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: "Primuse needs local network access to discover and connect to your NAS devices, media servers, and other music sources."
+        NSLocalNetworkUsageDescription: "猿音需要访问本地网络以发现和连接您的 NAS 设备、媒体服务器及其他音乐源。"
         NSBonjourServices:
           - "_smb._tcp."
           - "_webdav._tcp."
@@ -196,7 +191,7 @@ targets:
 
   PrimuseKit:
     type: framework
-    supportedDestinations: [iOS, macOS]
+    platform: iOS
     sources:
       - path: PrimuseKit/Sources/PrimuseKit
     dependencies:
@@ -233,6 +228,69 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_ENTITLEMENTS: Config/PrimuseWidgetExtension.entitlements
 
+  PrimuseWatchApp:
+    type: application
+    platform: watchOS
+    sources:
+      - path: PrimuseWatch
+      - path: PrimuseWatchShared
+    resources:
+      - path: PrimuseWatch/Resources
+    dependencies:
+      - target: PrimuseWatchWidgets
+        embed: true
+    info:
+      path: PrimuseWatch/Info.plist
+      properties:
+        CFBundleDisplayName: "猿音"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.welape.yuanyin
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.watchkitapp
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SUPPORTS_MACCATALYST: NO
+        TARGETED_DEVICE_FAMILY: "4"
+        # SKIP_INSTALL=YES 是 watchOS embedded app 的强制要求 ── 它通过
+        # Primuse 的 "Embed Watch Content" build phase 拷到 Primuse.app/Watch/
+        # 内部, 不应作为独立 product 安装到 archive 的 Applications/ 顶层。
+        # 设成 NO 会让 archive 同时产出 Applications/Primuse.app 和
+        # Applications/PrimuseWatchApp.app 两个顶层 product, Organizer 不知
+        # 道主 app 是谁, 把整个 archive 标成 "Generic Xcode Archive"。
+        SKIP_INSTALL: YES
+        CODE_SIGN_ENTITLEMENTS: Config/PrimuseWatchApp.entitlements
+
+  PrimuseWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: PrimuseWatchWidgets
+      - path: PrimuseWatchShared
+    info:
+      path: PrimuseWatchWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: "猿音表盘"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.watchkitapp.widgets
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "4"
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_ENTITLEMENTS: Config/PrimuseWatchWidgets.entitlements
+
   PrimuseActivityExtension:
     type: app-extension
     platform: iOS
@@ -258,102 +316,3 @@ targets:
         SKIP_INSTALL: YES
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_ENTITLEMENTS: Config/PrimuseActivityExtension.entitlements
-
-  PrimuseMac:
-    type: application
-    platform: macOS
-    configFiles:
-      Debug: Config/Debug.xcconfig
-      Release: Config/Release.xcconfig
-    sources:
-      - path: Primuse
-        excludes:
-          - "**/.DS_Store"
-          # iOS 的 Info.plist 不能进 mac bundle ── 它会被当成嵌套 bundle
-          # Resources/Info.plist 触发 App Store 上传报 90261/90277/90280。
-          # mac 的 INFOPLIST_FILE 已指向 Info-macOS.plist。
-          - "Info.plist"
-          - "Info-macOS.plist"
-          - "**/AppSecrets.example.swift"
-    resources:
-      - path: Primuse/Resources
-    dependencies:
-      - package: GRDB
-      - package: AMSMB2
-        embed: true
-      - package: FilesProvider
-        product: FilesProvider
-      - package: Citadel
-        product: Citadel
-      - package: SwiftCrypto
-        product: Crypto
-      - package: SwiftNIO
-        product: NIOCore
-      - package: NFSKit
-        product: NFSKit
-      - package: SFBAudioEngine
-        product: SFBAudioEngine
-      - sdk: AppIntents.framework
-      - sdk: iTunesLibrary.framework
-      - target: PrimuseKit
-    info:
-      path: Primuse/Info-macOS.plist
-      properties:
-        CFBundleShortVersionString: "$(MARKETING_VERSION)"
-        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        # Default (English) — overridden per-locale in InfoPlist.strings.
-        CFBundleDisplayName: "Primuse"
-        CFBundleName: "Primuse"
-        LSApplicationCategoryType: "public.app-category.music"
-        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
-        NSHumanReadableCopyright: "© Welape"
-        ITSAppUsesNonExemptEncryption: false
-        NSAppleMusicUsageDescription: "Primuse needs access to your Apple Music / iTunes library to import its local tracks as a playback source."
-        CFBundleURLTypes:
-          - CFBundleURLSchemes:
-              - primuse
-            CFBundleURLName: "com.welape.yuanyin.oauth"
-          - CFBundleURLSchemes:
-              - "$(GOOGLE_REVERSED_CLIENT_ID)"
-            CFBundleURLName: "com.welape.yuanyin.google-oauth"
-          - CFBundleURLSchemes:
-              - "msauth.$(PRODUCT_BUNDLE_IDENTIFIER)"
-            CFBundleURLName: "com.welape.yuanyin.microsoft-oauth"
-        PrimuseBaiduClientID: "$(BAIDU_CLIENT_ID)"
-        PrimuseBaiduClientSecret: "$(BAIDU_CLIENT_SECRET)"
-        PrimuseDropboxClientID: "$(DROPBOX_CLIENT_ID)"
-        PrimuseDropboxClientSecret: "$(DROPBOX_CLIENT_SECRET)"
-        PrimuseGoogleClientID: "$(GOOGLE_CLIENT_ID)"
-        PrimuseGoogleReversedClientID: "$(GOOGLE_REVERSED_CLIENT_ID)"
-        PrimuseOneDriveClientID: "$(ONEDRIVE_CLIENT_ID)"
-        NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
-          NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: "Primuse needs local network access to discover and connect to your NAS devices, media servers, and other music sources."
-        NSBonjourServices:
-          - "_smb._tcp."
-          - "_webdav._tcp."
-          - "_webdavs._tcp."
-          - "_ftp._tcp."
-          - "_sftp-ssh._tcp."
-          - "_nfs._tcp."
-          - "_diskstation._tcp."
-          - "_synology-dsm._tcp."
-          - "_http._tcp."
-          - "_https._tcp."
-    settings:
-      base:
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon-Mac
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        SWIFT_EMIT_LOC_STRINGS: YES
-        # Universal Purchase: 跟 iOS 共用同一个 bundle ID,这样上传后会
-        # 自动落到 App Store Connect 现有"猿音"record 的 macOS 槽位下,
-        # 用户买一次两端都能用,共享评分 / 评论 / 通知池。
-        PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin
-        CODE_SIGN_ENTITLEMENTS: Config/PrimuseMac.entitlements
-        SWIFT_OBJC_BRIDGING_HEADER: Primuse/Primuse-Bridging-Header.h
-        # macOS 独立版本号 — Mac 是新平台首发,从 1.0.0 起步,
-        # 与 iOS 的 MARKETING_VERSION/CURRENT_PROJECT_VERSION 解耦
-        # (即使 bundle ID 相同,iOS 和 macOS 在 ASC 内仍是独立版本流)。
-        MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "2"

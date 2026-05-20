@@ -3,26 +3,9 @@ import CryptoKit
 import Foundation
 import MediaPlayer
 import PrimuseKit
-import WidgetKit
-#if os(iOS)
+import SFBAudioEngine
 import UIKit
-#else
-import AppKit
-#endif
-
-#if os(macOS)
-enum MacWidgetSyncSettings {
-    static let isEnabledKey = "primuse.macWidgetSyncEnabled"
-
-    static var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: isEnabledKey)
-    }
-
-    static func setEnabled(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: isEnabledKey)
-    }
-}
-#endif
+import WidgetKit
 
 /// Mutable counter that can be captured by @Sendable closures (e.g. Timer callbacks wrapped in Task).
 private final class StepCounter: @unchecked Sendable {
@@ -57,6 +40,45 @@ private final class BufferIteratorBox: @unchecked Sendable {
 /// safe in practice.
 private struct PCMBufferBox: @unchecked Sendable {
     let value: AVAudioPCMBuffer?
+}
+
+/// Mutable handoff state for one gapless boundary. The audio scheduling
+/// callback and decoder task both touch it, but all mutations are routed
+/// back through `AudioPlayerService` on MainActor.
+private final class GaplessTransitionState: @unchecked Sendable {
+    let queueGeneration: Int
+    var prepared: GaplessPreparedTrack?
+    var didBoundaryFire = false
+    var shouldCancelPreparation = false
+    var isFullyScheduled = false
+    var didFail = false
+
+    init(queueGeneration: Int) {
+        self.queueGeneration = queueGeneration
+    }
+}
+
+private struct GaplessPreparedTrack: @unchecked Sendable {
+    let song: Song
+    let url: URL
+    let decoderKind: AudioPlayerService.DecoderKind
+    let followingTransition: GaplessTransitionState
+}
+
+/// One slot in the play queue. Wraps a `Song` with a per-slot UUID so
+/// the queue can hold the same song multiple times without ID
+/// collisions in SwiftUI ForEach. The id stays put across metadata
+/// backfill (`syncSongMetadata` only mutates `song`), so list rows
+/// don't lose their identity when the embedded song's tags get
+/// rewritten by a later scan.
+struct QueueEntry: Sendable, Identifiable {
+    let id: UUID
+    var song: Song
+
+    init(song: Song, id: UUID = UUID()) {
+        self.id = id
+        self.song = song
+    }
 }
 
 @MainActor
@@ -103,10 +125,22 @@ final class AudioPlayerService {
         return extrapolated
     }
 
-    var queue: [Song] = []
+    /// Stored backing for the queue. Each entry pairs a Song with a
+    /// stable UUID — see `QueueEntry`. Mutate via `setQueue`,
+    /// `clearQueue`, `moveQueueItems`, or `syncSongMetadata`; do NOT
+    /// hand-edit from outside.
+    private(set) var queueEntries: [QueueEntry] = []
+    /// Backward-compatible read-only view over the queue's songs.
+    /// Internal callers and observers keep using `player.queue` —
+    /// the @Observable macro tracks reads through `queueEntries`,
+    /// so SwiftUI re-renders correctly when entries change.
+    var queue: [Song] { queueEntries.map(\.song) }
     var currentIndex: Int = 0
     var shuffleEnabled = false {
-        didSet { rebuildShuffleOrder() }
+        didSet {
+            queueGeneration += 1
+            rebuildShuffleOrder()
+        }
     }
     var repeatMode: RepeatMode = .off
 
@@ -119,6 +153,8 @@ final class AudioPlayerService {
     /// on what plays next at the boundary. Cleared on any structural
     /// change to `queue` / shuffle state.
     private var pendingNextShuffleIndices: [Int]?
+    /// Invalidates prepared gapless transitions when queue order changes.
+    private var queueGeneration = 0
 
     // MARK: - Decoder Tracking (for seek)
     /// Tracks which decoder pipeline produced the currently-playing audio
@@ -128,25 +164,25 @@ final class AudioPlayerService {
     /// requires building a NEW `InputSource` — feeding the
     /// `primuse-stream://` URL to SFB's URL-based opener fails because
     /// the scheme isn't registered with the file system.
-    private enum DecoderKind { case native, streaming, cloudStream, assetReader }
+    fileprivate enum DecoderKind: Sendable, Equatable { case native, streaming, httpStream, cloudStream, assetReader }
     private var activeDecoderKind: DecoderKind = .native
 
     // MARK: - Sleep Timer
     private(set) var sleepTimerEndDate: Date?
     private var sleepTimerTask: Task<Void, Never>?
-    var isSleepTimerActive: Bool { sleepTimerEndDate != nil }
+    /// "曲终停止" 模式: 持有当前歌曲的 id, 一旦切到下一首 (或 currentSong
+    /// 变 nil) 立即 pause。比固定分钟数更智能 ── 不会在曲子中间硬切。
+    private(set) var sleepStopAfterSongID: String?
+    var isSleepTimerActive: Bool { sleepTimerEndDate != nil || sleepStopAfterSongID != nil }
 
     private var displayLink: Timer?
-    #if os(macOS)
-    /// ProcessInfo.beginActivity token —— 播放期间 hold 住,防止 App Nap
-    /// 把 main run loop 节流导致 Timer 半天才发一次。stop 时 endActivity。
-    private var appNapToken: NSObjectProtocol?
-    #endif
     private let nativeDecoder = NativeAudioDecoder()
     private let assetReaderDecoder = AssetReaderDecoder()
     private let streamingDecoder = StreamingDownloadDecoder()
     private var decodingTask: Task<Void, Never>?
     private var prefetchTask: Task<Void, Never>?
+    private var gaplessPreparationTask: Task<Void, Never>?
+    private var gaplessFollowupTask: Task<Void, Never>?
     private var crossfadeDecodingTask: Task<Void, Never>?
     private var crossfadeTimer: Timer?
     private var crossfadeTriggered = false
@@ -180,12 +216,35 @@ final class AudioPlayerService {
         audioEngine = AudioEngine()
         equalizerService = EqualizerService(audioEngine: audioEngine)
         audioEffectsService = AudioEffectsService(audioEngine: audioEngine, settingsStore: playbackSettings)
+        applySpatialAudioSettings()
+        observeSpatialAudioSettings()
 
         // Defer heavy system registrations to avoid blocking first frame
         Task { @MainActor [weak self] in
             AudioSessionManager.shared.configureForPlayback()
             self?.setupRemoteCommands()
             self?.setupAudioSessionCallbacks()
+        }
+    }
+
+    func applySpatialAudioSettings() {
+        let settings = playbackSettings.snapshot()
+        audioEngine.configureSpatialAudio(
+            enabled: settings.spatialAudioEnabled,
+            headTrackingEnabled: settings.spatialHeadTrackingEnabled
+        )
+    }
+
+    private func observeSpatialAudioSettings() {
+        withObservationTracking {
+            _ = playbackSettings.spatialAudioEnabled
+            _ = playbackSettings.spatialHeadTrackingEnabled
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.applySpatialAudioSettings()
+                self.observeSpatialAudioSettings()
+            }
         }
     }
 
@@ -267,6 +326,7 @@ final class AudioPlayerService {
         // Stop current playback
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         crossfadeDecodingTask?.cancel()
         crossfadeDecodingTask = nil
         audioEngine.stopPlayback()
@@ -302,6 +362,7 @@ final class AudioPlayerService {
         clearPendingPlaybackRecovery()
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         audioEngine.stopPlayback()
         stopTimeUpdater()
         await playFromURL(song: song, url: url, playID: id)
@@ -332,6 +393,7 @@ final class AudioPlayerService {
         do {
             _ = AudioSessionManager.shared.activatePlaybackSession()
             try audioEngine.setUp()
+            applySpatialAudioSettings()
             audioEffectsService.applySettings()
             guard let outputFormat = audioEngine.outputFormat else {
                 throw AudioDecoderError.decodingFailed("Audio engine not ready")
@@ -342,30 +404,45 @@ final class AudioPlayerService {
             // Reset volume immediately; apply ReplayGain asynchronously after playback starts
             audioEngine.resetPlayerVolume()
 
-            // Remote URLs: use StreamingDownloadDecoder (handles self-signed HTTPS via URLSession)
-            if isRemoteURL {
-                plog("▶️ Using StreamingDownloadDecoder for remote URL: \(url.scheme ?? "")://...")
-                plog("▶️   outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
-                let cacheURL = playbackSettings.audioCacheEnabled ? sourceManager?.cacheURL(for: song) : nil
-                await playWithStreamingDownload(song: song, url: url, outputFormat: outputFormat, playID: id, cacheURL: cacheURL)
-                return
-            }
-
             // Cloud streaming: instead of downloading the whole file, build
             // an SFBInputSource whose reads go through HTTP Range +
             // sparse-on-disk cache. SFBAudioEngine reads from it like any
             // file and we get instant playback.
             let stream: AsyncThrowingStream<AVAudioPCMBuffer, Error>
-            if isCloudStream, let manager = sourceManager,
+            if isRemoteURL {
+                if let inputSource = await makeHTTPStreamingInputSource(for: song, url: url) {
+                    plog("▶️ Decoder: HTTPRangePlaybackSource (reason: scheme=\(url.scheme ?? "?"), range-based HTTP streaming) cache=\(playbackSettings.audioCacheEnabled) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
+                    activeDecoderKind = .httpStream
+                    stream = nativeDecoder.decode(from: inputSource, outputFormat: outputFormat, onResolveSourceLength: makeResolveLengthCallback(for: song))
+                } else {
+                    // Fallback for legacy rows / arbitrary URLs where fileSize is
+                    // unknown. This preserves compatibility but still logs clearly
+                    // that startup waits for a full download.
+                    plog("▶️ Decoder: StreamingDownloadDecoder (reason: HTTP range unavailable or fileSize unknown, full-download fallback) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
+                    let cacheURL = playbackSettings.audioCacheEnabled ? sourceManager?.cacheURL(for: song) : nil
+                    await playWithStreamingDownload(song: song, url: url, outputFormat: outputFormat, playID: id, cacheURL: cacheURL)
+                    return
+                }
+            } else if isCloudStream, let manager = sourceManager,
                let inputSource = try? await manager.makeStreamingInputSource(
                    for: song,
                    cacheEnabled: playbackSettings.audioCacheEnabled
                ) {
-                plog("▶️ Using CloudPlaybackSource (streaming SFBInputSource, cache=\(playbackSettings.audioCacheEnabled))")
+                // 解码器选型: 自定义 cloudStreamingScheme (primuse-stream://)
+                // 走 CloudPlaybackSource。它包装一层 SFBInputSource, SFB read
+                // 时按需走 HTTP Range fetch, 配合 sparse cache 实现"边下边播"。
+                // 适合云盘 (Baidu / Aliyun / OneDrive / Dropbox) 的 dlink
+                // 流式播放 ── 这些场景下不能像 NAS 那样直接给 SFBAudioEngine
+                // 一个稳定的 HTTPS URL。
+                plog("▶️ Decoder: CloudPlaybackSource (reason: scheme=primuse-stream, range-based streaming) cache=\(playbackSettings.audioCacheEnabled) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
                 activeDecoderKind = .cloudStream
                 stream = nativeDecoder.decode(from: inputSource, outputFormat: outputFormat, onResolveSourceLength: makeResolveLengthCallback(for: song))
             } else {
                 // Local file path (or fallback when streaming setup failed)
+                let reason = isCloudStream
+                    ? "primuse-stream URL but inputSource setup failed, fallback to file path"
+                    : "local file path (file:// scheme)"
+                plog("▶️ Decoder: NativeDecoder (reason: \(reason)) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
                 stream = nativeDecoder.decode(from: url, outputFormat: outputFormat, onResolveSourceLength: makeResolveLengthCallback(for: song))
             }
             let iteratorBox = BufferIteratorBox(stream.makeAsyncIterator())
@@ -412,7 +489,11 @@ final class AudioPlayerService {
                 // so let the caller surface the error instead.
                 guard !Task.isCancelled, playID == id else { return }
                 plog("⚠️ Native decode failed for '\(song.title)': \(error.localizedDescription)")
-                if !isCloudStream {
+                if activeDecoderKind == .httpStream {
+                    plog("↳ HTTP range decode failed before first buffer; falling back to full download")
+                    let cacheURL = playbackSettings.audioCacheEnabled ? sourceManager?.cacheURL(for: song) : nil
+                    await playWithStreamingDownload(song: song, url: url, outputFormat: outputFormat, playID: id, cacheURL: cacheURL)
+                } else if !isCloudStream {
                     await playWithFallbackDecoder(song: song, url: url, outputFormat: outputFormat, playID: id)
                 } else {
                     isLoading = false
@@ -432,7 +513,7 @@ final class AudioPlayerService {
             // Skip for cloud-stream URLs — fileInfo opens via SFBAudioEngine
             // by URL, which doesn't understand the custom scheme. Duration
             // for cloud songs is filled in by MetadataBackfillService.
-            if duration <= 0, !isCloudStream {
+            if duration <= 0, !isCloudStream, activeDecoderKind != .httpStream {
                 Task {
                     if let info = try? await nativeDecoder.fileInfo(for: url) {
                         guard self.playID == id else { return }
@@ -454,13 +535,18 @@ final class AudioPlayerService {
             updatePlaybackState()
 
             // Apply ReplayGain in background (don't block playback start).
-            // Skip for cloud-stream URLs — readers open by URL and can't
-            // decode the custom scheme. Once playback finishes the cache
-            // file is fully populated and a future play picks up RG.
+            // Streaming URLs use persisted library tags; local files may
+            // fall back to reading embedded tags from disk.
             let settings = playbackSettings.snapshot()
-            if settings.replayGainEnabled, !isCloudStream {
+            if settings.replayGainEnabled {
+                let decoderKind = activeDecoderKind
                 Task { [id] in
-                    await self.applyReplayGain(for: url, mode: settings.replayGainMode)
+                    await self.applyReplayGain(
+                        for: song,
+                        url: url,
+                        mode: settings.replayGainMode,
+                        allowFileRead: decoderKind != .cloudStream && decoderKind != .httpStream
+                    )
                     guard self.playID == id else { return }
                 }
             }
@@ -469,7 +555,7 @@ final class AudioPlayerService {
             // Cloud streaming already writes to the same cache file as
             // it goes — duplicating via cacheInBackground would just
             // race two writers on the same path.
-            if playbackSettings.audioCacheEnabled, !isCloudStream {
+            if playbackSettings.audioCacheEnabled, !isCloudStream, activeDecoderKind != .httpStream {
                 sourceManager?.cacheInBackground(song: song, cacheEnabled: playbackSettings.audioCacheEnabled)
             }
 
@@ -526,7 +612,7 @@ final class AudioPlayerService {
                     }
                 } else if let finalBuffer = lastBuffer {
                     // Natural EOF — schedule with track-end completion.
-                    self.scheduleLastBuffer(finalBuffer, playID: id)
+                    await self.scheduleDecodedFinalBuffer(finalBuffer, playID: id)
                 }
             }
         } catch {
@@ -539,8 +625,9 @@ final class AudioPlayerService {
         }
     }
 
-    /// Streaming playback using URLSession download + progressive decode.
-    /// Handles self-signed HTTPS certificates that AVAssetReader cannot.
+    /// Full-download fallback for remote URLs whose length is unknown or
+    /// whose server rejects Range reads. Handles self-signed HTTPS
+    /// certificates that AVAssetReader cannot.
     private func playWithStreamingDownload(
         song: Song, url: URL, outputFormat: AVAudioFormat,
         playID id: UUID, cacheURL: URL?
@@ -564,8 +651,11 @@ final class AudioPlayerService {
             audioEngine.play()
             plog("🌊 Engine diagnostics after play: \(audioEngine.diagnosticInfo())")
 
-            // Fetch duration asynchronously if needed
-            if duration <= 0 {
+            // Fetch duration asynchronously if needed。SFBAudioDecoder 只支持
+            // file:// URL,远程 HTTP/HTTPS URL 走到这条路径会抛 NSException
+            // (NSAssertionHandler) 整 app SIGABRT,`try?` 接不住 ObjC 异常。
+            // 远程流的 duration 由 streamingDownloadDecoder 自己解出来,这里跳过。
+            if duration <= 0 && url.isFileURL {
                 Task {
                     if let info = try? await self.nativeDecoder.fileInfo(for: url) {
                         guard self.playID == id else { return }
@@ -617,7 +707,7 @@ final class AudioPlayerService {
                 }
                 if let finalBuffer = lastBuffer {
                     guard !Task.isCancelled, self.playID == id else { return }
-                    self.scheduleLastBuffer(finalBuffer, playID: id)
+                    await self.scheduleDecodedFinalBuffer(finalBuffer, playID: id)
                 }
             }
         } catch {
@@ -717,7 +807,52 @@ final class AudioPlayerService {
             }
             return nativeDecoder.decode(from: inputSource, outputFormat: outputFormat, onResolveSourceLength: onResolveLength)
         }
+        if url.scheme == "http" || url.scheme == "https" {
+            if let cached = sourceManager?.cachedURL(for: song) {
+                return nativeDecoder.decode(from: cached, outputFormat: outputFormat, onResolveSourceLength: onResolveLength)
+            }
+            if let inputSource = await makeHTTPStreamingInputSource(for: song, url: url) {
+                return nativeDecoder.decode(from: inputSource, outputFormat: outputFormat, onResolveSourceLength: onResolveLength)
+            }
+            return streamingDecoder.decode(from: url, outputFormat: outputFormat, cacheFileURL: nil, fileExtension: song.fileFormat.rawValue)
+        }
         return nativeDecoder.decode(from: url, outputFormat: outputFormat, onResolveSourceLength: onResolveLength)
+    }
+
+    private func makeHTTPStreamingInputSource(for song: Song, url: URL) async -> InputSource? {
+        guard song.fileSize > 0,
+              url.scheme == "http" || url.scheme == "https" else { return nil }
+
+        let cacheEnabled = playbackSettings.audioCacheEnabled
+        let cacheURL: URL
+        let cacheRelativePath: String?
+        if cacheEnabled, let sourceManager {
+            cacheURL = sourceManager.cacheURL(for: song)
+            let sanitized = song.filePath.replacingOccurrences(of: "/", with: "_")
+            cacheRelativePath = "\(song.sourceID)/\(sanitized)"
+            await AudioCacheManager.shared.evictIfNeeded(reserveBytes: song.fileSize)
+        } else {
+            cacheURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("primuse-http-\(song.id)")
+            cacheRelativePath = nil
+        }
+
+        return CloudPlaybackSource.makeHTTPInputSource(
+            song: song,
+            url: url,
+            totalLength: song.fileSize,
+            cacheURL: cacheURL,
+            persistOnComplete: cacheEnabled && sourceManager != nil,
+            cacheRelativePath: cacheRelativePath
+        )
+    }
+
+    private func decoderKind(for song: Song, url: URL) -> DecoderKind {
+        if url.scheme == SourceManager.cloudStreamingScheme { return .cloudStream }
+        if url.scheme == "http" || url.scheme == "https" {
+            return song.fileSize > 0 ? .httpStream : .streaming
+        }
+        return .native
     }
 
     private func prefetchNextSong() {
@@ -854,7 +989,7 @@ final class AudioPlayerService {
             let settings = playbackSettings.snapshot()
             if settings.replayGainEnabled, url.isFileURL {
                 Task { [id] in
-                    await self.applyReplayGain(for: url, mode: settings.replayGainMode)
+                    await self.applyReplayGain(for: song, url: url, mode: settings.replayGainMode)
                     guard self.playID == id else { return }
                 }
             }
@@ -883,13 +1018,48 @@ final class AudioPlayerService {
 
                 if let finalBuffer = lastBuffer {
                     guard !Task.isCancelled, self.playID == id else { return }
-                    self.scheduleLastBuffer(finalBuffer, playID: id)
+                    await self.scheduleDecodedFinalBuffer(finalBuffer, playID: id)
                 }
             }
         } catch {
             plog("⚠️ AssetReader fallback also failed: \(error.localizedDescription)")
             isLoading = false
             await autoAdvanceAfterFailure()
+        }
+    }
+
+    private func scheduleDecodedFinalBuffer(_ buffer: AVAudioPCMBuffer, playID id: UUID) async {
+        guard shouldAttemptGapless(settings: playbackSettings.snapshot()),
+              nextSongInQueue() != nil else {
+            scheduleLastBuffer(buffer, playID: id)
+            return
+        }
+
+        let transition = GaplessTransitionState(queueGeneration: queueGeneration)
+        audioEngine.scheduleBuffer(
+            buffer,
+            completionCallbackType: .dataPlayedBack
+        ) { [weak self, transition] _ in
+            plog("🔔 gapless boundary fired playID=\(id.uuidString.prefix(8))")
+            Task { @MainActor [weak self] in
+                guard let self, self.playID == id else { return }
+                await self.handleGaplessBoundary(transition: transition, playID: id)
+            }
+        }
+
+        startGaplessPreparation(playID: id, transition: transition)
+    }
+
+    private func shouldAttemptGapless(settings: PlaybackSettings) -> Bool {
+        guard settings.gaplessEnabled,
+              !settings.crossfadeEnabled,
+              repeatMode != .one else { return false }
+
+        switch activeDecoderKind {
+        case .native, .httpStream, .cloudStream:
+            return true
+        case .streaming, .assetReader:
+            return false
         }
     }
 
@@ -929,6 +1099,13 @@ final class AudioPlayerService {
                 await self.autoAdvanceAfterFailure()
             }
         }
+    }
+
+    private func cancelGaplessTasks() {
+        gaplessPreparationTask?.cancel()
+        gaplessPreparationTask = nil
+        gaplessFollowupTask?.cancel()
+        gaplessFollowupTask = nil
     }
 
     func pause() {
@@ -977,6 +1154,7 @@ final class AudioPlayerService {
         }
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         crossfadeDecodingTask?.cancel()
         crossfadeDecodingTask = nil
         crossfadeTimer?.invalidate()
@@ -1011,6 +1189,7 @@ final class AudioPlayerService {
         }
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         crossfadeDecodingTask?.cancel()
         crossfadeDecodingTask = nil
         crossfadeTimer?.invalidate()
@@ -1092,6 +1271,7 @@ final class AudioPlayerService {
         // currentSong, and other state that stop() would tear down.
         decodingTask?.cancel()
         decodingTask = nil
+        cancelGaplessTasks()
         crossfadeDecodingTask?.cancel()
         crossfadeDecodingTask = nil
         audioEngine.stopPlayback()
@@ -1108,12 +1288,18 @@ final class AudioPlayerService {
                 guard playID == id else { return }
                 _ = AudioSessionManager.shared.activatePlaybackSession()
                 try audioEngine.setUp()
+                applySpatialAudioSettings()
                 guard let outputFormat = audioEngine.outputFormat else { return }
                 try audioEngine.start()
 
                 let settings = playbackSettings.snapshot()
                 if settings.replayGainEnabled {
-                    await applyReplayGain(for: url, mode: settings.replayGainMode)
+                    await applyReplayGain(
+                        for: song,
+                        url: url,
+                        mode: settings.replayGainMode,
+                        allowFileRead: activeDecoderKind != .cloudStream && activeDecoderKind != .httpStream
+                    )
                 }
 
                 // Use the same decoder that was used for initial playback.
@@ -1138,6 +1324,16 @@ final class AudioPlayerService {
                 switch activeDecoderKind {
                 case .native, .streaming:
                     stream = nativeDecoder.decode(from: seekURL, outputFormat: outputFormat, onResolveSourceLength: onResolveLength)
+                case .httpStream:
+                    if let cached = sourceManager?.cachedURL(for: song) {
+                        stream = nativeDecoder.decode(from: cached, outputFormat: outputFormat, onResolveSourceLength: onResolveLength)
+                    } else if let inputSource = await makeHTTPStreamingInputSource(for: song, url: url) {
+                        stream = nativeDecoder.decode(from: inputSource, outputFormat: outputFormat, onResolveSourceLength: onResolveLength)
+                    } else {
+                        plog("⚠️ Seek: failed to build HTTP streaming InputSource")
+                        isLoading = false
+                        return
+                    }
                 case .cloudStream:
                     // Build a fresh InputSource for the seek session. The
                     // sparse cache file from the prior session is reused
@@ -1228,7 +1424,7 @@ final class AudioPlayerService {
 
                     if let finalBuffer = lastBuffer {
                         guard !Task.isCancelled, self.playID == id else { return }
-                        self.scheduleLastBuffer(finalBuffer, playID: id)
+                        await self.scheduleDecodedFinalBuffer(finalBuffer, playID: id)
                     }
                 }
             } catch {
@@ -1265,7 +1461,8 @@ final class AudioPlayerService {
     }
 
     func setQueue(_ songs: [Song], startAt index: Int = 0) {
-        queue = songs
+        queueGeneration += 1
+        queueEntries = songs.map { QueueEntry(song: $0) }
         currentIndex = min(index, songs.count - 1)
         // Drop any pre-built next round — the queue itself changed, so
         // prior shuffle plans (and their indices into the old queue)
@@ -1274,139 +1471,282 @@ final class AudioPlayerService {
         if shuffleEnabled { rebuildShuffleOrder() }
     }
 
+    /// Wipe the queue. Replaces the legacy `player.queue = []` setter,
+    /// which is no longer accessible since `queue` is now computed.
+    func clearQueue() {
+        queueGeneration += 1
+        cancelGaplessTasks()
+        queueEntries = []
+        currentIndex = 0
+        pendingNextShuffleIndices = nil
+        shuffledIndices = []
+        shufflePosition = 0
+    }
+
+    /// Move queue rows. Used by the QueueView reorder handle. Beyond
+    /// the obvious `move`, this also invalidates any pending shuffle
+    /// plan and rebuilds the shuffle order — `shuffledIndices` stores
+    /// raw queue offsets, so a manual reorder makes those offsets
+    /// point at the wrong songs unless we regenerate them.
+    func moveQueueItems(fromOffsets source: IndexSet, toOffset destination: Int) {
+        queueGeneration += 1
+        queueEntries.move(fromOffsets: source, toOffset: destination)
+        pendingNextShuffleIndices = nil
+        if shuffleEnabled {
+            rebuildShuffleOrder()
+        }
+    }
+
     func syncSongMetadata(_ updatedSong: Song) {
         if currentSong?.id == updatedSong.id {
             currentSong = updatedSong
             updateNowPlayingInfo()
             updatePlaybackState()
         }
-        if let queueIndex = queue.firstIndex(where: { $0.id == updatedSong.id }) {
-            queue[queueIndex] = updatedSong
+        // Keep the per-row UUID stable — mutate only `song` so SwiftUI
+        // doesn't see a row disappear/reappear when metadata backfill
+        // rewrites tags mid-listening.
+        if let queueIndex = queueEntries.firstIndex(where: { $0.song.id == updatedSong.id }) {
+            queueEntries[queueIndex].song = updatedSong
         }
     }
 
     // MARK: - Gapless Playback
 
-    /// After current track's buffers are all scheduled, preload ONE next track's
-    /// buffers into the SAME playerNode. Uses a completion callback on the last
-    /// buffer to chain the next preload — no recursion.
-    private func gaplessPreloadNext(id: UUID) async {
-        guard self.playID == id else {
-            plog("🔄 gaplessPreload: ABORTED (playID mismatch)")
-            return
+    private func startGaplessPreparation(playID id: UUID, transition: GaplessTransitionState) {
+        gaplessPreparationTask?.cancel()
+        gaplessPreparationTask = Task { [id, transition] in
+            await self.prepareGaplessNextTrack(playID: id, transition: transition)
         }
-        guard var nextSong = nextSongInQueue() else {
-            // No next song — use completion callback to detect track end
-            scheduleEndDetection(id: id)
+    }
+
+    private func handleGaplessBoundary(
+        transition: GaplessTransitionState,
+        playID id: UUID
+    ) async {
+        transition.didBoundaryFire = true
+        let settings = playbackSettings.snapshot()
+
+        // The user can switch Crossfade on after the gapless final buffer
+        // has already been scheduled. In that race, the crossfade path owns
+        // the transition and will swap nodes; do not also advance here.
+        if settings.crossfadeEnabled, crossfadeTriggered {
+            transition.shouldCancelPreparation = true
+            gaplessPreparationTask?.cancel()
+            gaplessPreparationTask = nil
             return
         }
 
-        // For repeat-one, don't gapless-chain (use normal replay via callback)
-        if repeatMode == .one {
-            scheduleEndDetection(id: id)
+        if let lockedID = sleepStopAfterSongID, currentSong?.id == lockedID {
+            sleepStopAfterSongID = nil
+            transition.shouldCancelPreparation = true
+            cancelGaplessTasks()
+            stopAtTrackEnd()
             return
         }
 
-        // 跳过相邻同 title+artist 重复 (NAS 上同首歌的多版本)。
-        // gapless 路径 bypass 了 next() 函数, 所以这里也要 dedup。
-        if let cur = currentSong, queue.count > 2,
-           nextSong.title == cur.title, nextSong.artistName == cur.artistName {
-            plog("🔄 gaplessPreload: skip duplicate '\(nextSong.title)', advance one more")
-            advanceToNextIndex()
-            guard let after = nextSongInQueue() else {
-                scheduleEndDetection(id: id)
-                return
+        guard shouldAttemptGapless(settings: settings),
+              queueGeneration == transition.queueGeneration,
+              let prepared = transition.prepared,
+              nextSongInQueue()?.id == prepared.song.id else {
+            transition.shouldCancelPreparation = true
+            gaplessPreparationTask?.cancel()
+            gaplessPreparationTask = nil
+            await handleTrackEnd()
+            return
+        }
+
+        activateGaplessTrack(prepared, completedTransition: transition, playID: id)
+    }
+
+    private func activateGaplessTrack(
+        _ prepared: GaplessPreparedTrack,
+        completedTransition: GaplessTransitionState,
+        playID id: UUID
+    ) {
+        guard playID == id else { return }
+
+        if let previous = currentSong {
+            sourceManager?.finalizeStreamingSession(for: previous)
+        }
+
+        audioEngine.markTrackBoundary()
+        advanceToNextIndex()
+        currentSong = prepared.song
+        duration = prepared.song.duration.sanitizedDuration
+        currentTime = 0
+        isLoading = false
+        isPlaying = true
+        isAtTrackEnd = false
+        crossfadeTriggered = false
+        isCrossfading = false
+        activeDecoderKind = prepared.decoderKind
+        library?.recordPlayback(of: prepared.song.id)
+        ScrobbleService.shared.handlePlaybackStarted(song: prepared.song)
+        PlayHistoryStore.shared.beginSession(song: prepared.song)
+
+        let settings = playbackSettings.snapshot()
+        if settings.replayGainEnabled {
+            Task { [id] in
+                await self.applyReplayGain(
+                    for: prepared.song,
+                    url: prepared.url,
+                    mode: settings.replayGainMode,
+                    allowFileRead: prepared.decoderKind != .cloudStream && prepared.decoderKind != .httpStream
+                )
+                guard self.playID == id else { return }
             }
-            nextSong = after
+        } else {
+            audioEngine.resetPlayerVolume()
+        }
+
+        if duration <= 0,
+           prepared.decoderKind != .cloudStream,
+           prepared.decoderKind != .httpStream {
+            Task { [id] in
+                if let info = try? await self.nativeDecoder.fileInfo(for: prepared.url) {
+                    guard self.playID == id, self.currentSong?.id == prepared.song.id else { return }
+                    self.duration = info.duration.sanitizedDuration
+                    self.updateNowPlayingInfo()
+                }
+            }
+        }
+
+        startTimeUpdater()
+        updateNowPlayingInfo()
+        updateNowPlayingArtworkIfNeeded()
+        updatePlaybackState()
+        prefetchNextSong()
+        startGaplessFollowupPreparation(
+            playID: id,
+            after: completedTransition,
+            followingTransition: prepared.followingTransition
+        )
+    }
+
+    private func startGaplessFollowupPreparation(
+        playID id: UUID,
+        after completedTransition: GaplessTransitionState,
+        followingTransition: GaplessTransitionState
+    ) {
+        gaplessFollowupTask?.cancel()
+        gaplessFollowupTask = Task { [id, completedTransition, followingTransition] in
+            while !Task.isCancelled {
+                guard self.playID == id,
+                      self.queueGeneration == completedTransition.queueGeneration,
+                      !completedTransition.shouldCancelPreparation,
+                      !completedTransition.didFail else { return }
+                if completedTransition.isFullyScheduled { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+
+            guard !Task.isCancelled,
+                  self.playID == id,
+                  self.queueGeneration == followingTransition.queueGeneration else { return }
+            self.startGaplessPreparation(playID: id, transition: followingTransition)
+        }
+    }
+
+    private func prepareGaplessNextTrack(
+        playID id: UUID,
+        transition: GaplessTransitionState
+    ) async {
+        guard playID == id,
+              queueGeneration == transition.queueGeneration,
+              !transition.shouldCancelPreparation,
+              shouldAttemptGapless(settings: playbackSettings.snapshot()),
+              let nextSong = nextSongInQueue() else { return }
+
+        var nextURL: URL
+        var nextDecoderKind: DecoderKind
+        do {
+            nextURL = try await resolvedURL(for: nextSong)
+            nextDecoderKind = decoderKind(for: nextSong, url: nextURL)
+        } catch {
+            plog("Gapless prepare URL error: \(error.localizedDescription)")
+            return
+        }
+
+        guard playID == id,
+              queueGeneration == transition.queueGeneration,
+              !transition.shouldCancelPreparation,
+              nextDecoderKind == .native || nextDecoderKind == .httpStream || nextDecoderKind == .cloudStream,
+              nextDecoderKind != .native || nativeDecoder.canDecode(url: nextURL),
+              let outputFormat = audioEngine.outputFormat else { return }
+
+        guard let stream = await decodeStream(for: nextSong, url: nextURL, outputFormat: outputFormat) else {
+            return
+        }
+
+        let followingTransition = GaplessTransitionState(queueGeneration: queueGeneration)
+        var lastBuffer: AVAudioPCMBuffer?
+        var didMarkPrepared = false
+
+        func markPreparedIfNeeded() {
+            guard !didMarkPrepared else { return }
+            didMarkPrepared = true
+            transition.prepared = GaplessPreparedTrack(
+                song: nextSong,
+                url: nextURL,
+                decoderKind: nextDecoderKind,
+                followingTransition: followingTransition
+            )
+            plog("🔄 gapless prepared next track '\(nextSong.title)'")
         }
 
         do {
-            let nextURL = try await resolvedURL(for: nextSong)
-            guard nativeDecoder.canDecode(url: nextURL),
-                  let outputFormat = audioEngine.outputFormat else {
-                scheduleEndDetection(id: id)
-                return
-            }
-
-            // Mark the sample boundary for time tracking
-            audioEngine.markTrackBoundary()
-
-            // Update state for the new track
-            advanceToNextIndex()
-            plog("🔄 gaplessPreload: currentSong → \(nextSong.title)")
-            currentSong = nextSong
-            duration = nextSong.duration
-            currentTime = 0
-            crossfadeTriggered = false; isCrossfading = false
-            library?.recordPlayback(of: nextSong.id)
-
-            // Apply ReplayGain for next track
-            let settings = playbackSettings.snapshot()
-            if settings.replayGainEnabled {
-                await applyReplayGain(for: nextURL, mode: settings.replayGainMode)
-            }
-
-            // Decode and schedule next track's buffers (only this one track)
-            guard let stream = await decodeStream(for: nextSong, url: nextURL, outputFormat: outputFormat) else {
-                scheduleEndDetection(id: id)
-                return
-            }
-            var isFirst = true
-            var lastBuffer: AVAudioPCMBuffer?
-
             for try await buffer in stream {
-                guard !Task.isCancelled, self.playID == id else { return }
+                guard !Task.isCancelled,
+                      playID == id,
+                      queueGeneration == transition.queueGeneration,
+                      !transition.shouldCancelPreparation else { return }
 
                 if let prev = lastBuffer {
                     audioEngine.scheduleBuffer(prev)
+                    markPreparedIfNeeded()
                 }
                 lastBuffer = buffer
-
-                if isFirst {
-                    isFirst = false
-                    Task {
-                        if let info = try? await nativeDecoder.fileInfo(for: nextURL) {
-                            self.duration = info.duration.sanitizedDuration
-                        }
-                    }
-                    updateNowPlayingInfo()
-                    updateNowPlayingArtworkIfNeeded()
-                    updatePlaybackState()
-                }
             }
-
-            // Schedule the last buffer with completion → chain next preload
-            if let finalBuffer = lastBuffer {
-                guard !Task.isCancelled, self.playID == id else { return }
+        } catch {
+            guard !Task.isCancelled,
+                  playID == id,
+                  queueGeneration == transition.queueGeneration,
+                  !transition.shouldCancelPreparation else { return }
+            transition.didFail = true
+            plog("Gapless prepare decode error: \(error.localizedDescription)")
+            if let tailBuffer = lastBuffer {
                 audioEngine.scheduleBuffer(
-                    finalBuffer,
+                    tailBuffer,
                     completionCallbackType: .dataPlayedBack
                 ) { [weak self] _ in
                     Task { @MainActor [weak self] in
                         guard let self, self.playID == id else { return }
-                        // Chain: preload the NEXT track when this one finishes playing
-                        await self.gaplessPreloadNext(id: id)
+                        await self.autoAdvanceAfterFailure()
                     }
                 }
+                markPreparedIfNeeded()
+                transition.isFullyScheduled = true
             }
-        } catch {
-            plog("Gapless preload error: \(error)")
-            scheduleEndDetection(id: id)
+            return
         }
-    }
 
-    /// Schedule a silent buffer with completion callback to detect when all audio finishes.
-    private func scheduleEndDetection(id: UUID) {
-        guard let silence = createSilentBuffer(frameCount: 1) else { return }
+        guard !Task.isCancelled,
+              playID == id,
+              queueGeneration == transition.queueGeneration,
+              !transition.shouldCancelPreparation,
+              let finalBuffer = lastBuffer else { return }
+
         audioEngine.scheduleBuffer(
-            silence,
+            finalBuffer,
             completionCallbackType: .dataPlayedBack
-        ) { [weak self] _ in
+        ) { [weak self, followingTransition] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.playID == id else { return }
-                await self.handleTrackEnd()
+                await self.handleGaplessBoundary(transition: followingTransition, playID: id)
             }
         }
+        markPreparedIfNeeded()
+        transition.isFullyScheduled = true
     }
 
     // MARK: - Crossfade
@@ -1434,6 +1774,7 @@ final class AudioPlayerService {
 
         do {
             let nextURL = try await resolvedURL(for: nextSong)
+            let nextDecoderKind = decoderKind(for: nextSong, url: nextURL)
             guard nativeDecoder.canDecode(url: nextURL),
                   let outputFormat = audioEngine.outputFormat else {
                 crossfadeTriggered = false; isCrossfading = false
@@ -1487,7 +1828,8 @@ final class AudioPlayerService {
                 startCrossfadeRamp(
                     duration: crossfadeDuration,
                     nextSong: nextSong,
-                    nextURL: nextURL
+                    nextURL: nextURL,
+                    nextDecoderKind: nextDecoderKind
                 )
             }
         } catch {
@@ -1496,7 +1838,12 @@ final class AudioPlayerService {
         }
     }
 
-    private func startCrossfadeRamp(duration: Double, nextSong: Song, nextURL: URL) {
+    private func startCrossfadeRamp(
+        duration: Double,
+        nextSong: Song,
+        nextURL: URL,
+        nextDecoderKind: DecoderKind
+    ) {
         let totalSteps = max(1, Int(duration / 0.05))
         let stepCounter = StepCounter()
         let rampPlayID = playID
@@ -1514,7 +1861,7 @@ final class AudioPlayerService {
                 if progress >= 1.0 {
                     self.crossfadeTimer?.invalidate()
                     self.crossfadeTimer = nil
-                    self.completeCrossfade(nextSong: nextSong, nextURL: nextURL)
+                    self.completeCrossfade(nextSong: nextSong, nextURL: nextURL, nextDecoderKind: nextDecoderKind)
                 } else {
                     // Equal-power crossfade curve: maintains perceived loudness
                     // through the transition (no "dip" in the middle like linear)
@@ -1528,7 +1875,7 @@ final class AudioPlayerService {
         }
     }
 
-    private func completeCrossfade(nextSong: Song, nextURL: URL) {
+    private func completeCrossfade(nextSong: Song, nextURL: URL, nextDecoderKind: DecoderKind) {
         // Stop old decoding
         decodingTask?.cancel()
         decodingTask = nil
@@ -1546,6 +1893,7 @@ final class AudioPlayerService {
         // 误以为又开了一首新歌, 重新计时)。
         let newID = UUID()
         playID = newID
+        activeDecoderKind = nextDecoderKind
         crossfadeTriggered = false; isCrossfading = false
         isCrossfading = false
         plog("🔄 completeCrossfade: swap done, currentSong=\(nextSong.title)")
@@ -1553,12 +1901,23 @@ final class AudioPlayerService {
         // Apply ReplayGain (now on the swapped primary node)
         let settings = playbackSettings.snapshot()
         if settings.replayGainEnabled {
-            Task { await applyReplayGain(for: nextURL, mode: settings.replayGainMode) }
+            Task {
+                await applyReplayGain(
+                    for: nextSong,
+                    url: nextURL,
+                    mode: settings.replayGainMode,
+                    allowFileRead: nextDecoderKind != .cloudStream && nextDecoderKind != .httpStream
+                )
+            }
         }
 
-        Task {
-            if let info = try? await nativeDecoder.fileInfo(for: nextURL) {
-                self.duration = info.duration
+        if nextDecoderKind != .cloudStream,
+           nextDecoderKind != .httpStream,
+           nextDecoderKind != .streaming {
+            Task {
+                if let info = try? await nativeDecoder.fileInfo(for: nextURL) {
+                    self.duration = info.duration
+                }
             }
         }
 
@@ -1568,34 +1927,72 @@ final class AudioPlayerService {
 
     // MARK: - ReplayGain
 
-    private func applyReplayGain(for url: URL, mode: ReplayGainMode) async {
-        let metadata = await FileMetadataReader.read(from: url)
+    private struct ReplayGainValues {
+        var gain: Double?
+        var peak: Double?
 
-        let gain: Double?
-        let peak: Double?
+        var hasValue: Bool {
+            gain != nil || peak != nil
+        }
+    }
 
-        switch mode {
-        case .track:
-            gain = metadata.replayGainTrackGain
-            peak = metadata.replayGainTrackPeak
-        case .album:
-            gain = metadata.replayGainAlbumGain ?? metadata.replayGainTrackGain
-            peak = metadata.replayGainAlbumPeak ?? metadata.replayGainTrackPeak
+    private func applyReplayGain(
+        for song: Song,
+        url: URL,
+        mode: ReplayGainMode,
+        allowFileRead: Bool = true
+    ) async {
+        let storedValues = replayGainValues(from: song, mode: mode)
+        if storedValues.hasValue {
+            audioEngine.applyReplayGain(gain: storedValues.gain, peak: storedValues.peak)
+            return
         }
 
-        audioEngine.applyReplayGain(gain: gain, peak: peak)
+        guard allowFileRead else {
+            audioEngine.applyReplayGain(gain: nil, peak: nil)
+            return
+        }
+
+        let metadata = await FileMetadataReader.read(from: url)
+        let values = replayGainValues(from: metadata, mode: mode)
+        audioEngine.applyReplayGain(gain: values.gain, peak: values.peak)
+    }
+
+    private func replayGainValues(from song: Song, mode: ReplayGainMode) -> ReplayGainValues {
+        switch mode {
+        case .track:
+            return ReplayGainValues(
+                gain: song.replayGainTrackGain,
+                peak: song.replayGainTrackPeak
+            )
+        case .album:
+            return ReplayGainValues(
+                gain: song.replayGainAlbumGain ?? song.replayGainTrackGain,
+                peak: song.replayGainAlbumPeak ?? song.replayGainTrackPeak
+            )
+        }
+    }
+
+    private func replayGainValues(from metadata: FileMetadataReader.Metadata, mode: ReplayGainMode) -> ReplayGainValues {
+        switch mode {
+        case .track:
+            return ReplayGainValues(
+                gain: metadata.replayGainTrackGain,
+                peak: metadata.replayGainTrackPeak
+            )
+        case .album:
+            return ReplayGainValues(
+                gain: metadata.replayGainAlbumGain ?? metadata.replayGainTrackGain,
+                peak: metadata.replayGainAlbumPeak ?? metadata.replayGainTrackPeak
+            )
+        }
     }
 
     // MARK: - Time Updates
 
     private func startTimeUpdater() {
         stopTimeUpdater()
-        // Timer.scheduledTimer 默认挂在 .default run loop mode,窗口拖
-        // 拽 / 菜单展开 / SwiftUI 动画期间会暂停发,导致 currentTime
-        // 发布滞后,UI 端 (尤其桌面歌词 NSPanel) 看到歌词卡住,只在
-        // 主窗口聚焦时 syncPlaybackProgressFromEngine() 才"赶上来"。
-        // 改成手动建 Timer 加到 .common 模式,这些场景下也能持续触发。
-        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        displayLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 // crossfade 期间 audioEngine 报的还是旧曲 primary node 时间,
@@ -1623,37 +2020,23 @@ final class AudioPlayerService {
                 self.checkCrossfade()
             }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        displayLink = timer
-
-        #if os(macOS)
-        // 播放期间抑制 App Nap,防止后台切到低优先级时 Timer 节流;
-        // 系统休眠不阻止 (idleSystemSleepDisabled),只是别让 macOS 把
-        // 我们 nap 掉。stopTimeUpdater 里释放 token。
-        if appNapToken == nil {
-            appNapToken = ProcessInfo.processInfo.beginActivity(
-                options: [.userInitiated, .latencyCritical],
-                reason: "Primuse audio playback in progress"
-            )
-        }
-        #endif
     }
 
     private func stopTimeUpdater() {
         displayLink?.invalidate()
         displayLink = nil
-        #if os(macOS)
-        if let token = appNapToken {
-            ProcessInfo.processInfo.endActivity(token)
-            appNapToken = nil
-        }
-        #endif
     }
 
     // MARK: - Track End
 
     private func handleTrackEnd() async {
         plog("⏭️ handleTrackEnd() currentSong=\(currentSong?.title ?? "nil") playID=\(playID?.uuidString.prefix(8) ?? "nil")")
+        // 曲终停止 sleep 模式 ── 锁定的歌刚播完, 暂停而不是 advance。
+        if let lockedID = sleepStopAfterSongID, currentSong?.id == lockedID {
+            sleepStopAfterSongID = nil
+            stopAtTrackEnd()  // 进 "已播完但保留 currentSong" 状态, 跟用户手动暂停一致
+            return
+        }
         switch repeatMode {
         case .one:
             if let song = currentSong { await play(song: song) }
@@ -1788,16 +2171,6 @@ final class AudioPlayerService {
         return order
     }
 
-    private func createSilentBuffer(frameCount: AVAudioFrameCount) -> AVAudioPCMBuffer? {
-        guard let format = audioEngine.outputFormat,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            return nil
-        }
-        buffer.frameLength = frameCount
-        // Buffer is zero-initialized by default — silence
-        return buffer
-    }
-
     // MARK: - URL Resolution
 
     private func resolvedURL(for song: Song) async throws -> URL {
@@ -1826,6 +2199,16 @@ final class AudioPlayerService {
 
     /// Tracks which cover we last loaded to avoid redundant disk reads
     private var lastArtworkFileName: String?
+
+    /// 单调递增的封面刷新 token。当刮削回写完成、cache 失效但 coverArtFileName
+    /// 字符串可能没变（hash deterministic）时, view 上的 onChange(coverRef) 不会
+    /// 触发 reload, @State image 卡在旧 UIImage。CachedArtworkView 监听这个
+    /// token, 任意 bump 都能强制三个封面位重新走 loadImage。
+    private(set) var coverRevision: Int = 0
+
+    func bumpCoverRevision() {
+        coverRevision &+= 1
+    }
 
     private func updateNowPlayingInfo() {
         guard currentSong != nil else {
@@ -1876,17 +2259,17 @@ final class AudioPlayerService {
             let store = MetadataAssetStore.shared
 
             // Tier 1: songID-based cache (透明处理 content-addressed redirect)
-            var loadedImage: PlatformImage?
+            var loadedImage: UIImage?
             let hashedName = store.expectedCoverFileName(for: songID)
             if let data = store.readCoverData(named: hashedName) {
-                loadedImage = PlatformImage(data: data)
+                loadedImage = UIImage(data: data)
             }
 
             // Tier 2: legacy filename (local hashed filename, no "/" or "://")
             if loadedImage == nil, let coverRef, !coverRef.isEmpty,
                !coverRef.contains("/"), !coverRef.contains("://") {
                 if let data = store.readCoverData(named: coverRef) {
-                    loadedImage = PlatformImage(data: data)
+                    loadedImage = UIImage(data: data)
                 }
             }
 
@@ -1913,7 +2296,7 @@ final class AudioPlayerService {
                 if let data = fetchedData {
                     // Cache for next time
                     await store.cacheCover(data, forSongID: songID)
-                    loadedImage = PlatformImage(data: data)
+                    loadedImage = UIImage(data: data)
                 }
             }
 
@@ -1926,7 +2309,7 @@ final class AudioPlayerService {
                     let metadata = await FileMetadataReader.read(from: cachedURL)
                     if let coverData = metadata.coverArtData {
                         await store.cacheCover(coverData, forSongID: songID)
-                        loadedImage = PlatformImage(data: coverData)
+                        loadedImage = UIImage(data: coverData)
                     }
                 }
             }
@@ -1949,10 +2332,11 @@ final class AudioPlayerService {
     /// Resets lastArtworkFileName so the guard check passes.
     func forceRefreshNowPlayingArtwork() {
         lastArtworkFileName = nil
+        bumpCoverRevision()
         updateNowPlayingArtworkIfNeeded()
     }
 
-    func updateNowPlayingArtwork(_ image: PlatformImage) {
+    func updateNowPlayingArtwork(_ image: UIImage) {
         lastArtworkFileName = currentSong?.coverArtFileName
         let artwork = Self.makeArtwork(from: image)
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
@@ -1963,7 +2347,7 @@ final class AudioPlayerService {
     /// Creates MPMediaItemArtwork with a non-isolated requestHandler closure.
     /// Must be nonisolated so the closure doesn't inherit @MainActor isolation —
     /// MediaPlayer calls the handler on a background dispatch queue.
-    nonisolated private static func makeArtwork(from image: PlatformImage) -> MPMediaItemArtwork {
+    nonisolated private static func makeArtwork(from image: UIImage) -> MPMediaItemArtwork {
         let safeImage = image
         return MPMediaItemArtwork(boundsSize: image.size) { _ in safeImage }
     }
@@ -2003,10 +2387,27 @@ final class AudioPlayerService {
         }
     }
 
+    /// 曲终停止 ── 锁定当前曲目, 等它播完 (currentSong 变化或变 nil) 时
+    /// 自动暂停。如果 currentSong 是空的就什么也不做。
+    func scheduleSleepAtTrackEnd() {
+        cancelSleep()
+        sleepStopAfterSongID = currentSong?.id
+    }
+
     func cancelSleep() {
         sleepTimerTask?.cancel()
         sleepTimerTask = nil
         sleepTimerEndDate = nil
+        sleepStopAfterSongID = nil
+    }
+
+    /// 在 player 切歌路径里 (next / 队列自动推进) 调一次 ── 如果"曲终停止"
+    /// 已激活并且当前曲目就是 sleep 锁定的那首, 暂停播放并清除 sleep state。
+    /// 不在 sleep 模式时是 no-op。
+    func handleSongTransitionForSleep(previousSongID: String?) {
+        guard let lockedID = sleepStopAfterSongID, previousSongID == lockedID else { return }
+        pause()
+        sleepStopAfterSongID = nil
     }
 
     // MARK: - Shared Playback State
@@ -2016,15 +2417,7 @@ final class AudioPlayerService {
     /// Coalesces repeated WidgetKit reload requests with identical content.
     private var lastWidgetTimelineSignature: String?
 
-    func publishWidgetStateForMacWidgetSync() {
-        updatePlaybackState()
-    }
-
     private func updatePlaybackState() {
-        #if os(macOS)
-        guard MacWidgetSyncSettings.isEnabled else { return }
-        #endif
-
         var coverName: String?
         var recentAlbumsChanged = false
 
@@ -2079,11 +2472,9 @@ final class AudioPlayerService {
     }
 
     /// Writes a cover image to the App Group shared container for Widget rendering.
-    /// Returns the filename if successful. macOS has no widget extension in
-    /// this build, so the call collapses to a no-op there.
+    /// Returns the filename if successful.
     @discardableResult
     private func writeWidgetCover(song: Song, fileName: String, size: CGFloat = 300) -> String? {
-        #if os(iOS)
         guard let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: PrimuseConstants.appGroupIdentifier
         ) else { return nil }
@@ -2138,9 +2529,6 @@ final class AudioPlayerService {
         } catch {
             return nil
         }
-        #else
-        return nil
-        #endif
     }
 
     private func sharedWidgetCoverExists(named fileName: String) -> Bool {

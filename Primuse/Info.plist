@@ -9,7 +9,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Primuse</string>
+	<string>猿音</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -55,6 +55,8 @@
 	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.music</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Primuse uses Apple Music to search the catalog and play tracks if you have an active subscription.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -76,14 +78,17 @@
 		<string>_https._tcp.</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Primuse needs local network access to discover and connect to your NAS devices, media servers, and other music sources.</string>
+	<string>猿音需要访问本地网络以发现和连接您的 NAS 设备、媒体服务器及其他音乐源。</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Primuse uses headphone motion to keep Spatial Audio anchored while you move your head.</string>
 	<key>NSSiriUsageDescription</key>
-	<string>Used to start playback and control Primuse with Siri voice commands.</string>
+	<string>用 Siri 语音点播、控制猿音播放。</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>INPlayMediaIntent</string>
+		<string>com.welape.yuanyin.nowplaying</string>
 	</array>
 	<key>PrimuseBaiduClientID</key>
 	<string>$(BAIDU_CLIENT_ID)</string>
@@ -97,6 +102,10 @@
 	<string>$(GOOGLE_CLIENT_ID)</string>
 	<key>PrimuseGoogleReversedClientID</key>
 	<string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
+	<key>PrimuseLastFmAPIKey</key>
+	<string>$(LASTFM_API_KEY)</string>
+	<key>PrimuseLastFmAPISecret</key>
+	<string>$(LASTFM_API_SECRET)</string>
 	<key>PrimuseOneDriveClientID</key>
 	<string>$(ONEDRIVE_CLIENT_ID)</string>
 	<key>UIApplicationSceneManifest</key>
@@ -114,6 +123,17 @@
 					<string>CarPlay</string>
 					<key>UISceneDelegateClassName</key>
 					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+				</dict>
+			</array>
+			<key>UIWindowSceneSessionRoleExternalDisplayNonInteractive</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>UIWindowScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>ExternalDisplay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).ExternalDisplaySceneDelegate</string>
 				</dict>
 			</array>
 		</dict>

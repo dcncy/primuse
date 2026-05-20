@@ -30,21 +30,12 @@ enum CloudPlaybackSource {
     /// 但比 cold-start 卡顿 5s 重要得多。
     static let chunkSize: Int64 = 1024 * 1024
 
-    /// 默认一次性后台并发预取这么多个 chunk (大文件场景)。
-    /// 实际值会按 file size 自适应: 小文件 (<= prefetchSmallFileThreshold)
-    /// 直接拉整个文件, SFB 任意 seek 都 cache hit。
+    /// 默认一次性后台并发预取这么多个 chunk。
     /// 4 而不是 8: 8 路并发 + 1 user fetch 给 NAS 太多压力, 实测每个 chunk
     /// fetch 从 0.5s 变 1.5s, 反而拖慢 firstBuffer。配合 user fetch 等待
     /// in-flight prefetch 复用结果, 4 路 + 复用 = 实际有效 5+ 个 chunk
     /// 同时 cover, 性能更稳。
     static let prefetchAhead: Int = 4
-
-    /// 小于这个 size 的文件, prefetch 一次性覆盖整个文件 (减去 head + tail)。
-    /// mp3 SFB.open() 阶段会跳读到中段做 frame index seek (实测跳到 1MB / 6MB
-    /// / 9MB 等位置), 顺序 prefetch ahead=N 完全覆盖不到。直接全文件 prefetch
-    /// 让 SFB 任意 seek 都 hit。20MB = 典型 mp3 (4-15MB) 全覆盖, 长 flac
-    /// (50MB+) 不全拉避免冷启动流量爆炸。
-    static let prefetchSmallFileThreshold: Int64 = 20 * 1024 * 1024
 
     /// Size of the head chunk that `SourceManager.prewarmCloudSong` fetches
     /// for the next-up song. Marker JSON 描述 partial 里哪些 ranges 已 prewarm。
@@ -118,6 +109,62 @@ enum CloudPlaybackSource {
         persistOnComplete: Bool = true,
         cacheRelativePath: String? = nil
     ) -> InputSource? {
+        let path = song.filePath
+        let connectorFetch: @Sendable (Int64, Int64) async throws -> Data = { off, len in
+            try await connector.fetchRange(path: path, offset: off, length: len)
+        }
+
+        return makeInputSource(
+            label: song.title,
+            sourceURL: makeSourceURL(scheme: "primuse-cloud", song: song),
+            totalLength: totalLength,
+            cacheURL: cacheURL,
+            persistOnComplete: persistOnComplete,
+            cacheRelativePath: cacheRelativePath,
+            connectorFetch: connectorFetch
+        )
+    }
+
+    /// Build an `InputSource` for a direct HTTP(S) playback URL. This is
+    /// used for media servers, UPnP, and NAS plain streaming URLs so
+    /// playback can start from byte ranges instead of waiting for
+    /// `URLSession.download` to finish the whole file.
+    static func makeHTTPInputSource(
+        song: Song,
+        url: URL,
+        totalLength: Int64,
+        cacheURL: URL,
+        persistOnComplete: Bool = true,
+        cacheRelativePath: String? = nil
+    ) -> InputSource? {
+        guard totalLength > 0,
+              url.scheme == "http" || url.scheme == "https" else { return nil }
+
+        let fetcher = HTTPRangeFetcher(url: url, totalLength: totalLength)
+        let fetch: @Sendable (Int64, Int64) async throws -> Data = { off, len in
+            try await fetcher.fetch(offset: off, length: len)
+        }
+
+        return makeInputSource(
+            label: song.title,
+            sourceURL: makeSourceURL(scheme: "primuse-http", song: song),
+            totalLength: totalLength,
+            cacheURL: cacheURL,
+            persistOnComplete: persistOnComplete,
+            cacheRelativePath: cacheRelativePath,
+            connectorFetch: fetch
+        )
+    }
+
+    private static func makeInputSource(
+        label: String,
+        sourceURL: URL?,
+        totalLength: Int64,
+        cacheURL: URL,
+        persistOnComplete: Bool,
+        cacheRelativePath: String?,
+        connectorFetch: @escaping @Sendable (Int64, Int64) async throws -> Data
+    ) -> InputSource? {
         let partialURL = URL(fileURLWithPath: cacheURL.path + ".partial")
         let markerURL = URL(fileURLWithPath: partialURL.path + prewarmMarkerSuffix)
 
@@ -142,15 +189,10 @@ enum CloudPlaybackSource {
             FileManager.default.createFile(atPath: partialURL.path, contents: nil)
         }
 
-        let path = song.filePath
-        let connectorFetch: @Sendable (Int64, Int64) async throws -> Data = { off, len in
-            try await connector.fetchRange(path: path, offset: off, length: len)
-        }
-
-        plog("☁️ makeInputSource '\(song.title)' totalLength=\(totalLength) initialRanges=\(initialRanges.map { "[\($0.lowerBound)..\($0.upperBound))" }.joined(separator: ","))")
+        plog("☁️ makeInputSource '\(label)' totalLength=\(totalLength) initialRanges=\(initialRanges.map { "[\($0.lowerBound)..\($0.upperBound))" }.joined(separator: ","))")
 
         let state = State(
-            label: song.title,
+            label: label,
             partialURL: partialURL,
             finalURL: cacheURL,
             totalLength: totalLength,
@@ -166,10 +208,18 @@ enum CloudPlaybackSource {
         }
 
         return CloudInputSourceObjC(
-            url: URL(string: "primuse-cloud://\(song.sourceID)\(song.filePath)"),
+            url: sourceURL,
             totalLength: totalLength,
             fetch: block
         )
+    }
+
+    private static func makeSourceURL(scheme: String, song: Song) -> URL? {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = song.sourceID
+        components.path = song.filePath.hasPrefix("/") ? song.filePath : "/" + song.filePath
+        return components.url
     }
 
     // MARK: - Active session registry
@@ -229,6 +279,54 @@ private final class FetchResultBox: @unchecked Sendable {
     var error: Error?
 }
 
+private final class HTTPRangeFetcher: @unchecked Sendable {
+    private let url: URL
+    private let totalLength: Int64
+    private let session: URLSession
+
+    init(url: URL, totalLength: Int64) {
+        self.url = url
+        self.totalLength = totalLength
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 600
+        config.httpMaximumConnectionsPerHost = 6
+        self.session = URLSession(configuration: config, delegate: SmartSSLDelegate(), delegateQueue: nil)
+    }
+
+    func fetch(offset: Int64, length: Int64) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let rangeHeader = offset < 0
+            ? "bytes=\(offset)"
+            : "bytes=\(offset)-\(offset + length - 1)"
+        request.setValue(rangeHeader, forHTTPHeaderField: "Range")
+        request.timeoutInterval = 60
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AudioDecoderError.decodingFailed("Invalid HTTP range response")
+        }
+
+        switch http.statusCode {
+        case 206:
+            return data
+        case 200 where offset == 0:
+            // Server ignored Range. Returning the full body lets the cache
+            // complete in one pass, matching the old full-download behavior
+            // without corrupting non-zero offsets.
+            return data
+        case 200:
+            throw AudioDecoderError.decodingFailed("HTTP server ignored Range")
+        case 416 where offset >= totalLength:
+            return Data()
+        default:
+            throw AudioDecoderError.decodingFailed("HTTP \(http.statusCode)")
+        }
+    }
+}
+
 /// Per-source mutable state. Held by the fetch block via the closure
 /// capture; lives as long as the InputSource itself.
 private final class State: @unchecked Sendable {
@@ -271,6 +369,30 @@ private final class State: @unchecked Sendable {
     private var fetchCount: Int = 0
     private var fetchTotalElapsed: TimeInterval = 0
     private var fetchTotalBytes: Int = 0
+    /// SFB read 命中已 cache 部分的次数 / 字节。跟 fetchCount 一起在切歌时
+    /// 输出 summary, 看 cache 复用率, 帮诊断"为什么这首歌仍然卡 ── 是 SFB
+    /// 反复跨 chunk 边界 cache miss, 还是云盘真的拉不动"。
+    private var cacheHitCount: Int = 0
+    private var cacheHitBytes: Int = 0
+    /// 每个 chunkStart 累计被 fetch 的次数。第 2 次 + 时打 retry 日志,
+    /// 不正常应用情况下 SFB 不应该让同一个 chunk 被 fetch 多次 (fetch
+    /// 完会写 cache, 下次 read 应该 cache hit)。出现 retry > 1 通常是
+    /// 上次 fetch 写 cache 失败 / 或解码器的 short-read 触发了 chunk
+    /// 重新对齐。
+    private var fetchAttemptByChunk: [Int64: Int] = [:]
+    /// 本 session 最慢 / 最快的单次 fetch, 帮诊断网络抖动是均匀慢还是
+    /// 单次 spike。
+    private var maxFetchElapsed: TimeInterval = 0
+    private var slowestChunkStart: Int64 = -1
+    private var minFetchElapsed: TimeInterval = .greatestFiniteMagnitude
+    /// 等待并行 prefetch 完成的次数和总等待时间。这两个值高 = SFB 读到一个
+    /// 已经在 prefetch 的 chunk, prefetch 没赶上 SFB 节奏 (chunk size 太大
+    /// 或 prefetchAhead 不够)。
+    private var prefetchWaitCount: Int = 0
+    private var prefetchWaitTotalElapsed: TimeInterval = 0
+    /// session 创建到 finalize 之间是否输出过摘要, 防止重复输出 (例如
+    /// 同一 session 被 finalize 两次)。
+    private var summaryEmitted: Bool = false
 
     /// 「补全 trailing 缺口」任务是否已经派出去过。每个 session 只跑一次,
     /// 防止 writeToCache 反复触发 + 多个 in-flight fill 互相打架。
@@ -316,18 +438,16 @@ private final class State: @unchecked Sendable {
         if offset >= totalLength { return Data() }
         let endOffset = min(offset + length, totalLength)
 
-        // 入口立即触发 prefetch (后续 N 个 chunk), 让 prefetch 与 user-facing
-        // fetch 真正并发跑。之前 prefetch 在 serve 末尾触发, cache miss 时
-        // 主 fetch 1s 阻塞 + prefetch 串行启动 → SFB 接下来读下一个 chunk
-        // 还是 cache miss + 等下一次 fetch。改到入口后, SFB 读 chunk N 的
-        // user fetch 与 chunk N+1..N+4 prefetch 并行, 整体 firstBuffer
-        // 时间从 3s 降到 ~1s (单次 RTT)。
-        prefetchIfNeeded(startOffset: offset)
-
         let served: Data?
 
         // Cache hit — read straight from disk.
         if let cached = readFromCacheIfAvailable(offset: offset, endOffset: endOffset) {
+            // 不每次 plog, 累计在 finalize summary 输出 (read 一首歌可能几百
+            // 次, 每次打日志会淹没真正重要的 fetch / 失败信息)。
+            lock.lock()
+            cacheHitCount += 1
+            cacheHitBytes += cached.count
+            lock.unlock()
             served = cached
         } else {
             // Chunk-align fetch, but skip already-cached prefix within
@@ -352,33 +472,69 @@ private final class State: @unchecked Sendable {
             }()
             let want = chunkEnd - chunkStart
 
-            // 关键优化: 如果这个 chunk 已经被 prefetch task 在拉, 等它完成读
-            // cache, 而不是并发自己再发一个 fetch (SFB 顺序读时 user fetch
-            // 紧跟 prefetch, 双 fetch 同 chunk 浪费 NAS 带宽且让两边都变慢)。
+            // Foreground decode must never wait long behind background
+            // prefetch. Give an already-running prefetch a tiny chance to
+            // finish, then issue the user-facing fetch anyway. On slow WAN
+            // links this avoids "next track spins while prefetch owns the
+            // connection pool" behavior.
             lock.lock()
             let prefetchActive = prefetchInFlight.contains(chunkStart)
             lock.unlock()
             if prefetchActive {
-                // Poll cache (background thread, sleep OK). Prefetch 完成
-                // (成功写 cache 或失败移除 in-flight) 时退出 wait。
-                let waitDeadline = Date().addingTimeInterval(8)
+                let waitStart = Date()
+                let waitDeadline = waitStart.addingTimeInterval(0.15)
                 while Date() < waitDeadline {
                     Thread.sleep(forTimeInterval: 0.03)
                     if let cached = readFromCacheIfAvailable(offset: offset, endOffset: endOffset) {
+                        let elapsed = Date().timeIntervalSince(waitStart)
+                        lock.lock()
+                        prefetchWaitCount += 1
+                        prefetchWaitTotalElapsed += elapsed
+                        lock.unlock()
+                        cacheHitCountIncrement(by: cached.count)
+                        if elapsed > 0.1 {
+                            plog(String(format: "⏳ Cloud stream '%@' waited %.0fms for prefetch chunkStart=%lld (then served from cache)",
+                                        label, elapsed * 1000, chunkStart))
+                        }
                         return cached
                     }
                     lock.lock()
                     let stillInFlight = prefetchInFlight.contains(chunkStart)
                     lock.unlock()
                     if !stillInFlight {
-                        // Prefetch 退出了 — 再读 cache, 命中就返回; 否则
-                        // (prefetch 失败) fall through 到 user fetch 路径。
                         if let cached = readFromCacheIfAvailable(offset: offset, endOffset: endOffset) {
+                            let elapsed = Date().timeIntervalSince(waitStart)
+                            lock.lock()
+                            prefetchWaitCount += 1
+                            prefetchWaitTotalElapsed += elapsed
+                            lock.unlock()
+                            cacheHitCountIncrement(by: cached.count)
                             return cached
                         }
+                        let elapsed = Date().timeIntervalSince(waitStart)
+                        plog(String(format: "⚠️ Cloud stream '%@' prefetch chunkStart=%lld dropped (waited %.0fms, falling back to user fetch)",
+                                    label, chunkStart, elapsed * 1000))
                         break
                     }
                 }
+                if Date() >= waitDeadline {
+                    let elapsed = Date().timeIntervalSince(waitStart)
+                    plog(String(format: "⏩ Cloud stream '%@' foreground fetch bypassing slow prefetch chunkStart=%lld after %.0fms",
+                                label, chunkStart, elapsed * 1000))
+                }
+            }
+
+            // 记录这次 fetch 的 attempt 次数。SFB 正常顺序读时每个 chunk 应该
+            // 只 fetch 一次, attempt > 1 说明上次 fetch 完成但 cache 没写到
+            // SFB 期望的位置 (e.g. partial fetch, short read), 或者解码器
+            // 跳读后又回来。
+            lock.lock()
+            let attempt = (fetchAttemptByChunk[chunkStart] ?? 0) + 1
+            fetchAttemptByChunk[chunkStart] = attempt
+            lock.unlock()
+            if attempt > 1 {
+                plog(String(format: "🔁 Cloud stream '%@' fetch RETRY chunkStart=%lld attempt=%d (offsetReq=%lld)",
+                            label, chunkStart, attempt, offset))
             }
 
             // Bridge async → sync. SFBAudioEngine's decode thread isn't
@@ -435,6 +591,13 @@ private final class State: @unchecked Sendable {
             fetchCount += 1
             fetchTotalElapsed += elapsed
             fetchTotalBytes += data.count
+            if elapsed > maxFetchElapsed {
+                maxFetchElapsed = elapsed
+                slowestChunkStart = chunkStart
+            }
+            if elapsed < minFetchElapsed {
+                minFetchElapsed = elapsed
+            }
             let count = fetchCount
             let totalElapsed = fetchTotalElapsed
             let totalBytes = fetchTotalBytes
@@ -490,15 +653,10 @@ private final class State: @unchecked Sendable {
         // startOffset was just fetched (or hit cache). Prefetch the ones
         // after it so SFB doesn't stall when it crosses boundaries.
         let baseChunkStart = ((startOffset / chunkSize) + 1) * chunkSize
-        // 小文件直接拉到结尾, mp3 SFB.open() 跳读全文件做 frame index seek 时
-        // 任意位置都 cache hit。大文件用固定 ahead 数量避免一次性流量爆炸。
-        let aheadCount: Int = {
-            if totalLength <= CloudPlaybackSource.prefetchSmallFileThreshold {
-                let remaining = max(0, totalLength - baseChunkStart)
-                return Int((remaining + chunkSize - 1) / chunkSize)
-            }
-            return CloudPlaybackSource.prefetchAhead
-        }()
+        // 始终固定少量前瞻。不要按“小文件”切换成整首预取:
+        // 真实音乐库里大部分 mp3 都小于 20MB, 那会让普通播放退化成
+        // 整首后台下载, 在蜂窝 / 外网 NAS 上既抢前台带宽也浪费流量。
+        let aheadCount = CloudPlaybackSource.prefetchAhead
         for i in 0..<aheadCount {
             let nextChunkStart = baseChunkStart + Int64(i) * chunkSize
             guard nextChunkStart < totalLength else { return }
@@ -552,6 +710,50 @@ private final class State: @unchecked Sendable {
         lock.lock()
         fetchDisabled = true
         lock.unlock()
+    }
+
+    /// 把 cacheHit 累计字段加锁更新成原子动作。serve 多入口都要计数, 抽出
+    /// 来比每处 lock/unlock 易读。
+    private func cacheHitCountIncrement(by bytes: Int) {
+        lock.lock()
+        cacheHitCount += 1
+        cacheHitBytes += bytes
+        lock.unlock()
+    }
+
+    /// 在 finalizeSession / disconnect 之前打一次本 session 的统计摘要。
+    /// 用来回头看一首歌为什么卡 ── 是 fetch 慢还是 SFB 反复 short-read 重读
+    /// 还是 prefetch 跟不上, 一行能定位。
+    fileprivate func emitSessionSummary() {
+        lock.lock()
+        if summaryEmitted { lock.unlock(); return }
+        summaryEmitted = true
+        let count = fetchCount
+        let totalElapsed = fetchTotalElapsed
+        let maxE = maxFetchElapsed
+        let slow = slowestChunkStart
+        let minE = minFetchElapsed == .greatestFiniteMagnitude ? 0 : minFetchElapsed
+        let hit = cacheHitCount
+        let hitKB = cacheHitBytes / 1024
+        let pwCount = prefetchWaitCount
+        let pwElapsed = prefetchWaitTotalElapsed
+        let retries = fetchAttemptByChunk.values.filter { $0 > 1 }.count
+        let cachedKB = cachedRanges.reduce(0) { $0 + Int($1.upperBound - $1.lowerBound) } / 1024
+        let totalKB = Int(totalLength) / 1024
+        let sinceFirst = firstServeAt.map { Date().timeIntervalSince($0) } ?? 0
+        lock.unlock()
+
+        plog(String(format:
+            "📊 Cloud SUMMARY '%@' %dKB/%dKB cached, fetch=%d (%.2fs avg=%.2fs min=%.2fs max=%.2fs@%lld) retry=%d hit=%d/%dKB prefetchWait=%d/%.2fs lifetime=%.1fs",
+            label,
+            cachedKB, totalKB,
+            count, totalElapsed,
+            count > 0 ? totalElapsed / Double(count) : 0,
+            minE, maxE, slow,
+            retries,
+            hit, hitKB,
+            pwCount, pwElapsed,
+            sinceFirst))
     }
 
     /// Caller MUST hold `lock`. Returns true when `cachedRanges`
@@ -678,6 +880,14 @@ private final class State: @unchecked Sendable {
     /// - 缺口太大 (用户跳过没听到那段): 不动, .partial 留着 LRU / pruneStale
     ///   后续清理。
     fileprivate func finalizeSession() {
+        // 不论结果如何, finalize 时机一律输出一次 session summary, 用来对照
+        // 本首歌的 fetch / cache / prefetch 表现。emitSessionSummary 内部
+        // dedupe, 多次调用只输出一次。
+        emitSessionSummary()
+        // Audio Cache 关闭时 streaming 文件只放在 NSTemporaryDirectory 供
+        // 本次 SFB 解码读取。不要在用户切歌/停止后继续补齐临时文件, 否则
+        // 会把"边播边取"退化成后台整首下载。
+        guard persistOnComplete else { return }
         lock.lock()
         // 已经 rename 过了, 啥也不做。
         if activeURL == finalURL {

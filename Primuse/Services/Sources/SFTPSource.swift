@@ -158,6 +158,14 @@ actor SFTPSource: MusicSourceConnector {
         }
     }
 
+    func deleteFile(at path: String) async throws {
+        guard let sftp else {
+            throw SourceError.connectionFailed("Not connected")
+        }
+
+        try await sftp.remove(at: resolvedRemotePath(for: path))
+    }
+
     /// SFTP READ via Citadel's `SFTPFile.read(from:length:)`。SFTP 协议级支持
     /// 任意 offset 读, 让 CloudPlaybackSource 边下边播替代整文件下载。
     /// 每次开关 file handle 一次 (SSH 连接复用), 8 路并发 prefetch 时

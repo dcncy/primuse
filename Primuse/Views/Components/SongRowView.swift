@@ -34,6 +34,8 @@ struct SongRowView: View {
     @State private var showSongInfo = false
     @State private var showDeleteConfirm = false
     @State private var showBareAlert = false
+    @State private var showTagEditor = false
+    @State private var showSimilarSongs = false
 
     /// Cloud songs added by Phase A scan stay non-playable until the
     /// backfill fills `duration` (needed for the progress bar / seek).
@@ -43,8 +45,13 @@ struct SongRowView: View {
     /// unknown would otherwise look "ready" but auto-advance to it would
     /// hand the player a track it can't render properly.
     private var isBare: Bool { !song.isPlayable }
+    private var offlineSnapshot: OfflineAudioCacheSnapshot {
+        sourceManager.offlineAudioSnapshot(for: song)
+    }
 
     var body: some View {
+        let offline = offlineSnapshot
+
         HStack(spacing: 10) {
             // Cover art with playing overlay
             ZStack {
@@ -126,6 +133,8 @@ struct SongRowView: View {
 
             Spacer()
 
+            OfflineAudioStatusBadge(snapshot: offline)
+
             if showsActions {
                 Menu {
                     // Group 1: Actions
@@ -141,6 +150,14 @@ struct SongRowView: View {
                         } label: {
                             Label(String(localized: "add_to_playlist"), systemImage: "text.badge.plus")
                         }
+
+                        Button {
+                            showSimilarSongs = true
+                        } label: {
+                            Label(String(localized: "similar_songs"), systemImage: "sparkles")
+                        }
+
+                        offlineActionButton(snapshot: offline)
 
                         Button {
                             showSongInfo = true
@@ -171,13 +188,18 @@ struct SongRowView: View {
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
                 }
-                // macOS 默认会在 Menu 旁边再画一个下拉小箭头,跟我们的
-                // ellipsis 图标重复;隐藏它只保留 ⋯,跟 iOS 行为一致。
-                .menuIndicator(.hidden)
-                .fixedSize()
+                .accessibilityLabel("a11y_more_actions")
             }
         }
         .contentShape(Rectangle())
+        // VoiceOver 把整行合并成一个可选元素,读出来 "歌名,艺术家",
+        // 操作菜单走 contextMenu (VoiceOver 长按手势仍可触发)。
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(
+            [song.title, song.artistName]
+                .compactMap { $0 }
+                .joined(separator: " — ")
+        ))
         // Bare songs (still being filled by MetadataBackfillService) are
         // tap-disabled with a clear hint rather than just visually dimmed.
         // The overlay is layered above the row's content so its tap
@@ -208,10 +230,24 @@ struct SongRowView: View {
                 }
 
                 Button {
+                    showTagEditor = true
+                } label: {
+                    Label(String(localized: "tag_editor_menu"), systemImage: "tag")
+                }
+
+                Button {
                     showAddToPlaylist = true
                 } label: {
                     Label(String(localized: "add_to_playlist"), systemImage: "text.badge.plus")
                 }
+
+                Button {
+                    showSimilarSongs = true
+                } label: {
+                    Label(String(localized: "similar_songs"), systemImage: "sparkles")
+                }
+
+                offlineActionButton(snapshot: offline)
 
                 Button {
                     showSongInfo = true
@@ -236,20 +272,6 @@ struct SongRowView: View {
                 }
             }
         }
-        #if os(macOS)
-        // macOS 改成独立 NSWindow (ScrapeWindowController) —— 带原生红灯,
-        // 不再走 sheet。showScrapeOptions 只用来触发开窗,然后立刻置 false。
-        .onChange(of: showScrapeOptions) { _, new in
-            guard new else { return }
-            ScrapeWindowController.shared.show(song: song) { updated in
-                CachedArtworkView.invalidateCache(for: updated.id)
-                if let oldRef = song.coverArtFileName {
-                    CachedArtworkView.invalidateCache(for: oldRef)
-                }
-            }
-            showScrapeOptions = false
-        }
-        #else
         .sheet(isPresented: $showScrapeOptions) {
             ScrapeOptionsView(song: song) { updated in
                 CachedArtworkView.invalidateCache(for: updated.id)
@@ -261,9 +283,17 @@ struct SongRowView: View {
             // 搜索数量 picker 挤到下方,用户不知道要上滑会以为功能消失。
             .presentationDetents([.large])
         }
-        #endif
+        .sheet(isPresented: $showTagEditor) {
+            TagEditorView(song: song)
+                .presentationDetents([.large])
+        }
         .sheet(isPresented: $showAddToPlaylist) {
             AddToPlaylistSheet(song: song)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showSimilarSongs) {
+            SimilarSongsSheet(seed: song)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -280,28 +310,278 @@ struct SongRowView: View {
         } message: {
             Text(String(localized: "delete_song_message"))
         }
+        .task(id: song.id) {
+            await sourceManager.refreshOfflineAudioSnapshot(for: song)
+        }
+    }
+
+    @ViewBuilder
+    private func offlineActionButton(snapshot: OfflineAudioCacheSnapshot) -> some View {
+        switch snapshot.state {
+        case .downloading:
+            Button {} label: {
+                Label(String(localized: "offline_downloading"), systemImage: "arrow.down.circle")
+            }
+            .disabled(true)
+        case .pinned:
+            Button(role: .destructive) {
+                sourceManager.removeOfflineDownload(song: song)
+            } label: {
+                Label(String(localized: "offline_remove_download"), systemImage: "trash")
+            }
+        case .cached:
+            Button {
+                sourceManager.downloadForOffline(song: song)
+            } label: {
+                Label(String(localized: "offline_keep_cached"), systemImage: "pin")
+            }
+        case .failed:
+            Button {
+                sourceManager.downloadForOffline(song: song)
+            } label: {
+                Label(String(localized: "offline_retry_download"), systemImage: "arrow.clockwise")
+            }
+        case .notCached:
+            Button {
+                sourceManager.downloadForOffline(song: song)
+            } label: {
+                Label(String(localized: "offline_download"), systemImage: "arrow.down.circle")
+            }
+        }
     }
 
     private func deleteSong() {
-        // Stop if currently playing
-        if player.currentSong?.id == song.id {
-            Task { await player.next() }
-        }
-        // Clean caches
-        let songID = song.id
         Task {
-            await MetadataAssetStore.shared.invalidateCoverCache(forSongID: songID)
-            await MetadataAssetStore.shared.invalidateLyricsCache(forSongID: songID)
+            // Stop if currently playing
+            if player.currentSong?.id == song.id {
+                await player.next()
+            }
+            let retainedSongs = library.songs.filter { $0.id != song.id }
+            let deleteSidecars = sourceManager.shouldDeleteSidecars(for: song, retaining: retainedSongs)
+            _ = await sourceManager.deleteSourceFilesAndCaches(for: song, deleteSidecars: deleteSidecars)
+            // Remove from library and keep the source badge in sync.
+            let remaining = library.deleteSong(song)
+            sourcesStore.updateLocal(song.sourceID) { $0.songCount = remaining }
         }
-        CachedArtworkView.invalidateCache(for: song.id)
-        sourceManager.deleteAudioCache(for: song)
-        // Remove from library and keep the source badge in sync.
-        let remaining = library.deleteSong(song)
-        sourcesStore.updateLocal(song.sourceID) { $0.songCount = remaining }
     }
 
     private func formatDuration(_ duration: TimeInterval) -> String {
         duration.formattedDuration
+    }
+}
+
+private struct OfflineAudioStatusBadge: View {
+    let snapshot: OfflineAudioCacheSnapshot
+
+    var body: some View {
+        switch snapshot.state {
+        case .downloading:
+            ProgressView(value: snapshot.progress)
+                .controlSize(.mini)
+                .frame(width: 20, height: 20)
+                .accessibilityLabel("offline_downloading")
+        case .pinned:
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.callout)
+                .foregroundStyle(.tint)
+                .accessibilityLabel("offline_available")
+        case .failed:
+            Image(systemName: "exclamationmark.circle")
+                .font(.callout)
+                .foregroundStyle(.orange)
+                .accessibilityLabel("offline_download_failed")
+        case .cached, .notCached:
+            EmptyView()
+        }
+    }
+}
+
+struct DiscoveryReasonsView: View {
+    let reasons: [MusicDiscoveryReason]
+    var maxCount: Int = 2
+
+    private var text: String {
+        let visible = reasons.prefix(maxCount)
+        guard !visible.isEmpty else {
+            return String(localized: "discovery_reason_libraryPick")
+        }
+        return visible
+            .map { String(localized: LocalizedStringResource(stringLiteral: $0.localizationKey)) }
+            .joined(separator: " · ")
+    }
+
+    var body: some View {
+        Label {
+            Text(text)
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: "sparkles")
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.tint)
+        .accessibilityLabel(text)
+    }
+}
+
+struct SimilarSongsSheet: View {
+    let seed: Song
+
+    @Environment(AudioPlayerService.self) private var player
+    @Environment(MusicLibrary.self) private var library
+    @Environment(\.dismiss) private var dismiss
+
+    private var results: [MusicDiscoveryResult] {
+        MusicDiscoveryEngine.similarSongs(to: seed, in: library, limit: 30)
+    }
+
+    private var radioQueue: [MusicDiscoveryResult] {
+        MusicDiscoveryEngine.songRadio(from: seed, in: library, limit: 48)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    seedRow
+                    if !results.isEmpty {
+                        Button {
+                            startSongRadio()
+                        } label: {
+                            Label(String(localized: "start_song_radio"), systemImage: "dot.radiowaves.left.and.right")
+                        }
+
+                        Button {
+                            startSimilarMix()
+                        } label: {
+                            Label(String(localized: "start_similar_mix"), systemImage: "play.circle.fill")
+                        }
+                    }
+                }
+
+                if results.isEmpty {
+                    ContentUnavailableView {
+                        Label(String(localized: "similar_songs_empty"), systemImage: "sparkles")
+                    } description: {
+                        Text(String(localized: "similar_songs_empty_desc"))
+                    }
+                    .listRowBackground(Color.clear)
+                } else {
+                    Section(String(localized: "similar_songs")) {
+                        ForEach(results) { result in
+                            Button {
+                                play(result.song)
+                            } label: {
+                                SimilarSongResultRow(result: result)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(String(localized: "similar_songs"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(String(localized: "done")) { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var seedRow: some View {
+        HStack(spacing: 10) {
+            CachedArtworkView(
+                coverRef: seed.coverArtFileName,
+                songID: seed.id,
+                size: 44,
+                cornerRadius: 6,
+                sourceID: seed.sourceID,
+                filePath: seed.filePath
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(seed.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(seed.artistName ?? seed.albumTitle ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func startSimilarMix() {
+        let queue = ([seed] + results.map(\.song)).filteredPlayable()
+        guard let first = queue.first else { return }
+        player.shuffleEnabled = false
+        player.setQueue(queue, startAt: 0)
+        dismiss()
+        Task { await player.play(song: first) }
+    }
+
+    private func startSongRadio() {
+        let queue = radioQueue.map(\.song).filteredPlayable()
+        guard let first = queue.first else { return }
+        player.shuffleEnabled = false
+        player.setQueue(queue, startAt: 0)
+        dismiss()
+        Task { await player.play(song: first) }
+    }
+
+    private func play(_ song: Song) {
+        let tail = results.map(\.song).filter { $0.id != song.id }
+        let queue = ([song] + tail).filteredPlayable()
+        guard let first = queue.first else { return }
+        player.shuffleEnabled = false
+        player.setQueue(queue, startAt: 0)
+        dismiss()
+        Task { await player.play(song: first) }
+    }
+}
+
+private struct SimilarSongResultRow: View {
+    let result: MusicDiscoveryResult
+
+    var body: some View {
+        let song = result.song
+        HStack(spacing: 10) {
+            CachedArtworkView(
+                coverRef: song.coverArtFileName,
+                songID: song.id,
+                size: 44,
+                cornerRadius: 6,
+                sourceID: song.sourceID,
+                filePath: song.filePath
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                HStack(spacing: 4) {
+                    if let artist = song.artistName {
+                        Text(artist)
+                    }
+                    if let album = song.albumTitle {
+                        Text("·")
+                        Text(album)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+                DiscoveryReasonsView(reasons: result.reasons, maxCount: 3)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 

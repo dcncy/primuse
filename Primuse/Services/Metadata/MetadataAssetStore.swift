@@ -241,6 +241,27 @@ actor MetadataAssetStore {
         return try? decoder.decode([LyricLine].self, from: data)
     }
 
+    /// Synchronous lyrics lookup for local search. Only reads Primuse's local
+    /// JSON lyric cache; it deliberately avoids network/source reads while the
+    /// user is typing.
+    nonisolated func cachedLyricsForSearch(songID: String, lyricsFileName: String?) -> [LyricLine]? {
+        var candidates: [URL] = []
+        if let lyricsFileName,
+           !lyricsFileName.isEmpty,
+           isLegacyLocalRef(lyricsFileName),
+           lyricsFileName.hasSuffix(".json") {
+            candidates.append(lyricsDirectoryURL.appendingPathComponent(lyricsFileName))
+        }
+        candidates.append(lyricsDirectoryURL.appendingPathComponent(expectedLyricsFileName(for: songID)))
+
+        for url in candidates {
+            guard let data = try? Data(contentsOf: url),
+                  let lines = try? JSONDecoder().decode([LyricLine].self, from: data) else { continue }
+            return lines
+        }
+        return nil
+    }
+
     /// Remove cached cover art for a specific song (e.g., after scraping updates it).
     /// 只删 ref 文件;content/ 里的物理 jpeg 留给 GC 处理(可能还被其他歌
     /// 引用)。

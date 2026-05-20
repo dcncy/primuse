@@ -3,12 +3,16 @@ import UIKit
 import PrimuseKit
 
 enum WidgetDesign {
-    static let ink = Color(red: 0.05, green: 0.07, blue: 0.12)
-    static let night = Color(red: 0.10, green: 0.09, blue: 0.18)
-    static let indigo = Color(red: 0.32, green: 0.41, blue: 0.95)
-    static let cyan = Color(red: 0.34, green: 0.86, blue: 0.84)
-    static let coral = Color(red: 0.98, green: 0.56, blue: 0.43)
-    static let lilac = Color(red: 0.58, green: 0.43, blue: 0.98)
+    static let ink = Color(red: 0.043, green: 0.067, blue: 0.071)
+    static let charcoal = Color(red: 0.075, green: 0.078, blue: 0.073)
+    static let graphite = Color(red: 0.135, green: 0.145, blue: 0.135)
+    static let sea = Color(red: 0.078, green: 0.490, blue: 0.541)
+    static let mint = Color(red: 0.33, green: 0.78, blue: 0.62)
+    static let amber = Color(red: 0.941, green: 0.706, blue: 0.353)
+    static let clay = Color(red: 0.82, green: 0.38, blue: 0.24)
+    static let rose = Color(red: 0.86, green: 0.35, blue: 0.42)
+    static let fern = Color(red: 0.24, green: 0.55, blue: 0.32)
+    static let sky = Color(red: 0.23, green: 0.58, blue: 0.86)
 
     /// Brand accent driven by the user's current app icon — the main app
     /// publishes this into the App Group, the widget reads it on every
@@ -18,13 +22,12 @@ enum WidgetDesign {
         if let rgb = BrandTintStore.load() {
             return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
         }
-        return Color(red: 0.20, green: 0.50, blue: 0.95)
+        return sea
     }
 
-    /// Deep base color that the brand-tinted overlay sits on top of. Keeps the
-    /// canvas dark enough to read white text against, no matter what tint the
-    /// user picked.
-    static let canvasBase = Color(red: 0.05, green: 0.06, blue: 0.10)
+    /// Neutral base for widget chrome. The selected app-icon tint is still used
+    /// as an accent, but it no longer paints the whole surface purple.
+    static let canvasBase = ink
 
     static let panelGradient = LinearGradient(
         colors: [
@@ -39,20 +42,35 @@ enum WidgetDesign {
     static let secondaryText = Color.white.opacity(0.76)
     static let tertiaryText = Color.white.opacity(0.52)
     static let hairline = Color.white.opacity(0.10)
-    static let glowHighlight = Color.white.opacity(0.14)
+    static let glowHighlight = Color.white.opacity(0.12)
 
-    static let placeholderGradients: [(Color, Color)] = [
-        (indigo, lilac),
-        (Color(red: 0.18, green: 0.55, blue: 0.92), Color(red: 0.20, green: 0.78, blue: 0.87)),
-        (Color(red: 0.58, green: 0.33, blue: 0.92), Color(red: 0.89, green: 0.40, blue: 0.67)),
-        (Color(red: 0.92, green: 0.50, blue: 0.34), Color(red: 0.73, green: 0.31, blue: 0.45)),
-        (Color(red: 0.27, green: 0.78, blue: 0.72), Color(red: 0.18, green: 0.52, blue: 0.72)),
+    static let placeholderGradients: [(Color, Color, Color)] = [
+        (sea, mint, amber),
+        (sky, sea, Color(red: 0.12, green: 0.30, blue: 0.36)),
+        (amber, clay, rose),
+        (fern, mint, Color(red: 0.16, green: 0.36, blue: 0.30)),
+        (rose, clay, Color(red: 0.32, green: 0.18, blue: 0.16)),
+        (Color(red: 0.36, green: 0.46, blue: 0.52), sky, mint),
     ]
 
     static func placeholderGradient(for index: Int) -> LinearGradient {
         let pair = placeholderGradients[index % placeholderGradients.count]
         return LinearGradient(
-            colors: [pair.0, pair.1],
+            colors: [pair.0, pair.1, pair.2],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    static func chromeGradient(tint: Color = brandTint) -> LinearGradient {
+        LinearGradient(
+            colors: [
+                graphite.opacity(0.94),
+                sea.opacity(0.20),
+                tint.opacity(0.05),
+                amber.opacity(0.14),
+                Color.black.opacity(0.30)
+            ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
@@ -71,36 +89,13 @@ struct WidgetCanvas<Content: View>: View {
     var body: some View {
         let tint = WidgetDesign.brandTint
         ZStack {
-            // Deep tinted dark base — the brand color shifts in subtly from
-            // top-left to bottom-right so the whole canvas reads as the
-            // user's chosen accent, not a fixed purple.
             WidgetDesign.canvasBase
+            WidgetDesign.chromeGradient(tint: tint)
             LinearGradient(
-                colors: [
-                    tint.opacity(0.10),
-                    tint.opacity(0.20),
-                    tint.opacity(0.32)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                colors: [tint.opacity(0.06), .clear, WidgetDesign.clay.opacity(0.12)],
+                startPoint: .topTrailing,
+                endPoint: .bottomLeading
             )
-
-            // Single brand glow in the upper-right corner — anchors the eye
-            // and gives the surface depth without competing color noise.
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [tint.opacity(0.50), .clear],
-                        center: .center,
-                        startRadius: 12,
-                        endRadius: 220
-                    )
-                )
-                .frame(width: 280, height: 280)
-                .offset(x: 80, y: -130)
-                .blendMode(.plusLighter)
-
-            // Frosted-glass highlight that sweeps across the surface.
             LinearGradient(
                 colors: [WidgetDesign.glowHighlight, .clear, Color.black.opacity(0.18)],
                 startPoint: .topLeading,
@@ -214,17 +209,10 @@ struct WidgetEmptyStateIcon: View {
     var size: CGFloat = 72
 
     var body: some View {
-        let tint = WidgetDesign.brandTint
         ZStack {
             Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [tint.opacity(0.55), tint.opacity(0.15)],
-                        center: .center,
-                        startRadius: 4,
-                        endRadius: size / 2
-                    )
-                )
+                .fill(WidgetDesign.placeholderGradient(for: 3))
+                .overlay(Color.black.opacity(0.10))
             Circle()
                 .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
             Image(systemName: systemName)
@@ -232,7 +220,7 @@ struct WidgetEmptyStateIcon: View {
                 .foregroundStyle(.white.opacity(0.92))
         }
         .frame(width: size, height: size)
-        .shadow(color: tint.opacity(0.30), radius: 12, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(0.22), radius: 12, x: 0, y: 4)
     }
 }
 
@@ -279,18 +267,10 @@ struct WidgetCoverImageView: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(WidgetDesign.placeholderGradient(for: placeholderIndex))
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.black.opacity(0.12))
-                Image(systemName: "waveform")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.58))
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            WidgetPlaceholderArtwork(
+                systemName: "waveform",
+                cornerRadius: cornerRadius,
+                placeholderIndex: placeholderIndex
             )
         }
     }
@@ -327,16 +307,10 @@ struct RecentAlbumCoverView: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(WidgetDesign.placeholderGradient(for: placeholderIndex))
-                Image(systemName: "music.note")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            WidgetPlaceholderArtwork(
+                systemName: "music.note",
+                cornerRadius: cornerRadius,
+                placeholderIndex: placeholderIndex
             )
         }
     }
@@ -354,6 +328,47 @@ struct RecentAlbumCoverView: View {
             return nil
         }
         return image
+    }
+}
+
+private struct WidgetPlaceholderArtwork: View {
+    let systemName: String
+    var cornerRadius: CGFloat
+    var placeholderIndex: Int
+
+    var body: some View {
+        GeometryReader { geometry in
+            let side = max(1, min(geometry.size.width, geometry.size.height))
+            let ringSize = side * 0.58
+
+            ZStack {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(WidgetDesign.placeholderGradient(for: placeholderIndex))
+                LinearGradient(
+                    colors: [Color.white.opacity(0.16), .clear, Color.black.opacity(0.28)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.22), lineWidth: max(1, side * 0.018))
+                    .frame(width: ringSize, height: ringSize)
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: max(1, side * 0.010))
+                    .frame(width: ringSize * 0.62, height: ringSize * 0.62)
+                Circle()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: side * 0.10, height: side * 0.10)
+                Image(systemName: systemName)
+                    .font(.system(size: max(12, side * 0.16), weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.70))
+                    .offset(x: side * 0.20, y: side * 0.20)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+            )
+        }
     }
 }
 

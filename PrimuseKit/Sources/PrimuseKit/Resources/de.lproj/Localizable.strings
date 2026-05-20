@@ -1,0 +1,3 @@
+// PrimuseKit strings ── 该区域暂无翻译,系统会回退到 en.lproj。
+// 当 PrimuseKit 内部有面向用户的字符串(如 cloud account auth 错误)需要
+// 翻译时,在这里覆盖对应 key。

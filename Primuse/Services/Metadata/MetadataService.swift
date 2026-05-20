@@ -21,6 +21,10 @@ actor MetadataService {
         var coverArtFileName: String?
         var lyricsFileName: String?
         var lyrics: [LyricLine]?
+        var replayGainTrackGain: Double?
+        var replayGainTrackPeak: Double?
+        var replayGainAlbumGain: Double?
+        var replayGainAlbumPeak: Double?
     }
 
     /// Load metadata with priority: sidecar → embedded → online
@@ -28,8 +32,8 @@ actor MetadataService {
     /// `trustedSource`: 是否把结果直接写入 hash cache。
     /// - true（默认）: LibraryScanner / Backfill 路径,数据来自 embedded/sidecar,可信。
     /// - false: ScraperService 路径,可能错配,**不写 cache**。
-    ///   等 sidecar 真正写到 source 成功后,由 ScraperService 自己回写 cache。
-    ///   这样 hash cache 永远只是 sidecar 的镜像,杜绝错配数据污染缓存。
+    ///   由 ScraperService 在用户确认/应用刮削结果时写入本地 cache；dry-run
+    ///   路径只返回预期文件名,不会提前污染现有缓存。
     func loadMetadata(
         for url: URL,
         cacheKey: String? = nil,
@@ -43,17 +47,22 @@ actor MetadataService {
 
         // url.lastPathComponent 在 scrape 路径下是 cache 的 sanitized 名
         // 丑名字。caller 传原始文件名当 fallbackTitle 优先用。
-        let urlBasedFallback = url.deletingPathExtension().lastPathComponent
-        let titleFallback = fallbackTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            ? fallbackTitle!
-            : urlBasedFallback
+        let rawURLBasedFallback = url.deletingPathExtension().lastPathComponent
+        let urlBasedFallback = FileMetadataReader.repairLegacyChineseMojibake(rawURLBasedFallback)
+        let repairedFallbackTitle = fallbackTitle.map(FileMetadataReader.repairLegacyChineseMojibake)
+        let titleFallback: String = if let repairedFallbackTitle,
+                                       !repairedFallbackTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            repairedFallbackTitle
+        } else {
+            urlBasedFallback
+        }
 
         // 防御: 历史上 FileMetadataReader 在没 TIT2 时会自动把 url basename
         // 塞进 embedded.title。这里再校一次, 万一别的读取路径返回 sanitized
         // 名 (如 "_music_xxx") 也当成空, 走真正的 fallback。
         let trustedEmbeddedTitle: String? = {
             guard let t = embedded.title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
-            return t == urlBasedFallback ? nil : embedded.title
+            return t == rawURLBasedFallback || t == urlBasedFallback ? nil : embedded.title
         }()
 
         var result = SongMetadata(
@@ -68,7 +77,11 @@ actor MetadataService {
             sampleRate: embedded.sampleRate,
             bitRate: embedded.bitRate,
             bitDepth: embedded.bitDepth,
-            coverArtData: embedded.coverArtData
+            coverArtData: embedded.coverArtData,
+            replayGainTrackGain: embedded.replayGainTrackGain,
+            replayGainTrackPeak: embedded.replayGainTrackPeak,
+            replayGainAlbumGain: embedded.replayGainAlbumGain,
+            replayGainAlbumPeak: embedded.replayGainAlbumPeak
         )
 
         // 2. Check sidecar files (higher priority for cover & lyrics)
@@ -108,8 +121,8 @@ actor MetadataService {
                 if trustedSource {
                     result.coverArtFileName = await assetStore.storeCover(coverArtData, for: cacheKey)
                 } else {
-                    // 仅占位 ref,不写 cache 文件 —— 留给 ScraperService 在 sidecar
-                    // 写到 source 成功后再回写,确保 hash cache 永远不存错配数据。
+                    // 仅占位 ref,不写 cache 文件 —— dry-run 预览和直接刮削都需要
+                    // 先知道最终 ref,实际写入由 ScraperService 在应用结果时完成。
                     result.coverArtFileName = assetStore.expectedCoverFileName(for: cacheKey)
                 }
             }

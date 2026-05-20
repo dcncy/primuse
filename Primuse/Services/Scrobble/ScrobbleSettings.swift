@@ -88,6 +88,7 @@ enum LastFmCredentialsStore {
     private static let apiKeyAccount = "scrobble.lastFm.apiKey"
     private static let apiSecretAccount = "scrobble.lastFm.apiSecret"
     private static let sessionKeyAccount = ScrobbleProviderID.lastFm.keychainAccount
+    private static let pendingAuthTokenKey = "primuse.scrobble.lastFm.pendingAuthToken"
 
     static func saveAPIKey(_ key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -119,9 +120,24 @@ enum LastFmCredentialsStore {
     static func loadAPISecret() -> String { KeychainService.getPassword(for: apiSecretAccount) ?? "" }
     static func loadSessionKey() -> String { KeychainService.getPassword(for: sessionKeyAccount) ?? "" }
 
+    static func savePendingAuthToken(_ token: String?) {
+        let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: pendingAuthTokenKey)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: pendingAuthTokenKey)
+        }
+    }
+
+    static func loadPendingAuthToken() -> String? {
+        guard let token = UserDefaults.standard.string(forKey: pendingAuthTokenKey),
+              !token.isEmpty else { return nil }
+        return token
+    }
+
     /// 实际使用的 API key — 用户在 Settings 高级里粘了自己的就用自己的,
-    /// 没粘就 fallback 到 app 内置的 default (`AppSecrets.lastFmAPIKey`)。
-    /// 让普通用户开箱即用, 同时保留「我想用自己的 application 配额」的逃生口。
+    /// 没粘就 fallback 到 build-time default (`Secrets.local.xcconfig`)。
+    /// 让发行构建可配置默认 key, 同时保留「我想用自己的 application 配额」的逃生口。
     static func effectiveAPIKey() -> String {
         let user = loadAPIKey()
         if !user.isEmpty { return user }
@@ -158,5 +174,6 @@ enum LastFmCredentialsStore {
     /// 重新走 web auth 不用再粘一次 key。
     static func signOut() {
         KeychainService.deletePassword(for: sessionKeyAccount)
+        savePendingAuthToken(nil)
     }
 }

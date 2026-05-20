@@ -69,6 +69,10 @@ protocol MusicSourceConnector: Sendable {
     /// Write data to a remote path. Used by sidecar file writing (cover art, lyrics).
     func writeFile(data: Data, to path: String) async throws
 
+    /// Delete a remote file. Used by song deletion to remove the source audio
+    /// file and safe same-name sidecars.
+    func deleteFile(at path: String) async throws
+
     /// Count audio files in a directory (recursive). Default implementation uses scanAudioFiles.
     func countAudioFiles(in path: String) async throws -> Int
 
@@ -83,9 +87,25 @@ protocol MusicSourceConnector: Sendable {
     /// Default implementation falls back to a full download via `localURL`,
     /// which is correct but slow — cloud connectors should override.
     func fetchRange(path: String, offset: Int64, length: Int64) async throws -> Data
+
+    /// 批量预热下载链接 / 元数据。给定一组 path, connector 提前 batch 拿
+    /// (并 cache) 后续 fetchRange 需要的 dlink / CDN URL / 鉴权信息。
+    ///
+    /// 出现意义: 百度网盘 filemetas API 单次 fsids 数组最多 100 个, batch
+    /// 后单次调用能换 100 首歌的 dlink, 1w 首库下省 99% API 配额。其他
+    /// connector 不需要这个 (NAS 直连 / WebDAV 都没单 path 一次的限速)。
+    ///
+    /// 默认实现 noop, 不强制 connector 实现。失败不抛错 ── 仅是优化, 失败
+    /// 时 backfill 仍能走 single-path 慢路径。
+    func prefetchMetadata(paths: [String]) async
 }
 
 extension MusicSourceConnector {
+    /// 默认 noop ── 大多数 connector 不需要预热, 单次 fetchRange 自带的
+    /// metadata resolve 已经够。只有受限速 / batch API 收益高的源 (百度网盘)
+    /// 才 override。
+    func prefetchMetadata(paths: [String]) async {}
+
     func streamingURL(for path: String) async throws -> URL? { nil }
     func imageURL(for path: String) async throws -> URL? {
         // Default: use streamingURL as fallback (works for any file)
@@ -101,6 +121,10 @@ extension MusicSourceConnector {
 
     func writeFile(data: Data, to path: String) async throws {
         throw SourceError.connectionFailed("This source does not support file writing")
+    }
+
+    func deleteFile(at path: String) async throws {
+        throw SourceError.connectionFailed("This source does not support file deletion")
     }
 
     /// Default fallback: download the whole file via `localURL` then slice.

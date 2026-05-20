@@ -1,0 +1,85 @@
+// Korean — high-priority strings. Keys not present here fall back to English.
+// Native-speaker review recommended before App Store submission.
+
+// Tabs / Sections
+"home_title" = "홈";
+"library_title" = "라이브러리";
+"search_title" = "검색";
+"settings_title" = "설정";
+"tab_songs" = "곡";
+"tab_albums" = "앨범";
+"tab_artists" = "아티스트";
+"tab_playlists" = "재생 목록";
+"recently_added" = "최근 추가됨";
+"see_all" = "모두 보기";
+
+// Greetings
+"greeting_morning" = "좋은 아침입니다";
+"greeting_afternoon" = "안녕하세요";
+"greeting_evening" = "좋은 저녁입니다";
+"greeting_night" = "안녕히 주무세요";
+
+// Common actions
+"cancel" = "취소";
+"done" = "완료";
+"save" = "저장";
+"skip" = "건너뛰기";
+"delete" = "삭제";
+"share" = "공유";
+"later" = "나중에";
+
+// NowPlaying / Player
+"add_to_playlist" = "재생 목록에 추가";
+"scrape_song" = "메타데이터 가져오기";
+"song_info" = "곡 정보";
+"delete_song" = "곡 삭제";
+"queue" = "대기열";
+
+// Onboarding
+"onboarding_welcome_title" = "당신의 음악, 당신의 서버";
+"onboarding_welcome_subtitle" = "Primuse는 당신의 NAS, 클라우드 드라이브, 홈 네트워크에서 음악을 재생합니다. 파일을 어디에도 업로드하지 않습니다.";
+"onboarding_sources_title" = "모든 소스에 연결";
+"onboarding_sources_nas" = "Synology, QNAP, Ugreen, SMB / NFS 공유";
+"onboarding_sources_cloud" = "Baidu Pan, OneDrive, Google Drive, Dropbox";
+"onboarding_sources_webdav" = "WebDAV, FTP, SFTP — 비밀번호 보호 지원";
+"onboarding_sources_dlna" = "네트워크의 UPnP / DLNA 미디어 서버";
+"onboarding_sources_footer" = "언제든지 원하는 만큼 추가할 수 있습니다.";
+"onboarding_privacy_title" = "온전히 당신의 것";
+"onboarding_privacy_no_tracking" = "분석, 광고, 외부 추적 없음";
+"onboarding_privacy_icloud" = "라이브러리 설정은 당신의 iCloud로만 동기화";
+"onboarding_privacy_local" = "오디오 파일은 소스를 벗어나지 않습니다";
+"onboarding_next" = "계속";
+"onboarding_add_first_source" = "첫 번째 소스 추가";
+"onboarding_later" = "나중에";
+
+// Tag Editor
+"tag_editor_menu" = "태그 편집";
+"tag_editor_title_navigation" = "태그 편집";
+"tag_editor_basic_section" = "기본 정보";
+"tag_editor_extra_section" = "세부 정보";
+"tag_editor_title" = "제목";
+"tag_editor_artist" = "아티스트";
+"tag_editor_album" = "앨범";
+"tag_editor_genre" = "장르";
+"tag_editor_year" = "연도";
+"tag_editor_track" = "트랙 번호";
+"tag_editor_disc" = "디스크 번호";
+"tag_editor_reset" = "원래대로 되돌리기";
+"tag_editor_reset_confirm" = "편집 내용을 취소하시겠습니까?";
+"tag_editor_footer" = "편집 내용은 Primuse 내에만 적용되며 iCloud를 통해 동기화됩니다. 원본 파일은 수정되지 않습니다.";
+
+// VoiceOver / a11y
+"a11y_shuffle" = "셔플";
+"a11y_repeat" = "반복";
+"a11y_button_generic" = "버튼";
+"a11y_value_on" = "켜짐";
+"a11y_value_off" = "꺼짐";
+"a11y_play" = "재생";
+"a11y_pause" = "일시 정지";
+"a11y_previous_track" = "이전 곡";
+"a11y_next_track" = "다음 곡";
+"a11y_queue" = "재생 대기열";
+"a11y_open_lyrics" = "가사 표시";
+"a11y_close_lyrics" = "가사 숨김";
+"a11y_favorite_add" = "재생 목록에 추가";
+"a11y_more_actions" = "추가 작업";

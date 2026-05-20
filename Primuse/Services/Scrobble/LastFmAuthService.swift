@@ -1,41 +1,23 @@
 import Foundation
-#if os(iOS)
-import UIKit
-#elseif os(macOS)
-import AppKit
-#endif
 
-/// Last.fm desktop auth flow 封装。
+/// Last.fm auth flow 封装。
 ///
-/// 移动 app 不能用 web auth (`cb=` 参数), 因为 Last.fm 注册时只接受 http(s)
-/// callback URL —— 不能注册 `primuse://` scheme, 用 `cb=primuse://...`
-/// 又跟注册时不匹配会被 Last.fm 403 拒绝。
+/// Last.fm 的 desktop auth 不会自动唤回 native app。授权成功后网页只会让
+/// 用户关闭浏览器并回到应用。UI 层用 SFSafariViewController 把这个浏览器
+/// 留在 App 内, dismiss 后自动调用 `completeLogin(token:)` 完成 session 交换。
 ///
-/// 用 desktop application auth flow, 拆成 user-driven 两步:
-/// 1. `startLogin()` —— 拿 token, 在外置 Safari 打开授权页, 返回 token
-///    给 UI 暂存
-/// 2. UI 上让用户「点 Allow → 回到 app → 点 我已授权」, 然后
-///    `completeLogin(token:)` 调 getSession 把 token 换成 sessionKey
-///
-/// **重要前提**: 用户必须**先**在 Safari 里登录 Last.fm 账号, 否则授权页
-/// 直接 Cloudflare 403 (Last.fm 反 abuse, 没登录态 + 带 token 的请求被拦)。
-/// UI 提供 `openLoginPage()` 入口让用户先去登录。
+/// 旧的「先登录 Last.fm」只打开 login 页面, 登录态只存在浏览器侧, App 没有
+/// token 可换 sessionKey, 因此会出现用户已网页登录但 App 仍显示未连接。
 @MainActor
 enum LastFmAuthService {
-    /// 打开 https://www.last.fm/login 让用户先登录 Last.fm 账号。
-    /// Safari 主程序登录后, cookie 共享给所有 in-app browser, 后续授权才不会 403。
-    static func openLoginPage() async {
-        guard let url = URL(string: "https://www.last.fm/login") else { return }
-        #if os(iOS)
-        await UIApplication.shared.open(url)
-        #elseif os(macOS)
-        NSWorkspace.shared.open(url)
-        #endif
+    struct AuthorizationRequest {
+        let token: String
+        let url: URL
     }
 
-    /// Step 1: 拿 token 并打开授权页。返回的 token 由 UI 持有, 等用户回来
-    /// 点「我已授权」时传给 `completeLogin(token:)`。
-    static func startLogin() async throws -> String {
+    /// Step 1: 拿 token 并返回授权 URL。UI 负责展示网页, token 暂存到
+    /// UserDefaults, 等网页 dismiss / app foreground 后换 sessionKey。
+    static func startLogin() async throws -> AuthorizationRequest {
         let apiKey = LastFmCredentialsStore.effectiveAPIKey()
         let apiSecret = LastFmCredentialsStore.effectiveAPISecret()
         guard !apiKey.isEmpty, !apiSecret.isEmpty else {
@@ -44,17 +26,26 @@ enum LastFmAuthService {
         _ = apiSecret  // silence unused
 
         let token = try await fetchToken(apiKey: apiKey)
-        let authURL = URL(string: "https://www.last.fm/api/auth/?api_key=\(apiKey)&token=\(token)")!
-        #if os(iOS)
-        await UIApplication.shared.open(authURL)
-        #elseif os(macOS)
-        NSWorkspace.shared.open(authURL)
-        #endif
-        return token
+        return AuthorizationRequest(token: token, url: try authorizationURL(token: token))
     }
 
-    /// Step 2: 用户回 app 点「我已授权」时调, 用 token 换 sessionKey 存
-    /// Keychain。返回 username 当 UI 反馈。
+    static func authorizationURL(token: String) throws -> URL {
+        let apiKey = LastFmCredentialsStore.effectiveAPIKey()
+        guard !apiKey.isEmpty else {
+            throw LastFmAuthError.missingCredentials
+        }
+        var components = URLComponents(string: "https://www.last.fm/api/auth/")!
+        components.queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "token", value: token)
+        ]
+        guard let url = components.url else {
+            throw LastFmAuthError.tokenFailed("invalid auth URL")
+        }
+        return url
+    }
+
+    /// Step 2: 用 token 换 sessionKey 存 Keychain。返回 username 当 UI 反馈。
     @discardableResult
     static func completeLogin(token: String) async throws -> String {
         let apiKey = LastFmCredentialsStore.effectiveAPIKey()
@@ -67,9 +58,10 @@ enum LastFmAuthService {
                 token: token, apiKey: apiKey, apiSecret: apiSecret
             )
             LastFmCredentialsStore.saveSessionKey(sessionKey)
+            LastFmCredentialsStore.savePendingAuthToken(nil)
             return (try? await fetchUsername(apiKey: apiKey, sessionKey: sessionKey)) ?? ""
         } catch {
-            // 用户没点 Allow 就回来确认, getSession 抛 error 14 → 给个友好
+            // 用户没点 Allow 就回来/关闭网页, getSession 抛 error 14 → 给个友好
             // 提示让 UI 区分这种情况。
             throw LastFmAuthError.notAuthorized(error.localizedDescription)
         }

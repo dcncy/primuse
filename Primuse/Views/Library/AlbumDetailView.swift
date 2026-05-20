@@ -4,6 +4,7 @@ import PrimuseKit
 struct AlbumDetailView: View {
     @Environment(AudioPlayerService.self) private var player
     @Environment(MusicLibrary.self) private var library
+    @Environment(SourceManager.self) private var sourceManager
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
     let album: Album
@@ -12,62 +13,66 @@ struct AlbumDetailView: View {
         library.songs(forAlbum: album.id)
     }
 
-    private var playableSongs: [Song] {
-        songs.filteredPlayable()
-    }
-
     var body: some View {
-        Group {
-            #if os(macOS)
-            ScrollView(.vertical, showsIndicators: false) {
-                detailContent
-                    .frame(maxWidth: 980, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .padding(.bottom, 112)
-            }
-            #else
-            ScrollView {
-                detailContent
-            }
-            #endif
-        }
-        .navigationBarTitleDisplayMode(.inline)
-    }
+        ScrollView {
+            VStack(spacing: 20) {
+                // Album header
+                VStack(spacing: 12) {
+                    CachedArtworkView(albumID: album.id, albumTitle: album.title,
+                                      artistName: album.artistName,
+                                      size: 220, cornerRadius: 14)
 
-    @ViewBuilder
-    private var detailContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            #if os(macOS)
-            macHeader
-            #else
-            iosHeader
-            #endif
+                    Text(album.title)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .multilineTextAlignment(.center)
 
-            // Action buttons
-            if songs.isEmpty == false {
-                MediaDetailActionBar(
-                    canPlay: playableSongs.isEmpty == false,
-                    canShuffle: playableSongs.count > 1,
-                    playAction: playAll,
-                    shuffleAction: shuffleAll
-                )
-                #if os(macOS)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 12)
-                #else
-                .padding(.bottom, 8)
-                #endif
-            }
+                    Text(album.artistName ?? String(localized: "unknown_artist"))
+                        .font(.body)
+                        .foregroundStyle(.secondary)
 
-            // Track list
-            if songs.isEmpty {
-                ContentUnavailableView(
-                    "no_songs",
-                    systemImage: "music.note",
-                    description: Text("no_songs_desc")
-                )
-                .padding(.top, 24)
-            } else {
+                    HStack(spacing: 12) {
+                        if let year = album.year {
+                            Text("\(year)")
+                        }
+                        Text("\(album.songCount) \(String(localized: "songs_count"))")
+                        Text(formatDuration(album.totalDuration))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                }
+                .padding(.top, 20)
+
+                // Action buttons
+                HStack(spacing: 12) {
+                    Button {
+                        playAll()
+                    } label: {
+                        Label("play_all", systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        shuffleAll()
+                    } label: {
+                        Label("shuffle", systemImage: "shuffle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        sourceManager.downloadForOffline(songs: songs)
+                    } label: {
+                        Label("offline_download", systemImage: "arrow.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(songs.filteredPlayable().isEmpty)
+                }
+                .padding(.horizontal)
+
+                // Track list
                 LazyVStack(spacing: 0) {
                     ForEach(songs) { song in
                         SongRowView(
@@ -76,11 +81,7 @@ struct AlbumDetailView: View {
                             showAlbum: false,
                             context: SongRowView.context(for: song, sourcesStore: sourcesStore, backfill: backfill)
                         )
-                        #if os(macOS)
-                        .padding(.horizontal, 24)
-                        #else
                         .padding(.horizontal)
-                        #endif
                         .padding(.vertical, 8)
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -88,103 +89,16 @@ struct AlbumDetailView: View {
                         }
 
                         Divider()
-                            #if os(macOS)
-                            .padding(.leading, 24 + 50)
-                            #else
                             .padding(.leading, 50)
-                            #endif
                     }
                 }
-                #if os(macOS)
-                .padding(.horizontal, 24)
-                .background(.background.secondary, in: .rect(cornerRadius: 8))
-                .padding(.horizontal, 24)
-                .padding(.top, 4)
-                #endif
             }
         }
-    }
-
-    #if os(macOS)
-    /// macOS 横向 header:左封面、右元数据。比居中大封面更适合宽 detail 区,
-    /// 跟 Music.app / iTunes 的专辑详情视觉对齐。
-    private var macHeader: some View {
-        HStack(alignment: .top, spacing: 20) {
-            CachedArtworkView(
-                albumID: album.id,
-                albumTitle: album.title,
-                artistName: album.artistName,
-                size: 180,
-                cornerRadius: 10
-            )
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(album.title)
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .lineLimit(2)
-
-                Text(album.artistName ?? String(localized: "unknown_artist"))
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 8) {
-                    if let year = album.year {
-                        Text("\(year)")
-                    }
-                    if album.year != nil { dotSeparator }
-                    Text("\(songs.count) \(String(localized: "songs_count"))")
-                    dotSeparator
-                    Text(formatDuration(songs.reduce(0) { $0 + $1.duration.sanitizedDuration }))
-                }
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-                .padding(.top, 4)
-
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 24)
-        .padding(.bottom, 16)
-    }
-
-    private var dotSeparator: some View {
-        Text("·").foregroundStyle(.tertiary)
-    }
-    #endif
-
-    private var iosHeader: some View {
-        VStack(spacing: 12) {
-            CachedArtworkView(albumID: album.id, albumTitle: album.title,
-                              artistName: album.artistName,
-                              size: 220, cornerRadius: 14)
-
-            Text(album.title)
-                .font(.title2)
-                .fontWeight(.bold)
-                .multilineTextAlignment(.center)
-
-            Text(album.artistName ?? String(localized: "unknown_artist"))
-                .font(.body)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 12) {
-                if let year = album.year {
-                    Text("\(year)")
-                }
-                Text("\(songs.count) \(String(localized: "songs_count"))")
-                Text(formatDuration(songs.reduce(0) { $0 + $1.duration.sanitizedDuration }))
-            }
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-        }
-        .padding(.top, 20)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func playAll() {
-        let queue = playableSongs
+        let queue = songs.filteredPlayable()
         guard let first = queue.first else { return }
         player.setQueue(queue, startAt: 0)
         Task { await player.play(song: first) }
@@ -196,7 +110,7 @@ struct AlbumDetailView: View {
     }
 
     private func playSong(_ song: Song) {
-        let queue = playableSongs
+        let queue = songs.filteredPlayable()
         guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
         player.setQueue(queue, startAt: index)
         Task { await player.play(song: song) }

@@ -1,10 +1,5 @@
 import SwiftUI
-import CoreGraphics
-#if os(iOS)
 import UIKit
-#else
-import AppKit
-#endif
 
 /// Global dynamic theme color manager.
 /// Extracts dominant color from album artwork and provides it as the app-wide accent.
@@ -21,16 +16,19 @@ final class ThemeService {
     private(set) var colorID: String = "default"
 
     /// User-chosen base accent (driven by selected app icon). When set, this
-    /// replaces the static brand purple as the fallback whenever a song's
+    /// replaces the static brand color as the fallback whenever a song's
     /// cover art isn't actively driving the theme.
     private(set) var baseAccent: Color = ThemeService.defaultAccent
     private(set) var baseDarkAccent: Color = ThemeService.defaultDarkAccent
 
     // MARK: - Defaults
 
-    /// Fallback accent when nothing is playing (current brand blue-purple)
-    nonisolated static let defaultAccent = Color(red: 0.392, green: 0.318, blue: 0.976)       // #6451F9
-    nonisolated static let defaultDarkAccent = Color(red: 0.22, green: 0.15, blue: 0.56)
+    /// Fallback accent when nothing is playing (deep sea teal)
+    nonisolated static let defaultAccent = Color(red: 0.078, green: 0.490, blue: 0.541)       // #147D8A
+    nonisolated static let defaultDarkAccent = Color(red: 0.043, green: 0.267, blue: 0.294)   // #0B444B
+
+    // MARK: - Cover directory (via MetadataAssetStore)
+
 
     // MARK: - Public API
 
@@ -42,21 +40,21 @@ final class ThemeService {
 
         // Try songID-based cache first, then legacy filename。读取必须走
         // readCoverData(named:),它会透明处理 content-addressed redirect。
-        let image: PlatformImage?
+        let image: UIImage?
         if let songID {
             let hashedName = MetadataAssetStore.shared.expectedCoverFileName(for: songID)
-            image = MetadataAssetStore.shared.readCoverData(named: hashedName).flatMap { PlatformImage(data: $0) }
+            image = MetadataAssetStore.shared.readCoverData(named: hashedName).flatMap { UIImage(data: $0) }
         } else {
             image = nil
         }
-        let resolvedImage: PlatformImage
+        let resolvedImage: UIImage
         if let image {
             resolvedImage = image
         } else if let fileName, !fileName.isEmpty,
                   !fileName.contains("/"), !fileName.contains("://") {
             // Legacy: direct filename in artworkDir (走 redirect-aware reader)
             guard let data = MetadataAssetStore.shared.readCoverData(named: fileName),
-                  let loaded = PlatformImage(data: data) else {
+                  let loaded = UIImage(data: data) else {
                 resetToDefault()
                 return
             }
@@ -108,30 +106,30 @@ final class ThemeService {
 
     private static func darken(_ color: Color, factor: CGFloat) -> Color {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        #if os(iOS)
         UIColor(color).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-        #else
-        // NSColor's getHue requires an RGB color space — without converting,
-        // a `Color` from a system catalog raises an exception.
-        NSColor(color).usingColorSpace(.sRGB)?.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-        #endif
         return Color(hue: h, saturation: s, brightness: max(0, b * factor))
     }
 
     // MARK: - Color Extraction Algorithm
 
-    private struct ColorResult {
+    /// Exposed for `CoverTintProvider`, which needs per-song tints
+    /// without mutating the global accent. Stays nonisolated so it's
+    /// safe to call from background tasks.
+    struct ColorResult {
         let accent: Color
         let dark: Color
     }
 
     /// Extracts the most dominant vibrant color from an image using HSB bucketing.
-    nonisolated private static func extractDominantColor(from image: PlatformImage) -> ColorResult {
-        // Down-sample to 40×40 for performance via a CoreGraphics context —
-        // works identically on iOS (UIKit) and macOS (AppKit).
+    nonisolated static func extractDominantColor(from image: UIImage) -> ColorResult {
+        // Down-sample to 40×40 for performance
         let sampleSize = CGSize(width: 40, height: 40)
-        guard let sourceCGImage = cgImage(from: image),
-              let cgImage = downscaledRGBA(sourceCGImage, to: sampleSize),
+        UIGraphicsBeginImageContextWithOptions(sampleSize, true, 1)
+        image.draw(in: CGRect(origin: .zero, size: sampleSize))
+        let sampled = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+
+        guard let cgImage = sampled?.cgImage,
               let dataProvider = cgImage.dataProvider,
               let pixelData = dataProvider.data else {
             return ColorResult(accent: defaultAccent, dark: defaultDarkAccent)
@@ -156,12 +154,9 @@ final class ThemeService {
             let g = CGFloat(ptr[offset + 1]) / 255.0
             let b = CGFloat(ptr[offset + 2]) / 255.0
 
+            let uiColor = UIColor(red: r, green: g, blue: b, alpha: 1)
             var h: CGFloat = 0, s: CGFloat = 0, br: CGFloat = 0, a: CGFloat = 0
-            #if os(iOS)
-            UIColor(red: r, green: g, blue: b, alpha: 1).getHue(&h, saturation: &s, brightness: &br, alpha: &a)
-            #else
-            NSColor(red: r, green: g, blue: b, alpha: 1).usingColorSpace(.sRGB)?.getHue(&h, saturation: &s, brightness: &br, alpha: &a)
-            #endif
+            uiColor.getHue(&h, saturation: &s, brightness: &br, alpha: &a)
 
             // Filter out near-black, near-white, and desaturated pixels
             guard s > 0.15, br > 0.10, br < 0.95 else { continue }
@@ -200,34 +195,5 @@ final class ThemeService {
         let dark = Color(hue: avgH, saturation: accentS, brightness: darkB)
 
         return ColorResult(accent: accent, dark: dark)
-    }
-
-    nonisolated private static func cgImage(from image: PlatformImage) -> CGImage? {
-        #if os(iOS)
-        return image.cgImage
-        #else
-        var rect = CGRect(origin: .zero, size: image.size)
-        return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
-        #endif
-    }
-
-    nonisolated private static func downscaledRGBA(_ source: CGImage, to size: CGSize) -> CGImage? {
-        let width = Int(size.width)
-        let height = Int(size.height)
-        let bytesPerRow = width * 4
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-        guard let ctx = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else { return nil }
-        ctx.interpolationQuality = .low
-        ctx.draw(source, in: CGRect(origin: .zero, size: size))
-        return ctx.makeImage()
     }
 }

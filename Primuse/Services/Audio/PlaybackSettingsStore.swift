@@ -15,12 +15,15 @@ enum ReplayGainMode: String, Codable, Sendable, CaseIterable {
 struct PlaybackSettings: Codable, Sendable {
     static let defaultsKey = "primuse_playback_settings_v1"
 
-    var gaplessEnabled: Bool = true
+    var gaplessEnabled: Bool = false
     var crossfadeEnabled: Bool = false
     var crossfadeDuration: Double = 3.0
     var replayGainEnabled: Bool = false
     var replayGainMode: ReplayGainMode = .track
+    var spatialAudioEnabled: Bool = false
+    var spatialHeadTrackingEnabled: Bool = false
     var audioCacheEnabled: Bool = true
+    var audioCacheLimitBytes: Int64 = AudioCacheManager.defaultMaxCacheSize
 
     // Compressor / Limiter
     var compressorEnabled: Bool = false
@@ -42,12 +45,15 @@ struct PlaybackSettings: Codable, Sendable {
     // decode — existing user settings are preserved on update.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        gaplessEnabled = try c.decodeIfPresent(Bool.self, forKey: .gaplessEnabled) ?? true
+        gaplessEnabled = try c.decodeIfPresent(Bool.self, forKey: .gaplessEnabled) ?? false
         crossfadeEnabled = try c.decodeIfPresent(Bool.self, forKey: .crossfadeEnabled) ?? false
         crossfadeDuration = try c.decodeIfPresent(Double.self, forKey: .crossfadeDuration) ?? 3.0
         replayGainEnabled = try c.decodeIfPresent(Bool.self, forKey: .replayGainEnabled) ?? false
         replayGainMode = try c.decodeIfPresent(ReplayGainMode.self, forKey: .replayGainMode) ?? .track
+        spatialAudioEnabled = try c.decodeIfPresent(Bool.self, forKey: .spatialAudioEnabled) ?? false
+        spatialHeadTrackingEnabled = try c.decodeIfPresent(Bool.self, forKey: .spatialHeadTrackingEnabled) ?? false
         audioCacheEnabled = try c.decodeIfPresent(Bool.self, forKey: .audioCacheEnabled) ?? true
+        audioCacheLimitBytes = try c.decodeIfPresent(Int64.self, forKey: .audioCacheLimitBytes) ?? AudioCacheManager.defaultMaxCacheSize
         compressorEnabled = try c.decodeIfPresent(Bool.self, forKey: .compressorEnabled) ?? false
         compressorThreshold = try c.decodeIfPresent(Float.self, forKey: .compressorThreshold) ?? -20
         compressorHeadRoom = try c.decodeIfPresent(Float.self, forKey: .compressorHeadRoom) ?? 5
@@ -61,12 +67,15 @@ struct PlaybackSettings: Codable, Sendable {
     }
 
     init(
-        gaplessEnabled: Bool = true,
+        gaplessEnabled: Bool = false,
         crossfadeEnabled: Bool = false,
         crossfadeDuration: Double = 3.0,
         replayGainEnabled: Bool = false,
         replayGainMode: ReplayGainMode = .track,
+        spatialAudioEnabled: Bool = false,
+        spatialHeadTrackingEnabled: Bool = false,
         audioCacheEnabled: Bool = true,
+        audioCacheLimitBytes: Int64 = AudioCacheManager.defaultMaxCacheSize,
         compressorEnabled: Bool = false,
         compressorThreshold: Float = -20,
         compressorHeadRoom: Float = 5,
@@ -83,7 +92,10 @@ struct PlaybackSettings: Codable, Sendable {
         self.crossfadeDuration = crossfadeDuration
         self.replayGainEnabled = replayGainEnabled
         self.replayGainMode = replayGainMode
+        self.spatialAudioEnabled = spatialAudioEnabled
+        self.spatialHeadTrackingEnabled = spatialHeadTrackingEnabled
         self.audioCacheEnabled = audioCacheEnabled
+        self.audioCacheLimitBytes = audioCacheLimitBytes
         self.compressorEnabled = compressorEnabled
         self.compressorThreshold = compressorThreshold
         self.compressorHeadRoom = compressorHeadRoom
@@ -113,12 +125,43 @@ struct PlaybackSettings: Codable, Sendable {
 @MainActor
 @Observable
 final class PlaybackSettingsStore {
-    var gaplessEnabled: Bool { didSet { persist() } }
-    var crossfadeEnabled: Bool { didSet { persist() } }
+    var gaplessEnabled: Bool {
+        didSet {
+            if gaplessEnabled, crossfadeEnabled {
+                crossfadeEnabled = false
+            }
+            persist()
+        }
+    }
+    var crossfadeEnabled: Bool {
+        didSet {
+            if crossfadeEnabled, gaplessEnabled {
+                gaplessEnabled = false
+            }
+            persist()
+        }
+    }
     var crossfadeDuration: Double { didSet { persist() } }
     var replayGainEnabled: Bool { didSet { persist() } }
     var replayGainMode: ReplayGainMode { didSet { persist() } }
+    var spatialAudioEnabled: Bool {
+        didSet {
+            if !spatialAudioEnabled, spatialHeadTrackingEnabled {
+                spatialHeadTrackingEnabled = false
+            }
+            persist()
+        }
+    }
+    var spatialHeadTrackingEnabled: Bool {
+        didSet {
+            if spatialHeadTrackingEnabled, !spatialAudioEnabled {
+                spatialAudioEnabled = true
+            }
+            persist()
+        }
+    }
     var audioCacheEnabled: Bool { didSet { persist() } }
+    var audioCacheLimitBytes: Int64 { didSet { persist() } }
 
     // Compressor / Limiter
     var compressorEnabled: Bool { didSet { persist() } }
@@ -145,7 +188,10 @@ final class PlaybackSettingsStore {
         self.crossfadeDuration = s.crossfadeDuration
         self.replayGainEnabled = s.replayGainEnabled
         self.replayGainMode = s.replayGainMode
+        self.spatialAudioEnabled = s.spatialAudioEnabled
+        self.spatialHeadTrackingEnabled = s.spatialAudioEnabled && s.spatialHeadTrackingEnabled
         self.audioCacheEnabled = s.audioCacheEnabled
+        self.audioCacheLimitBytes = s.audioCacheLimitBytes
         self.compressorEnabled = s.compressorEnabled
         self.compressorThreshold = s.compressorThreshold
         self.compressorHeadRoom = s.compressorHeadRoom
@@ -173,7 +219,10 @@ final class PlaybackSettingsStore {
         crossfadeDuration = s.crossfadeDuration
         replayGainEnabled = s.replayGainEnabled
         replayGainMode = s.replayGainMode
+        spatialAudioEnabled = s.spatialAudioEnabled
+        spatialHeadTrackingEnabled = s.spatialAudioEnabled && s.spatialHeadTrackingEnabled
         audioCacheEnabled = s.audioCacheEnabled
+        audioCacheLimitBytes = s.audioCacheLimitBytes
         compressorEnabled = s.compressorEnabled
         compressorThreshold = s.compressorThreshold
         compressorHeadRoom = s.compressorHeadRoom
@@ -193,7 +242,10 @@ final class PlaybackSettingsStore {
             crossfadeDuration: crossfadeDuration,
             replayGainEnabled: replayGainEnabled,
             replayGainMode: replayGainMode,
+            spatialAudioEnabled: spatialAudioEnabled,
+            spatialHeadTrackingEnabled: spatialHeadTrackingEnabled,
             audioCacheEnabled: audioCacheEnabled,
+            audioCacheLimitBytes: audioCacheLimitBytes,
             compressorEnabled: compressorEnabled,
             compressorThreshold: compressorThreshold,
             compressorHeadRoom: compressorHeadRoom,

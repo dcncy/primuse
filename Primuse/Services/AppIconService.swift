@@ -44,7 +44,7 @@ final class AppIconService {
     /// Brand tints per icon — eyeballed from the preview artwork. Updating an
     /// icon design? Refresh the tint here too.
     private static let iconTints: [String: Color] = [
-        "":         Color(red: 0.20, green: 0.50, blue: 0.95),  // default — vinyl blue
+        "":         Color(red: 0.078, green: 0.490, blue: 0.541),  // default — deep sea teal
         "AppIcon1": Color(red: 0.39, green: 0.32, blue: 0.98),  // 1 — blue-purple gradient
         "AppIcon2": Color(red: 0.55, green: 0.32, blue: 0.85),  // 2 — gorilla purple
         "AppIcon3": Color(red: 0.20, green: 0.78, blue: 0.78),  // 3 — NAS cyan

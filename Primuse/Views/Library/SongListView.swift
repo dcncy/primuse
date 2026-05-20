@@ -41,10 +41,11 @@ struct SongListView: View {
     @ViewBuilder
     private var content: some View {
         if songs.isEmpty {
-            ContentUnavailableView(
-                "no_songs",
-                systemImage: "music.note",
-                description: Text("no_songs_desc")
+            EmptyStateView(
+                titleKey: "no_songs",
+                descriptionKey: "no_songs_desc",
+                imageName: "EmptyStateNoSongs",
+                systemImage: "music.note"
             )
         } else {
             #if os(macOS)

@@ -59,11 +59,27 @@ actor LocalFileSource: MusicSourceConnector {
     }
 
     func localURL(for path: String) async throws -> URL {
-        let fileURL = basePath.appendingPathComponent(path)
+        let fileURL = resolvedURL(for: path)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw SourceError.fileNotFound(path)
         }
         return fileURL
+    }
+
+    func deleteFile(at path: String) async throws {
+        let fileURL = resolvedURL(for: path).standardizedFileURL
+        let baseStandardized = basePath.standardizedFileURL
+        // 防御 path traversal ── 万一 path 含 "..", appendingPathComponent
+        // 会跳出 source 根。要求标准化后严格落在 basePath/ 子树内,
+        // 也不能等于 basePath 自身 (避免 deleteFile("/") 误删整个根)。
+        let basePrefix = baseStandardized.path.hasSuffix("/") ? baseStandardized.path : baseStandardized.path + "/"
+        guard fileURL.path.hasPrefix(basePrefix) else {
+            throw SourceError.connectionFailed("Refusing to delete outside source root: \(path)")
+        }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw SourceError.fileNotFound(path)
+        }
+        try FileManager.default.removeItem(at: fileURL)
     }
 
     func streamData(for path: String) async throws -> AsyncThrowingStream<Data, Error> {
@@ -118,6 +134,12 @@ actor LocalFileSource: MusicSourceConnector {
                 continuation.finish()
             }
         }
+    }
+
+    private func resolvedURL(for path: String) -> URL {
+        let relativePath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard relativePath.isEmpty == false else { return basePath }
+        return basePath.appendingPathComponent(relativePath)
     }
 }
 

@@ -1,31 +1,43 @@
 import SwiftUI
+import MusicKit
 import PrimuseKit
 
 struct SearchView: View {
     private static let recentSearchesKey = "search_recent_queries"
     private static let recentSearchLimit = 12
-    private let contentMaxWidth: CGFloat = 980
 
     @Environment(AudioPlayerService.self) private var player
     @Environment(MusicLibrary.self) private var library
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
+    @Environment(AppleMusicService.self) private var appleMusic
     @Binding var searchText: String
-    @State private var searchResults: [Song] = []
+    @State private var searchResults: [LibrarySearchResult] = []
+    @State private var matchingAlbums: [PrimuseKit.Album] = []
     @State private var recentSearches: [String] = []
     @State private var searchTask: Task<Void, Never>?
+    @State private var lyricsSearchCache = LibrarySearchCache()
 
     var body: some View {
         NavigationStack {
             Group {
                 if searchText.isEmpty {
                     if library.visibleSongs.isEmpty {
-                        emptyLibraryView
+                        // Empty-library prompt — distinct from
+                        // "no search results", so use the unified
+                        // illustration. The "no matches for query"
+                        // path keeps Apple's polished system view.
+                        EmptyStateView(
+                            titleKey: "search_empty_library",
+                            descriptionKey: "search_empty_library_desc",
+                            imageName: "EmptyStateNoSongs",
+                            systemImage: "magnifyingglass"
+                        )
                     } else {
                         recentSearchView
                     }
-                } else if searchResults.isEmpty {
-                    noResultsView
+                } else if searchResults.isEmpty && matchingAlbums.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
                 } else {
                     searchResultsView
                 }
@@ -33,8 +45,6 @@ struct SearchView: View {
             .navigationTitle("search_title")
             .toolbarTitleDisplayMode(.inlineLarge)
             .searchable(text: $searchText, prompt: Text("search_prompt"))
-            .navigationDestination(for: Album.self) { AlbumDetailView(album: $0) }
-            .navigationDestination(for: Artist.self) { ArtistDetailView(artist: $0) }
             .onSubmit(of: .search) {
                 addRecentSearch(searchText)
             }
@@ -47,6 +57,12 @@ struct SearchView: View {
         }
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
+            // 同步触发 Apple Music 搜索, 服务内部自己 debounce + 鉴权
+            appleMusic.search(query: newValue)
+        }
+        .onChange(of: library.searchRevision) { _, _ in
+            lyricsSearchCache = LibrarySearchCache()
+            performSearch(query: searchText)
         }
         .onDisappear {
             searchTask?.cancel()
@@ -54,352 +70,202 @@ struct SearchView: View {
     }
 
     private var recentSearchView: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 28) {
-                searchHero
-
-                if !recentSearches.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        sectionHeader("recent_searches") {
-                            Button(role: .destructive, action: clearRecentSearches) {
-                                Label("clear_all", systemImage: "trash")
-                                    .labelStyle(.iconOnly)
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.secondary)
-                            .help(Text("clear_all"))
-                        }
-
-                        FlowLayout(spacing: 10, rowSpacing: 10) {
-                            ForEach(recentSearches, id: \.self) { query in
-                                Button {
-                                    addRecentSearch(query)
-                                    searchText = query
-                                } label: {
-                                    Label(query, systemImage: "clock")
-                                        .font(.callout.weight(.medium))
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(.quaternary, in: .rect(cornerRadius: 8))
-                                }
-                                .buttonStyle(.plain)
-                            }
+        List {
+            if !recentSearches.isEmpty {
+                Section {
+                    ForEach(recentSearches, id: \.self) { query in
+                        Button {
+                            addRecentSearch(query)
+                            searchText = query
+                        } label: {
+                            Label(query, systemImage: "clock")
                         }
                     }
-                }
-
-                libraryOverview
-
-                if !quickSearchSuggestions.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        sectionHeader("recently_added")
-                        LazyVGrid(columns: [
-                            GridItem(.adaptive(minimum: 180, maximum: 240), spacing: 12, alignment: .top)
-                        ], alignment: .leading, spacing: 12) {
-                            ForEach(quickSearchSuggestions, id: \.self) { suggestion in
-                                Button {
-                                    addRecentSearch(suggestion)
-                                    searchText = suggestion
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: "magnifyingglass")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 22, height: 22)
-                                            .background(.quaternary, in: .circle)
-                                        Text(suggestion)
-                                            .font(.callout)
-                                            .lineLimit(1)
-                                        Spacer(minLength: 0)
-                                    }
-                                    .padding(10)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(.background.secondary, in: .rect(cornerRadius: 8))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                    .onDelete(perform: deleteRecentSearches)
+                } header: {
+                    HStack {
+                        Text("recent_searches")
+                        Spacer()
+                        Button("clear_all", role: .destructive, action: clearRecentSearches)
+                            .font(.caption)
                     }
                 }
             }
-            .frame(maxWidth: contentMaxWidth, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.top, 24)
-            .padding(.bottom, 108)
-            .frame(maxWidth: .infinity, alignment: .top)
+
+            Section {
+                HStack {
+                    Image(systemName: "music.note.list")
+                        .foregroundStyle(.secondary)
+                    Text("\(library.visibleSongs.count) \(String(localized: "tab_songs"))")
+                    Spacer()
+                    Text("\(library.albums.count) \(String(localized: "tab_albums"))")
+                    Text("·")
+                    Text("\(library.artists.count) \(String(localized: "tab_artists"))")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } header: {
+                Text("library")
+            }
         }
     }
 
     private var searchResultsView: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 28) {
-                resultSummary
+        List {
+            // Albums matching
+            if !matchingAlbums.isEmpty {
+                Section("tab_albums") {
+                    ForEach(matchingAlbums.prefix(5)) { album in
+                        HStack(spacing: 12) {
+                            CachedArtworkView(albumID: album.id, albumTitle: album.title,
+                                              artistName: album.artistName, size: 44, cornerRadius: 6)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(album.title).font(.subheadline).lineLimit(1)
+                                Text(album.artistName ?? "").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
 
-                if !matchingAlbums.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        sectionHeader("tab_albums")
-                        LazyVGrid(columns: [
-                            GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 14, alignment: .top)
-                        ], alignment: .leading, spacing: 16) {
-                            ForEach(matchingAlbums.prefix(8)) { album in
-                                NavigationLink(value: album) {
-                                    albumResultCard(album)
+            // Songs matching
+            Section("tab_songs") {
+                ForEach(searchResults.prefix(40)) { result in
+                    VStack(alignment: .leading, spacing: 4) {
+                        SongRowView(
+                            song: result.song,
+                            isPlaying: player.currentSong?.id == result.song.id,
+                            context: SongRowView.context(for: result.song, sourcesStore: sourcesStore, backfill: backfill)
+                        )
+
+                        if result.matchKind == .lyrics {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Label("search_match_lyrics", systemImage: "text.quote")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if let snippet = result.lyricSnippet {
+                                    Text(snippet)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(3)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
-                                .buttonStyle(.plain)
                             }
+                            .padding(.leading, 54)
+                        } else if result.matchKind == .fuzzy {
+                            Label("search_match_fuzzy", systemImage: "sparkle.magnifyingglass")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 54)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { playSong(result.song) }
+                }
+            }
+
+            // Apple Music — 只在用户已授权且查到结果时显示。未授权状态走
+            // Settings 入口让用户主动 opt-in,不在搜索这条路径里弹系统授权
+            // 对话框 (用户搜歌时被弹会很迷)。
+            if appleMusic.authState == .authorized {
+                if !appleMusic.searchResults.isEmpty {
+                    Section {
+                        ForEach(appleMusic.searchResults, id: \.id) { song in
+                            appleMusicRow(song)
+                        }
+                    } header: {
+                        HStack {
+                            Image(systemName: "applelogo")
+                            Text("search_section_apple_music")
+                        }
+                    }
+                } else if appleMusic.isSearching {
+                    Section {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text("search_apple_music_loading")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
 
-                if !matchingArtists.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        sectionHeader("tab_artists")
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 12) {
-                                ForEach(matchingArtists.prefix(10)) { artist in
-                                    NavigationLink(value: artist) {
-                                        artistResultChip(artist)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
+                if let err = appleMusic.lastPlaybackError {
+                    Section {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
+            }
+        }
+        .listStyle(.plain)
+    }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    sectionHeader("tab_songs")
-                    LazyVStack(spacing: 0) {
-                        ForEach(searchResults.prefix(40)) { song in
-                            SongRowView(
-                                song: song,
-                                isPlaying: player.currentSong?.id == song.id,
-                                context: SongRowView.context(for: song, sourcesStore: sourcesStore, backfill: backfill)
-                            )
-                            .padding(.vertical, 8)
-                            .contentShape(Rectangle())
-                            .onTapGesture { playSong(song) }
-
-                            if song.id != searchResults.prefix(40).last?.id {
-                                Divider()
-                                    .padding(.leading, 54)
-                            }
-                        }
+    private func appleMusicRow(_ song: MusicKit.Song) -> some View {
+        Button {
+            Task { await appleMusic.play(song) }
+        } label: {
+            HStack(spacing: 12) {
+                AsyncImage(url: song.artwork?.url(width: 88, height: 88)) { phase in
+                    if let img = phase.image {
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Color.secondary.opacity(0.15)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                    .background(.background.secondary, in: .rect(cornerRadius: 8))
                 }
-            }
-            .frame(maxWidth: contentMaxWidth, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.top, 24)
-            .padding(.bottom, 108)
-            .frame(maxWidth: .infinity, alignment: .top)
-        }
-    }
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
 
-    private var emptyLibraryView: some View {
-        ContentUnavailableView(
-            "search_empty_library",
-            systemImage: "magnifyingglass",
-            description: Text("search_empty_library_desc")
-        )
-    }
-
-    private var noResultsView: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 42, weight: .semibold))
-                .foregroundStyle(.tertiary)
-            Text(searchText)
-                .font(.title3.weight(.semibold))
-                .lineLimit(1)
-            Text("search_prompt")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.bottom, 80)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var searchHero: some View {
-        HStack(alignment: .center, spacing: 18) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.background.secondary)
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 74, height: 74)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("search_title")
-                    .font(.system(size: 32, weight: .bold))
-                Text(librarySummary)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var resultSummary: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(searchText)
-                .font(.system(size: 30, weight: .bold))
-                .lineLimit(1)
-            Text(resultSummaryText)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-    }
-
-    private var libraryOverview: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("library")
-            LazyVGrid(columns: [
-                GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 12, alignment: .top)
-            ], alignment: .leading, spacing: 12) {
-                statTile(value: library.visibleSongs.count, title: "tab_songs", icon: "music.note", color: .blue)
-                statTile(value: library.visibleAlbums.count, title: "tab_albums", icon: "square.stack.fill", color: .purple)
-                statTile(value: library.visibleArtists.count, title: "tab_artists", icon: "music.mic", color: .pink)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.title).font(.subheadline).lineLimit(1)
+                    Text(song.artistName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "applelogo").font(.caption2).foregroundStyle(.tertiary)
             }
         }
-    }
-
-    private func sectionHeader(_ title: LocalizedStringKey) -> some View {
-        sectionHeader(title) { EmptyView() }
-    }
-
-    private func sectionHeader<Trailing: View>(
-        _ title: LocalizedStringKey,
-        @ViewBuilder trailing: () -> Trailing
-    ) -> some View {
-        HStack {
-            Text(title)
-                .font(.headline)
-            Spacer()
-            trailing()
-        }
-    }
-
-    private func statTile(value: Int, title: LocalizedStringKey, icon: String, color: Color) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.headline)
-                .foregroundStyle(color)
-                .frame(width: 34, height: 34)
-                .background(color.opacity(0.14), in: .rect(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(value, format: .number)
-                    .font(.title3.weight(.semibold))
-                    .monospacedDigit()
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(.background.secondary, in: .rect(cornerRadius: 8))
-    }
-
-    private func albumResultCard(_ album: Album) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            CachedArtworkView(
-                albumID: album.id,
-                albumTitle: album.title,
-                artistName: album.artistName,
-                size: 156,
-                cornerRadius: 8
-            )
-            .aspectRatio(1, contentMode: .fit)
-            .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
-
-            Text(album.title)
-                .font(.callout.weight(.medium))
-                .lineLimit(1)
-            Text(album.artistName ?? "\(album.songCount) \(String(localized: "tab_songs"))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-    }
-
-    private func artistResultChip(_ artist: Artist) -> some View {
-        HStack(spacing: 10) {
-            CachedArtworkView(
-                artistID: artist.id,
-                artistName: artist.name,
-                size: 44,
-                cornerRadius: 22
-            )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(artist.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                Text("\(artist.songCount) \(String(localized: "tab_songs"))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 130, alignment: .leading)
-        }
-        .padding(8)
-        .background(.background.secondary, in: .rect(cornerRadius: 8))
-    }
-
-    private var matchingAlbums: [Album] {
-        library.visibleAlbums.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText)
-            || ($0.artistName?.localizedCaseInsensitiveContains(searchText) ?? false)
-        }
-    }
-
-    private var matchingArtists: [Artist] {
-        library.visibleArtists.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText)
-        }
-    }
-
-    private var quickSearchSuggestions: [String] {
-        let albumTitles = library.recentlyAddedAlbums(limit: 4).map(\.title)
-        let artistNames = library.visibleArtists.prefix(4).map(\.name)
-        var seen = Set<String>()
-        return (albumTitles + artistNames).filter { seen.insert($0).inserted }.prefix(6).map { $0 }
-    }
-
-    private var librarySummary: String {
-        "\(library.visibleSongs.count) \(String(localized: "tab_songs")) · \(library.visibleAlbums.count) \(String(localized: "tab_albums")) · \(library.visibleArtists.count) \(String(localized: "tab_artists"))"
-    }
-
-    private var resultSummaryText: String {
-        "\(searchResults.count) \(String(localized: "tab_songs")) · \(matchingAlbums.count) \(String(localized: "tab_albums")) · \(matchingArtists.count) \(String(localized: "tab_artists"))"
+        .buttonStyle(.plain)
     }
 
     private func performSearch(query: String) {
         searchTask?.cancel()
         guard !query.isEmpty else {
             searchResults = []
+            matchingAlbums = []
             return
         }
+
+        let songsSnapshot = library.visibleSongs
+        let albumsSnapshot = library.visibleAlbums
+        let cacheSnapshot = lyricsSearchCache
 
         searchTask = Task {
             // Debounce 200ms
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
 
-            let results = library.search(query: query)
-            searchResults = results
+            let worker = Task.detached(priority: .userInitiated) {
+                LibrarySearchWorker.compute(
+                    query: query,
+                    songs: songsSnapshot,
+                    albums: albumsSnapshot,
+                    cache: cacheSnapshot
+                )
+            }
+            let output = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            searchResults = output.songResults
+            matchingAlbums = output.albumResults
+            lyricsSearchCache = output.cache
         }
     }
 
-    private func playSong(_ song: Song) {
-        let queue = searchResults.filteredPlayable()
+    private func playSong(_ song: PrimuseKit.Song) {
+        let queue = searchResults.map(\.song).filteredPlayable()
         guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
         player.setQueue(queue, startAt: index)
         Task { await player.play(song: song) }
@@ -437,70 +303,5 @@ struct SearchView: View {
     private func saveRecentSearches() {
         UserDefaults.standard.set(recentSearches, forKey: Self.recentSearchesKey)
         CloudKVSSync.shared.markChanged(key: Self.recentSearchesKey)
-    }
-}
-
-private struct FlowLayout: Layout {
-    var spacing: CGFloat
-    var rowSpacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = rows(in: proposal.width ?? .infinity, subviews: subviews)
-        return CGSize(
-            width: proposal.width ?? rows.map(\.width).max() ?? 0,
-            height: rows.reduce(0) { $0 + $1.height } + CGFloat(max(rows.count - 1, 0)) * rowSpacing
-        )
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
-        for row in rows(in: bounds.width, subviews: subviews) {
-            var x = bounds.minX
-            for element in row.elements {
-                element.subview.place(
-                    at: CGPoint(x: x, y: y),
-                    anchor: .topLeading,
-                    proposal: ProposedViewSize(element.size)
-                )
-                x += element.size.width + spacing
-            }
-            y += row.height + rowSpacing
-        }
-    }
-
-    private func rows(in maxWidth: CGFloat, subviews: Subviews) -> [FlowRow] {
-        var rows: [FlowRow] = []
-        var current = FlowRow()
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            let nextWidth = current.elements.isEmpty ? size.width : current.width + spacing + size.width
-
-            if nextWidth > maxWidth, !current.elements.isEmpty {
-                rows.append(current)
-                current = FlowRow()
-            }
-
-            current.elements.append(FlowElement(subview: subview, size: size))
-            current.width = current.elements.count == 1 ? size.width : current.width + spacing + size.width
-            current.height = max(current.height, size.height)
-        }
-
-        if !current.elements.isEmpty {
-            rows.append(current)
-        }
-
-        return rows
-    }
-
-    private struct FlowRow {
-        var elements: [FlowElement] = []
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-    }
-
-    private struct FlowElement {
-        let subview: LayoutSubview
-        let size: CGSize
     }
 }

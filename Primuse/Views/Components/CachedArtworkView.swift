@@ -31,6 +31,10 @@ struct CachedArtworkView: View {
     var artistID: String? = nil
     var artistName: String? = nil
     var placeholderIcon: String = "music.note"
+    /// 当外部数据源 (e.g. AudioPlayerService.coverRevision) 想强制 view 重新加载,
+    /// 但 coverRef / songID 这些 key 字段没变, onChange 不会触发时使用。
+    /// 调用方传 player.coverRevision, 任意 bump 都会让本 view 重 loadImage。
+    var revisionToken: Int = 0
 
     @Environment(SourceManager.self) private var sourceManager
     @State private var image: PlatformImage?
@@ -72,23 +76,27 @@ struct CachedArtworkView: View {
 
     // Backward compatible init — old call sites use coverFileName
     init(coverFileName: String?, size: CGFloat? = nil, cornerRadius: CGFloat = 12,
-         sourceID: String? = nil, filePath: String? = nil) {
+         sourceID: String? = nil, filePath: String? = nil,
+         revisionToken: Int = 0) {
         self.coverRef = coverFileName
         self.size = size
         self.cornerRadius = cornerRadius
         self.sourceID = sourceID
         self.filePath = filePath
+        self.revisionToken = revisionToken
     }
 
     // New init with explicit songID
     init(coverRef: String?, songID: String, size: CGFloat? = nil, cornerRadius: CGFloat = 12,
-         sourceID: String? = nil, filePath: String? = nil) {
+         sourceID: String? = nil, filePath: String? = nil,
+         revisionToken: Int = 0) {
         self.coverRef = coverRef
         self.songID = songID
         self.size = size
         self.cornerRadius = cornerRadius
         self.sourceID = sourceID
         self.filePath = filePath
+        self.revisionToken = revisionToken
     }
 
     // Album cover init — fetches via ArtworkFetchService if not cached
@@ -134,6 +142,7 @@ struct CachedArtworkView: View {
         .onChange(of: songID) { _, _ in loadImage() }
         .onChange(of: albumID) { _, _ in loadImage() }
         .onChange(of: artistID) { _, _ in loadImage() }
+        .onChange(of: revisionToken) { _, _ in loadImage() }
         .onDisappear { loadTask?.cancel() }
     }
 
@@ -293,15 +302,21 @@ struct CachedArtworkView: View {
     // MARK: - Disk Cache
 
     private static func loadFromDiskCache(songID: String?, ref: String?) async -> Data? {
-        // 当 ref 是 source 端 sidecar 路径(NAS / https)时,NAS sidecar 才是
-        // single source of truth —— 跳过 songID-hash cache。理由:
-        // 1. 治本(MetadataService.trustedSource:false)只防"以后"刮削写脏 cache,
-        //    历史污染的 cache 文件不会自动消失。
-        // 2. cache mirror 和 sidecar 之间存在 stale 风险(用户在 NAS 上手动改过
-        //    cover 文件,cache 不会感知)。
-        // hash cache 仍用于无 NAS sidecar 引用的本地歌(embedded artwork)。
-        let refIsRemote = (ref ?? "").contains("/") || (ref ?? "").contains("://")
-        if let songID, !refIsRemote {
+        // 始终先尝试 songID-hash disk cache。它由刮削写回路径 (cacheCover) 维护,
+        // 是 NAS sidecar 的可信 mirror。只要存在就用 —— 即使 ref 是 NAS path。
+        //
+        // 历史顾虑(已在写入侧解决):
+        // 1. 旧的 trustedSource:false 污染 cache → 现在刮削写回会主动覆写 mirror,
+        //    污染会被新数据顶掉。
+        // 2. 用户在 NAS 上手动改 cover → 显式调用 invalidateCoverCache 触发重拉
+        //    (e.g. 下次扫描检测到 sidecar mtime 变化)。
+        //
+        // 旧策略 "ref 含 / 就跳过 disk cache 强制走 NAS" 引发的问题:
+        // - 每次 view 重 mount / NSCache 被清都触发 NAS round-trip
+        // - NAS / CDN HTTP cache 命中旧封面就显示旧的, 用户切到后台再回来封面就
+        //   "退回去了"
+        // 信任本地 mirror 把这些都解决掉。
+        if let songID {
             if let data = await MetadataAssetStore.shared.cachedCoverData(forSongID: songID) {
                 return data
             }

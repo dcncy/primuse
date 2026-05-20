@@ -217,6 +217,20 @@ actor SMBSource: MusicSourceConnector {
         }
     }
 
+    func deleteFile(at path: String) async throws {
+        let normalizedPath = Self.normalizeRemotePath(path)
+        let resolvedPath = try resolve(path: normalizedPath)
+
+        guard case let .share(shareName, relativePath) = resolvedPath else {
+            throw SourceError.connectionFailed("SMB share not selected")
+        }
+
+        try await runWithRetry {
+            let client = try await self.ensureConnectedShare(named: shareName)
+            try await client.removeItem(atPath: relativePath)
+        }
+    }
+
     private func scanDirectory(
         path: String,
         continuation: AsyncThrowingStream<RemoteFileItem, Error>.Continuation

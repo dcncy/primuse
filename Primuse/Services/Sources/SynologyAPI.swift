@@ -317,6 +317,27 @@ actor SynologyAPI {
         }
     }
 
+    func deleteFile(path: String) async throws {
+        guard let sid else { throw SynologyError.notLoggedIn }
+        let pathData = try JSONSerialization.data(withJSONObject: [path])
+        let pathJSON = String(data: pathData, encoding: .utf8) ?? "[\"\(path)\"]"
+
+        let data = try await request(path: "/webapi/entry.cgi", params: [
+            "api": "SYNO.FileStation.Delete",
+            "version": "2",
+            "method": "start",
+            "path": pathJSON,
+            "recursive": "false",
+            "_sid": sid,
+        ])
+
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        guard json["success"] as? Bool == true else {
+            let err = json["error"] as? [String: Any]
+            throw SynologyError.apiError("Delete failed: \(synologyErrorMessage(code: intValue(err?["code"])))")
+        }
+    }
+
     // MARK: - HTTP
 
     private func request(path: String, params: [String: String], usePost: Bool = false) async throws -> Data {

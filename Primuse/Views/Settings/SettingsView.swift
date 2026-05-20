@@ -2,269 +2,262 @@ import SwiftUI
 import PrimuseKit
 
 struct SettingsView: View {
-    @AppStorage(UserNotificationService.notifyLongTasksKey) private var notifyLongTasks: Bool = true
-
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    settingsHeader
-
-                    SettingsSectionCard(title: "playback", icon: "play.circle.fill", tint: .blue) {
-                        SettingsNavRow("playback_settings", systemImage: "play.circle", tint: .blue) {
-                            PlaybackSettingsView()
-                        }
-                        SettingsNavRow("equalizer", systemImage: "slider.horizontal.3", tint: .cyan) {
-                            EqualizerView()
-                        }
-                        SettingsNavRow("audio_effects", systemImage: "waveform.badge.plus", tint: .purple) {
-                            AudioEffectsView()
-                        }
+            List {
+                Section("playback") {
+                    NavigationLink {
+                        EqualizerView()
+                    } label: {
+                        Label("equalizer", systemImage: "slider.horizontal.3")
                     }
 
-                    SettingsSectionCard(title: "library", icon: "books.vertical.fill", tint: .pink) {
-                        SettingsNavRow("metadata_scraping", systemImage: "wand.and.stars", tint: .pink) {
-                            MetadataScrapingView()
-                        }
-                        SettingsNavRow("lyrics_translation_title", systemImage: "character.bubble", tint: .teal) {
-                            LyricsTranslationSettingsView()
-                        }
-                        SettingsNavRow("dup_title", systemImage: "square.stack.3d.up.badge.automatic", tint: .orange) {
-                            DuplicateSongsView()
-                        }
-                        SettingsNavRow("playlist_import_title", systemImage: "tray.and.arrow.down", tint: .green) {
-                            PlaylistImportView()
-                        }
-                        SettingsNavRow("storage_management", systemImage: "internaldrive", tint: .indigo) {
-                            StorageManagementView()
-                        }
+                    NavigationLink {
+                        AudioEffectsView()
+                    } label: {
+                        Label("audio_effects", systemImage: "waveform.badge.plus")
                     }
 
-                    SettingsSectionCard(title: "security", icon: "lock.shield.fill", tint: .green) {
-                        SettingsNavRow("trusted_domains", systemImage: "lock.shield", tint: .green,
-                                       trailing: "\(SSLTrustStore.shared.trustedDomains.count)") {
-                            TrustedDomainsView()
-                        }
+                    NavigationLink {
+                        PlaybackSettingsView()
+                    } label: {
+                        Label("playback_settings", systemImage: "play.circle")
                     }
-
-                    #if os(iOS)
-                    SettingsSectionCard(title: "appearance", icon: "sparkles", tint: .purple) {
-                        SettingsNavRow("app_icon", systemImage: "app.badge", tint: .purple) {
-                            AppIconSettingsView()
-                        }
-                    }
-                    #endif
-
-                    SettingsSectionCard(title: "sync", icon: "icloud.fill", tint: .blue) {
-                        SettingsNavRow("icloud_sync_title", systemImage: "icloud", tint: .blue) {
-                            CloudSyncSettingsView()
-                        }
-                        SettingsNavRow("recently_deleted", systemImage: "trash", tint: .red) {
-                            RecentlyDeletedView()
-                        }
-                        #if os(iOS)
-                        SettingsNavRow("stats_title", systemImage: "chart.bar.xaxis", tint: .cyan) {
-                            ListeningStatsView()
-                        }
-                        #endif
-                        SettingsNavRow("scrobble_title", systemImage: "music.note.list", tint: .pink) {
-                            ScrobbleSettingsView()
-                        }
-                    }
-
-                    notificationCard
-                    aboutCard
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 18)
-                .padding(.bottom, 20)
+
+                Section("library") {
+                    NavigationLink {
+                        SourcesView()
+                    } label: {
+                        Label("manage_sources", systemImage: "externaldrive.connected.to.line.below")
+                    }
+
+                    NavigationLink {
+                        MetadataScrapingView()
+                    } label: {
+                        Label("metadata_scraping", systemImage: "wand.and.stars")
+                    }
+
+                    NavigationLink {
+                        LyricsTranslationSettingsView()
+                    } label: {
+                        Label("lyrics_translation_title", systemImage: "character.bubble")
+                    }
+
+                    NavigationLink {
+                        DuplicateSongsView()
+                    } label: {
+                        Label("dup_title", systemImage: "square.stack.3d.up.badge.automatic")
+                    }
+
+                    NavigationLink {
+                        PlaylistImportView()
+                    } label: {
+                        Label("playlist_import_title", systemImage: "tray.and.arrow.down")
+                    }
+
+                    NavigationLink {
+                        StorageManagementView()
+                    } label: {
+                        Label("storage_management", systemImage: "internaldrive")
+                    }
+                }
+
+                Section("security") {
+                    NavigationLink {
+                        TrustedDomainsView()
+                    } label: {
+                        HStack {
+                            Label("trusted_domains", systemImage: "lock.shield")
+                            Spacer()
+                            Text("\(SSLTrustStore.shared.trustedDomains.count)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Section("appearance") {
+                    NavigationLink {
+                        AppIconSettingsView()
+                    } label: {
+                        Label("app_icon", systemImage: "app.badge")
+                    }
+
+                    NavigationLink {
+                        HomeSectionsSettingsView()
+                    } label: {
+                        Label("home_settings_title", systemImage: "house")
+                    }
+                }
+
+                Section("sync") {
+                    NavigationLink {
+                        CloudSyncSettingsView()
+                    } label: {
+                        Label("icloud_sync_title", systemImage: "icloud")
+                    }
+
+                    NavigationLink {
+                        RecentlyDeletedView()
+                    } label: {
+                        Label("recently_deleted", systemImage: "trash")
+                    }
+
+                    NavigationLink {
+                        ListeningStatsView()
+                    } label: {
+                        Label("stats_title", systemImage: "chart.bar.xaxis")
+                    }
+
+                    NavigationLink {
+                        ScrobbleSettingsView()
+                    } label: {
+                        Label("scrobble_title", systemImage: "music.note.list")
+                    }
+
+                    NavigationLink {
+                        AppleMusicSettingsView()
+                    } label: {
+                        Label("settings_apple_music_section", systemImage: "applelogo")
+                    }
+
+                    NavigationLink {
+                        DLNARendererSettingsView()
+                    } label: {
+                        Label("settings_dlna_section", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }
+
+                Section("about") {
+                    HStack {
+                        Label("version", systemImage: "number")
+                        Spacer()
+                        Text(Bundle.main.appVersion)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Label("build", systemImage: "hammer")
+                        Spacer()
+                        Text(Bundle.main.appBuildNumber)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    CheckForUpdateRow()
+
+                    NavigationLink {
+                        DiagnosticReportsView(service: AppServices.shared.crashDiagnostics)
+                    } label: {
+                        Label(String(localized: "diagnostics_title"), systemImage: "stethoscope")
+                    }
+
+                    NavigationLink {
+                        LicensesView()
+                    } label: {
+                        Label("licenses", systemImage: "doc.text")
+                    }
+                }
             }
-            .background(settingsBackground)
             .navigationTitle("settings_title")
             .toolbarTitleDisplayMode(.inlineLarge)
         }
     }
+}
 
-    private var settingsHeader: some View {
-        HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.blue.opacity(0.16))
-                Image(systemName: "gearshape.2.fill")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(.blue)
-            }
-            .frame(width: 70, height: 70)
+/// Settings row that lets the user manually poll the App Store. Three
+/// visual states:
+/// - Idle: tappable "Check for updates" row.
+/// - Checking: spinner replaces the chevron.
+/// - Result: inline status line under the title — "you're on the
+///   latest version" or "version X.Y.Z available, tap to update".
+private struct CheckForUpdateRow: View {
+    @Environment(AppUpdateChecker.self) private var checker
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("settings_title")
-                    .font(.largeTitle.bold())
-                Text("settings_overview_subtitle")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .padding(.vertical, 6)
+    enum Status: Equatable {
+        case idle
+        case checking
+        case upToDate
+        case available(version: String)
     }
 
-    private var notificationCard: some View {
-        SettingsSectionCard(title: "notifications", icon: "bell.badge.fill", tint: .orange) {
-            Toggle(isOn: $notifyLongTasks) {
+    @State private var status: Status = .idle
+
+    var body: some View {
+        Button {
+            switch status {
+            case .available:
+                checker.openAppStore()
+            case .idle, .upToDate:
+                Task { await runCheck() }
+            case .checking:
+                break
+            }
+        } label: {
+            HStack {
                 Label {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("notify_long_tasks")
-                            .font(.body.weight(.medium))
-                        Text("notify_long_tasks_hint")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("check_for_updates")
+                            .foregroundStyle(.primary)
+                        if let detail = statusDetail {
+                            Text(detail)
+                                .font(.caption)
+                                .foregroundStyle(statusColor)
+                        }
                     }
                 } icon: {
-                    SettingsIcon(systemImage: "clock.badge.checkmark", tint: .orange)
+                    Image(systemName: "arrow.triangle.2.circlepath")
                 }
-            }
-            .toggleStyle(.switch)
-            .padding(.vertical, 2)
-        }
-    }
-
-    private var aboutCard: some View {
-        SettingsSectionCard(title: "about", icon: "info.circle.fill", tint: .secondary) {
-            SettingsInfoRow("version", value: Bundle.main.appVersion)
-            SettingsInfoRow("build", value: Bundle.main.appBuildNumber)
-            SettingsNavRow("licenses", systemImage: "doc.text", tint: .secondary) {
-                LicensesView()
-            }
-        }
-    }
-
-    private var settingsBackground: some View {
-        #if os(iOS)
-        Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-        #else
-        Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
-        #endif
-    }
-}
-
-private struct SettingsSectionCard<Content: View>: View {
-    let title: LocalizedStringKey
-    let icon: String
-    let tint: Color
-    @ViewBuilder var content: Content
-
-    init(title: LocalizedStringKey, icon: String, tint: Color, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.icon = icon
-        self.tint = tint
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(tint)
-                    .frame(width: 18)
-                Text(title)
-                    .font(.headline)
                 Spacer()
+                accessory
             }
-            VStack(spacing: 0) {
-                content
-            }
-            .padding(12)
-            .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.primary.opacity(0.06), lineWidth: 1)
-            }
-        }
-    }
-}
-
-private struct SettingsNavRow<Destination: View>: View {
-    let title: LocalizedStringKey
-    let systemImage: String
-    let tint: Color
-    let trailing: String?
-    @ViewBuilder var destination: Destination
-
-    init(_ title: LocalizedStringKey,
-         systemImage: String,
-         tint: Color,
-         trailing: String? = nil,
-         @ViewBuilder destination: () -> Destination) {
-        self.title = title
-        self.systemImage = systemImage
-        self.tint = tint
-        self.trailing = trailing
-        self.destination = destination()
-    }
-
-    var body: some View {
-        NavigationLink {
-            destination
-        } label: {
-            HStack(spacing: 12) {
-                SettingsIcon(systemImage: systemImage, tint: tint)
-                Text(title)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
-                Spacer(minLength: 12)
-                if let trailing {
-                    Text(trailing)
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.vertical, 9)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct SettingsInfoRow: View {
-    let title: LocalizedStringKey
-    let value: String
-
-    init(_ title: LocalizedStringKey, value: String) {
-        self.title = title
-        self.value = value
+        .disabled(status == .checking)
     }
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.body.weight(.medium))
-            Spacer()
-            Text(value)
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
+    @ViewBuilder
+    private var accessory: some View {
+        switch status {
+        case .checking:
+            ProgressView().controlSize(.small)
+        case .available:
+            Image(systemName: "arrow.up.circle.fill")
+                .foregroundStyle(.tint)
+        default:
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 9)
     }
-}
 
-private struct SettingsIcon: View {
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(tint.opacity(0.14))
-            Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(tint)
+    private var statusDetail: String? {
+        switch status {
+        case .idle, .checking:
+            return nil
+        case .upToDate:
+            return String(localized: "check_for_updates_up_to_date")
+        case .available(let v):
+            return String(format: String(localized: "check_for_updates_available_format"), v)
         }
-        .frame(width: 34, height: 34)
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .available: return .accentColor
+        default: return .secondary
+        }
+    }
+
+    private func runCheck() async {
+        status = .checking
+        // force=true bypasses the 6h throttle so the manual button
+        // always actually hits the network.
+        await checker.checkForUpdate(force: true)
+        if let info = checker.availableUpdate {
+            status = .available(version: info.version)
+        } else {
+            status = .upToDate
+        }
     }
 }
 
@@ -277,7 +270,6 @@ struct MetadataScrapingView: View {
     @State private var cookieText = ""
     @State private var showImportSheet = false
     @State private var importText = ""
-    #if os(iOS)
     @State private var shareTarget: ShareTarget?
 
     /// 分享 sheet 用 — URL 不是 Identifiable，包一层。
@@ -285,7 +277,6 @@ struct MetadataScrapingView: View {
         let id = UUID()
         let url: URL
     }
-    #endif
     @State private var importError: String?
     @State private var importMode: ImportMode = .paste
     @State private var editingConfigSource: ScraperSourceConfig?
@@ -366,7 +357,6 @@ struct MetadataScrapingView: View {
                             }
                             .tint(.blue)
 
-                            #if os(iOS)
                             Button {
                                 if let url = makeShareableConfigFile(for: source) {
                                     shareTarget = ShareTarget(url: url)
@@ -375,7 +365,6 @@ struct MetadataScrapingView: View {
                                 Image(systemName: "square.and.arrow.up")
                             }
                             .tint(.green)
-                            #endif
                         }
                     }
                 }
@@ -456,9 +445,7 @@ struct MetadataScrapingView: View {
         }
         .navigationTitle("metadata_scraping")
         .navigationBarTitleDisplayMode(.inline)
-        #if os(iOS)
         .environment(\.editMode, isReordering ? .constant(.active) : .constant(.inactive))
-        #endif
         .alert("cookie_config", isPresented: Binding(
             get: { editingCookieSourceId != nil },
             set: { if !$0 { editingCookieSourceId = nil } }
@@ -482,14 +469,11 @@ struct MetadataScrapingView: View {
         .sheet(item: $editingConfigSource) { source in
             editConfigSheet(source: source)
         }
-        #if os(iOS)
         .sheet(item: $shareTarget) { target in
             ShareSheet(items: [target.url])
         }
-        #endif
     }
 
-    #if os(iOS)
     /// 把指定源的 ScraperConfig（含 secrets）写入临时文件返回 URL，供 ShareSheet 使用。
     /// 注意：分享出去的 JSON 包含 secrets，因此目标只能是用户私下分享（AirDrop / 信任的私人聊天）。
     private func makeShareableConfigFile(for source: ScraperSourceConfig) -> URL? {
@@ -520,7 +504,6 @@ struct MetadataScrapingView: View {
             return nil
         }
     }
-    #endif
 
     private var importScraperSheet: some View {
         NavigationStack {
@@ -650,29 +633,29 @@ struct PlaybackSettingsView: View {
         Form {
             Section {
                 Toggle("gapless_playback", isOn: $settings.gaplessEnabled)
-                    .disabled(true)
+                    .onChange(of: settings.gaplessEnabled) { _, enabled in
+                        if enabled { settings.crossfadeEnabled = false }
+                    }
             } footer: {
-                Text("gapless_not_available")
+                Text("gapless_desc")
             }
 
             Section {
                 Toggle("crossfade", isOn: $settings.crossfadeEnabled)
+                    .onChange(of: settings.crossfadeEnabled) { _, enabled in
+                        if enabled { settings.gaplessEnabled = false }
+                    }
 
                 if settings.crossfadeEnabled {
-                    // 之前 Slider 的 trailing label "3s" 和下方 caption2 "3 秒"
-                    // 同时显示,在 macOS Form 里产生左右各一处重复的当前值。
-                    // 改为「title 左 / 当前值右」一行 + slider 单独一行,只显示一次值。
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("crossfade_duration")
-                                .font(.caption)
-                            Spacer()
-                            Text("\(Int(settings.crossfadeDuration)) \(String(localized: "seconds"))")
-                                .font(.caption)
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
+                    VStack(alignment: .leading) {
+                        Text("crossfade_duration")
+                            .font(.caption)
+                        Slider(value: $settings.crossfadeDuration, in: 1...12, step: 1) {
+                            Text("\(Int(settings.crossfadeDuration))s")
                         }
-                        Slider(value: $settings.crossfadeDuration, in: 1...12, step: 1)
+                        Text("\(Int(settings.crossfadeDuration)) \(String(localized: "seconds"))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             } footer: {
@@ -683,34 +666,34 @@ struct PlaybackSettingsView: View {
                 Toggle("replay_gain", isOn: $settings.replayGainEnabled)
 
                 if settings.replayGainEnabled {
-                    // 用 LabeledContent 显式分隔 title / Picker, 这样 macOS Form
-                    // 才会把 dropdown 推到行尾, 不会"模式 单曲"挤在最左留一片空白。
-                    LabeledContent {
-                        Picker("", selection: $settings.replayGainMode) {
-                            ForEach(ReplayGainMode.allCases, id: \.self) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
+                    Picker("rg_mode", selection: $settings.replayGainMode) {
+                        ForEach(ReplayGainMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
                         }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                    } label: {
-                        Text("rg_mode")
                     }
                 }
             } footer: {
                 Text("replay_gain_desc")
             }
 
+            Section {
+                Toggle("spatial_audio", isOn: $settings.spatialAudioEnabled)
+
+                if settings.spatialAudioEnabled {
+                    Toggle("spatial_head_tracking", isOn: $settings.spatialHeadTrackingEnabled)
+                }
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("spatial_audio_desc")
+                    if settings.spatialAudioEnabled {
+                        Text("spatial_head_tracking_desc")
+                    }
+                }
+            }
+
         }
-        #if os(macOS)
-        // macOS Settings 已经把 tab 标题画在窗口顶部,navigationTitle 在
-        // 这里既看不见也会让 SwiftUI 警告。Form 用 grouped 样式才像
-        // System Settings,跟 EqualizerView / AudioEffectsView 保持一致。
-        .formStyle(.grouped)
-        #else
         .navigationTitle("playback_settings")
         .navigationBarTitleDisplayMode(.inline)
-        #endif
     }
 }
 
@@ -721,6 +704,10 @@ struct StorageManagementView: View {
     @Environment(PlaybackSettingsStore.self) private var playbackSettings
     @Environment(MetadataBackfillService.self) private var backfill
     @AppStorage(MetadataBackfillService.wifiOnlyDefaultsKey) private var cloudScanWifiOnly: Bool = true
+    @AppStorage(UserNotificationService.backfillCompleteNotificationKey) private var notifyBackfillComplete: Bool = false
+    /// 系统授权状态 ── 进页面时查一次。用户在系统 Settings 关掉后, toggle
+    /// 仍是 on 但显示"已被系统拒绝"提示, 让用户知道为什么开关无效。
+    @State private var notificationStatusDenied: Bool = false
     @State private var audioCacheSize: String = "..."
     @State private var imageCacheSize: String = "..."
     @State private var metadataSize: String = "..."
@@ -750,6 +737,24 @@ struct StorageManagementView: View {
                         // start (or stop) right after flipping the switch.
                         backfill.refreshQueue()
                     }
+                Toggle("notify_backfill_complete", isOn: $notifyBackfillComplete)
+                    .onChange(of: notifyBackfillComplete) { _, on in
+                        guard on else { return }
+                        // 用户从关 → 开: 主动请求权限。系统第一次会弹对话框,
+                        // 之前 deny 过的话不会再弹, 我们用 currentAuthorizationStatus
+                        // 检测并提示用户去系统 Settings 开。
+                        Task {
+                            let granted = await UserNotificationService.requestAuthorization()
+                            if !granted {
+                                notificationStatusDenied = true
+                            }
+                        }
+                    }
+                if notifyBackfillComplete && notificationStatusDenied {
+                    Label("notify_permission_denied_hint", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
                 if backfill.hasPendingWork {
                     HStack {
                         Text("backfill_in_progress")
@@ -764,9 +769,23 @@ struct StorageManagementView: View {
             } footer: {
                 Text("cloud_scan_wifi_only_footer")
             }
+            .task {
+                // 进设置页时查一次系统授权状态。如果用户在 Settings 关掉了,
+                // toggle 显示打开但 notificationStatusDenied 让 UI 提示。
+                if notifyBackfillComplete {
+                    let status = await UserNotificationService.currentAuthorizationStatus()
+                    notificationStatusDenied = (status == .denied)
+                }
+            }
 
             Section {
                 Toggle("audio_cache_enabled", isOn: $settings.audioCacheEnabled)
+
+                Picker("audio_cache_limit", selection: $settings.audioCacheLimitBytes) {
+                    ForEach(Self.audioCacheLimitOptions, id: \.self) { bytes in
+                        Text(formatBytes(bytes)).tag(bytes)
+                    }
+                }
 
                 storageRow(
                     icon: "waveform",
@@ -776,7 +795,7 @@ struct StorageManagementView: View {
                 ) {
                     isClearingAudio = true
                     Task {
-                        let result = sourceManager.clearAudioCache()
+                        let result = await sourceManager.clearAudioCache()
                         await refreshSizes()
                         isClearingAudio = false
                         flashCacheToast(freed: result.freedBytes, failed: result.failedCount)
@@ -844,11 +863,9 @@ struct StorageManagementView: View {
             }
             #endif
         }
-        #if os(iOS)
         .sheet(item: $logShareItem) { item in
             ShareSheet(items: [item.url])
         }
-        #endif
         .navigationTitle("storage_management")
         .navigationBarTitleDisplayMode(.inline)
         .task { await refreshSizes() }
@@ -915,6 +932,17 @@ struct StorageManagementView: View {
 
         // 缩进 + 小一号字, 提示是 audio cache 的细分
         VStack(alignment: .leading, spacing: 8) {
+            if bd.pinnedBytes > 0 {
+                HStack {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundStyle(.tint).font(.caption)
+                    Text("cache_pinned").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(fmt.string(fromByteCount: bd.pinnedBytes))
+                        .font(.caption).foregroundStyle(.tint).monospacedDigit()
+                }
+            }
+
             HStack {
                 Image(systemName: "checkmark.circle")
                     .foregroundStyle(.secondary).font(.caption)
@@ -1020,6 +1048,20 @@ struct StorageManagementView: View {
         let metadata = await MetadataAssetStore.shared.cacheSize()
         metadataSize = formatter.string(fromByteCount: metadata)
     }
+
+    private static let audioCacheLimitOptions: [Int64] = [
+        1_073_741_824,
+        2_147_483_648,
+        5_368_709_120,
+        10_737_418_240,
+        21_474_836_480,
+    ]
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
 }
 
 // MARK: - Trusted Domains
@@ -1098,9 +1140,7 @@ struct LicensesView: View {
             }
         }
         .navigationTitle("licenses")
-        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
     }
 
     private func licenseRow(_ name: String, _ license: String) -> some View {
@@ -1117,11 +1157,8 @@ struct LicensesView: View {
 
 // MARK: - Share Sheet
 
-#if os(iOS)
 /// SwiftUI 包装的 `UIActivityViewController`，让任意 view 通过 `.sheet`
 /// 弹出系统分享面板（AirDrop / 微信 / 邮件 / 文件 / 等）。
-/// macOS 端用 NSSharingServicePicker，UI 接入方式不同——后续 MacSettingsView
-/// 单独适配，本通用 ShareSheet 仅 iOS 编译。
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
@@ -1131,4 +1168,3 @@ struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
-#endif

@@ -82,18 +82,18 @@ struct PlaylistImportView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                // Form section 里的按钮 iOS 26 用 .borderedProminent 偶尔
-                // 渲染成跟背景同色看不见。这里用 plain 按钮 + 显式色块,
-                // 文字始终可见; 顶部工具栏也放了一个 (toolbar) 双重保险。
                 Button {
                     showFileImporter = true
                 } label: {
-                    Label("playlist_import_pick_file", systemImage: "folder")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor))
+                    HStack {
+                        Label("playlist_import_pick_file", systemImage: "folder")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 8)

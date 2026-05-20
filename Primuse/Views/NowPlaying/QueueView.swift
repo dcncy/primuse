@@ -5,16 +5,16 @@ struct QueueView: View {
     @Environment(AudioPlayerService.self) private var player
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
                 if player.queue.isEmpty {
-                    ContentUnavailableView(
-                        "queue_empty",
-                        systemImage: "music.note.list",
-                        description: Text("queue_empty_desc")
+                    EmptyStateView(
+                        titleKey: "queue_empty",
+                        descriptionKey: "queue_empty_desc",
+                        imageName: "EmptyStateQueue",
+                        systemImage: "music.note.list"
                     )
                 } else {
                     // Now Playing
@@ -29,89 +29,69 @@ struct QueueView: View {
                         }
                     }
 
-                    // Up Next (draggable)
-                    let upNextIndices = (player.currentIndex + 1)..<player.queue.count
-                    if !upNextIndices.isEmpty {
+                    // Up Next (draggable). Iterate over queueEntries
+                    // (each has a stable UUID) instead of integer
+                    // indices — the previous `id: \.self` on Int
+                    // index made SwiftUI's diff see no identity change
+                    // after a reorder (range stays 0..N-1), so only
+                    // the dragged row animated while the others
+                    // swapped contents in place. Two rows visually
+                    // overlapped for a few frames whenever the source
+                    // and destination weren't adjacent. UUID-keyed
+                    // ForEach lets SwiftUI animate every row's real
+                    // position swap, and is also robust to the queue
+                    // holding the same song multiple times.
+                    let upNextStart = player.currentIndex + 1
+                    if upNextStart < player.queueEntries.count {
+                        let upNextEntries = Array(player.queueEntries[upNextStart..<player.queueEntries.count])
                         Section("up_next") {
-                            ForEach(Array(upNextIndices), id: \.self) { index in
-                                let song = player.queue[index]
+                            ForEach(Array(upNextEntries.enumerated()), id: \.element.id) { offset, entry in
                                 SongRowView(
-                                    song: song,
+                                    song: entry.song,
                                     isPlaying: false,
                                     showsActions: false,
-                                    context: SongRowView.context(for: song, sourcesStore: sourcesStore, backfill: backfill)
+                                    context: SongRowView.context(for: entry.song, sourcesStore: sourcesStore, backfill: backfill)
                                 )
                                 .contentShape(Rectangle())
-                                .onTapGesture { playAt(index: index) }
+                                .onTapGesture { playAt(index: upNextStart + offset) }
                             }
                             .onMove { source, destination in
-                                // Adjust indices relative to queue (not section)
-                                let adjustedSource = IndexSet(source.map { $0 + player.currentIndex + 1 })
-                                let adjustedDest = destination + player.currentIndex + 1
-                                player.queue.move(fromOffsets: adjustedSource, toOffset: adjustedDest)
+                                // ForEach's source/destination are
+                                // section-relative; rebase to queue
+                                // indices before mutating. Routed
+                                // through the player so shuffle plan
+                                // invalidation happens centrally.
+                                let adjustedSource = IndexSet(source.map { $0 + upNextStart })
+                                let adjustedDest = destination + upNextStart
+                                player.moveQueueItems(fromOffsets: adjustedSource, toOffset: adjustedDest)
                             }
                         }
                     }
 
-                    // Previously played
-                    let playedIndices = 0..<player.currentIndex
-                    if !playedIndices.isEmpty {
-                        Section {
-                            ForEach(Array(playedIndices), id: \.self) { index in
-                                let song = player.queue[index]
+                    // Previously played. Same UUID-keyed identity for
+                    // consistency, even without onMove.
+                    if player.currentIndex > 0 {
+                        let playedEntries = Array(player.queueEntries[0..<player.currentIndex])
+                        Section("played") {
+                            ForEach(Array(playedEntries.enumerated()), id: \.element.id) { offset, entry in
                                 SongRowView(
-                                    song: song,
+                                    song: entry.song,
                                     isPlaying: false,
                                     showsActions: false,
-                                    context: SongRowView.context(for: song, sourcesStore: sourcesStore, backfill: backfill)
+                                    context: SongRowView.context(for: entry.song, sourcesStore: sourcesStore, backfill: backfill)
                                 )
                                 .opacity(0.6)
                                 .contentShape(Rectangle())
-                                .onTapGesture { playAt(index: index) }
-                            }
-                        } header: {
-                            HStack {
-                                Text("played")
-                                Spacer()
-                                Button {
-                                    clearPlayed(uptoIndex: player.currentIndex)
-                                } label: {
-                                    Text("clear_all")
-                                        .font(.caption)
-                                        .foregroundStyle(Color.accentColor)
-                                }
-                                .buttonStyle(.plain)
+                                .onTapGesture { playAt(index: offset) }
                             }
                         }
                     }
                 }
             }
-            #if os(macOS)
-            .listStyle(.inset)
-            #endif
-            #if os(iOS)
             .environment(\.editMode, .constant(.active)) // Enable drag handles
-            #endif
             .navigationTitle("queue_title")
             .navigationBarTitleDisplayMode(.inline)
-            #if os(macOS)
-            // iOS 用 presentationDragIndicator 关闭,macOS sheet 里没有,
-            // 加一个显式的 Done 按钮。
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "done")) { dismiss() }
-                }
-            }
-            #endif
         }
-    }
-
-    /// 清除「已播放」区(Apple Music 行为)。从队列里移除 0..<index 的歌,
-    /// 同时把 currentIndex 修正到 0,这样当前歌仍是播放中那首。
-    private func clearPlayed(uptoIndex: Int) {
-        guard uptoIndex > 0, uptoIndex <= player.queue.count else { return }
-        player.queue.removeFirst(uptoIndex)
-        player.currentIndex = max(0, player.currentIndex - uptoIndex)
     }
 
     private func playAt(index: Int) {

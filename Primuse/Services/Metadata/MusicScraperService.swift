@@ -89,6 +89,11 @@ final class MusicScraperService {
             // task 写 cache 已经晚了 (UI 不会再 reload)。
             let lyricsLines = result.lyricsLines
             let coverData = result.coverData
+            if let coverData {
+                await MetadataAssetStore.shared.cacheCover(coverData, forSongID: updatedSong.id)
+                updatedSong.coverArtFileName = MetadataAssetStore.shared.expectedCoverFileName(for: updatedSong.id)
+                CachedArtworkView.invalidateCache(for: updatedSong.id)
+            }
             if let lyricsLines, !lyricsLines.isEmpty {
                 await MetadataAssetStore.shared.cacheLyrics(lyricsLines, forSongID: updatedSong.id, force: true)
                 updatedSong.lyricsFileName = MetadataAssetStore.shared.expectedLyricsFileName(for: updatedSong.id)
@@ -102,12 +107,6 @@ final class MusicScraperService {
                 let sourceManager = self.sourceManager
                 let songID = updatedSong.id
                 Task { @MainActor in
-                    // 之前刮削过的 cover cache 可能仍然存在, 在 sidecar 写完前
-                    // 失效避免 UI 拿到上次的污染数据。lyrics 不在这里 invalidate
-                    // 因为我们刚刚已经写过新的字级 cache (上面那段)。
-                    await MetadataAssetStore.shared.invalidateCoverCache(forSongID: songID)
-                    CachedArtworkView.invalidateCache(for: songID)
-
                     do {
                         plog("📝 Sidecar: getting auxiliary connector for '\(songForWrite.title)' source=\(songForWrite.sourceID)")
                         let connector = try await sourceManager.auxiliaryConnector(for: songForWrite)

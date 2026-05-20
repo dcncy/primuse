@@ -16,7 +16,13 @@ final class AppServices {
     let themeService: ThemeService
     let scanService: ScanService
     let metadataBackfill: MetadataBackfillService
-    private var observerTokens: [NSObjectProtocol] = []
+    let updateChecker: AppUpdateChecker
+    let coverTintProvider: CoverTintProvider
+    let spotlightIndex: SpotlightIndexService
+    let appleMusic: AppleMusicService
+    let dlnaRenderer: DLNARendererService
+    let visualizer: AudioVisualizerService
+    let crashDiagnostics: CrashDiagnosticsService
 
     private init() {
         // Class is @MainActor so this initializer is too — but the static
@@ -56,21 +62,26 @@ final class AppServices {
         self.playbackSettingsStore = playbackSettings
         self.cloudSync = sync
         let theme = ThemeService()
-        #if os(iOS)
         // Pull the user's chosen app icon tint into the theme so the in-app
         // accent matches the icon they picked. Cover-art-derived colors will
         // override this while a song with artwork plays.
         theme.setBaseAccent(AppIconService.shared.currentTint)
-        #endif
         self.themeService = theme
         self.scanService = ScanService()
         self.metadataBackfill = MetadataBackfillService(library: library, sourceManager: manager)
+        self.updateChecker = AppUpdateChecker()
+        self.coverTintProvider = CoverTintProvider()
+        self.spotlightIndex = SpotlightIndexService()
+        self.appleMusic = AppleMusicService()
+        self.dlnaRenderer = DLNARendererService(player: player)
+        self.visualizer = AudioVisualizerService()
+        let crash = CrashDiagnosticsService()
+        crash.register()
+        self.crashDiagnostics = crash
 
-        library.updateSourceVisibility(
-            activeSourceIDs: Set(store.sources.map(\.id)),
-            disabledSourceIDs: Set(store.sources.filter { !$0.isEnabled }.map(\.id))
+        library.updateDisabledSourceIDs(
+            Set(store.sources.filter { !$0.isEnabled }.map(\.id))
         )
-        library.removeSongsExcludingSources(Set(store.sources.map(\.id)))
 
         // Wire the library's tombstone identity resolver. Maps a song's
         // mount UUID → its CloudAccount id (when available) so deletion
@@ -89,31 +100,109 @@ final class AppServices {
         CloudKVSSync.shared.register(key: CloudKVSKey.lyricsFontScale) { }
         CloudKVSSync.shared.register(key: CloudKVSKey.recentSearches) { }
 
-        observerTokens.append(
-            NotificationCenter.default.addObserver(
-                forName: .primuseSourcesDidChange,
-                object: nil,
-                queue: .main
-            ) { [weak store, weak library, weak manager] note in
-                // Pull the needed values out before entering the MainActor task.
-                // Notification itself is not Sendable under strict concurrency.
-                let deletedIDs = (note.userInfo?["ids"] as? [String]) ?? []
-                Task { @MainActor in
-                    guard let store, let library else { return }
-                    let activeSourceIDs = Set(store.sources.map(\.id))
-                    library.updateSourceVisibility(
-                        activeSourceIDs: activeSourceIDs,
-                        disabledSourceIDs: Set(store.sources.filter { !$0.isEnabled }.map(\.id))
-                    )
-                    library.removeSongsExcludingSources(activeSourceIDs)
-                    for id in deletedIDs where !activeSourceIDs.contains(id) {
-                        manager?.deleteSourceCaches(sourceID: id)
-                        #if os(macOS)
-                        LocalBookmarkStore.remove(sourceID: id)
-                        #endif
-                    }
-                }
+        wireIntentBridge()
+        observeSpotlightReindex()
+    }
+
+    /// Spotlight 重建索引 ── 启动时跑一次, 之后只要 library 的
+    /// songReplacementToken 翻动 (新增/删除/批量替换) 就重新拉一次。
+    /// Observation 自动 re-arm,跟 MacMenuBarController 的 observePlayerState
+    /// 是同一个模式。
+    private func observeSpotlightReindex() {
+        let library = self.musicLibrary
+        let index = self.spotlightIndex
+        // 启动 reindex 延 1s,等 CloudKit 同步先拉一拨远端歌单 / 设置,避免
+        // 反复重建。
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            index.reindex(library: library)
+        }
+
+        observeLibraryToken(library: library, index: index)
+    }
+
+    private func observeLibraryToken(library: MusicLibrary, index: SpotlightIndexService) {
+        withObservationTracking {
+            _ = library.songReplacementToken
+            _ = library.songs.count
+            _ = library.playlists.count
+        } onChange: { [weak library, weak index] in
+            Task { @MainActor [weak self] in
+                guard let library, let index else { return }
+                index.reindex(library: library)
+                self?.observeLibraryToken(library: library, index: index)
             }
-        )
+        }
+    }
+
+    /// 把 `PrimuseIntentBridge` 的闭包指向真实的 player / library。Widget
+    /// extension / Shortcuts / Control Center 触发 intent 时,系统会把
+    /// `AudioPlaybackIntent.perform()` 路由到主 app 进程(必要时唤醒),
+    /// 这里注入的闭包就跑起来了。
+    private func wireIntentBridge() {
+        let bridge = PrimuseIntentBridge.shared
+        let player = self.playerService
+        let library = self.musicLibrary
+
+        bridge.togglePlayPause = { player.togglePlayPause() }
+        bridge.setPlaying = { desired in
+            // 状态对齐: 想播放且当前没播 → toggle 一下; 想暂停且当前在播 → toggle。
+            // 已经对齐就别动 (避免来回开停)。
+            if desired != player.isPlaying { player.togglePlayPause() }
+        }
+        bridge.next = { await player.next(caller: "AppIntent") }
+        bridge.previous = { await player.previous() }
+
+        bridge.playSong = { title, artist in
+            let candidates = Self.matchingSongs(in: library.visibleSongs, title: title, artist: artist)
+            guard let song = candidates.first else { return nil }
+            // 命中歌 + 整库剩下的拼起来当队列,播完会自然往下接。
+            let rest = library.visibleSongs.filter { s in !candidates.contains(where: { $0.id == s.id }) }
+            player.setQueue(candidates + rest, startAt: 0)
+            await player.play(song: song, caller: "AppIntent")
+            let by = song.artistName.map { " by \($0)" } ?? ""
+            return "Playing \(song.title)\(by)"
+        }
+
+        bridge.playPlaylist = { name in
+            let trimmed = name.lowercased()
+            let exact = library.playlists.first(where: { $0.name.lowercased() == trimmed })
+            let target = exact ?? library.playlists.first(where: { $0.name.lowercased().contains(trimmed) })
+            guard let playlist = target else { return nil }
+            let songs = library.songs(forPlaylist: playlist.id)
+            guard let first = songs.first else { return nil }
+            player.setQueue(songs, startAt: 0)
+            await player.play(song: first, caller: "AppIntent")
+            return "Playing playlist \(playlist.name)."
+        }
+
+        bridge.shuffleLibrary = {
+            let pool = library.visibleSongs.shuffled()
+            guard let first = pool.first else { return }
+            player.setQueue(pool, startAt: 0)
+            await player.play(song: first, caller: "AppIntent")
+        }
+    }
+
+    /// 模糊匹配 ── title 包含 + (可选) artist 包含,都不区分大小写。
+    /// 精确 title 匹配排前。
+    private static func matchingSongs(in songs: [Song], title: String, artist: String?) -> [Song] {
+        let titleLower = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !titleLower.isEmpty else { return [] }
+        let artistLower = artist?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered = songs.filter { s in
+            let titleMatch = s.title.lowercased().contains(titleLower)
+            guard titleMatch else { return false }
+            if let artistLower, !artistLower.isEmpty {
+                return (s.artistName ?? "").lowercased().contains(artistLower)
+            }
+            return true
+        }
+        return filtered.sorted { a, b in
+            let aExact = a.title.lowercased() == titleLower
+            let bExact = b.title.lowercased() == titleLower
+            if aExact != bExact { return aExact }
+            return false
+        }
     }
 }

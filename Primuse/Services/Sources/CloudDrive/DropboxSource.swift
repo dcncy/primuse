@@ -89,7 +89,8 @@ actor DropboxSource: MusicSourceConnector, OAuthCloudSource {
         var request = URLRequest(url: URL(string: "\(Self.contentBase)/files/download")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("{\"path\":\"\(path)\"}", forHTTPHeaderField: "Dropbox-API-Arg")
+        let argData = try JSONSerialization.data(withJSONObject: ["path": path])
+        request.setValue(String(data: argData, encoding: .utf8), forHTTPHeaderField: "Dropbox-API-Arg")
         request.timeoutInterval = 300
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -174,9 +175,15 @@ actor DropboxSource: MusicSourceConnector, OAuthCloudSource {
         var request = URLRequest(url: URL(string: "https://api.dropboxapi.com/oauth2/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        var body = "grant_type=refresh_token&refresh_token=\(rt)&client_id=\(cid)"
-        if let secret = creds?.clientSecret { body += "&client_secret=\(secret)" }
-        request.httpBody = body.data(using: .utf8)
+        var items = [
+            URLQueryItem(name: "grant_type", value: "refresh_token"),
+            URLQueryItem(name: "refresh_token", value: rt),
+            URLQueryItem(name: "client_id", value: cid),
+        ]
+        if let secret = creds?.clientSecret {
+            items.append(URLQueryItem(name: "client_secret", value: secret))
+        }
+        request.httpBody = CloudDriveHelper.formURLEncodedBody(items)
         let (data, _) = try await URLSession.shared.data(for: request)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         guard let at = json["access_token"] as? String else { throw CloudDriveError.tokenRefreshFailed("") }

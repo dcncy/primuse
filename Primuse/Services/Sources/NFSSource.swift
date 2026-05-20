@@ -211,6 +211,22 @@ actor NFSSource: MusicSourceConnector {
         }
     }
 
+    func deleteFile(at path: String) async throws {
+        let selection = try resolveSelectionPath(for: path)
+        let client = try resolveClient()
+        try await ensureConnected(to: selection.exportPath)
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            client.removeFile(atPath: selection.relativePath) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
     /// NFS3/4 READ via NFSKit's `contents(atPath:range:progress:)`。底层是 libnfs
     /// 的 NFS_READ RPC (offset + count), 协议级支持任意 offset 读, 让
     /// CloudPlaybackSource 边下边播替代整文件下载。

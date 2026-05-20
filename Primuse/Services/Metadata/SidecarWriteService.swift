@@ -7,7 +7,7 @@ import AppKit
 #endif
 
 /// Writes sidecar files (cover art, lyrics) alongside source audio files on NAS/remote storage.
-/// - Cover: `cover.jpg` in the album directory (shared by all songs in the same folder)
+/// - Cover: `<basename>-cover.jpg` next to the audio file
 /// - Lyrics: `<basename>.lrc` next to the audio file
 actor SidecarWriteService {
     static let shared = SidecarWriteService()

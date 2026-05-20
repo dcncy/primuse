@@ -1,0 +1,33 @@
+import Foundation
+
+/// Intent <-> 主 app 服务的解耦层。
+///
+/// 为什么需要这层:
+/// - App Intents (Siri / Shortcuts / Lock Screen / Control Center) 在调用方
+///   (Widget Extension / Shortcuts.app) 进程里需要拿到 intent 类型,所以 intent
+///   声明要放在两个 target 都能 link 的位置。
+/// - 实际播放器 (`AudioPlayerService`) / 库 (`MusicLibrary`) 都在主 app target,
+///   widget extension 拿不到。
+/// - 解法: intent 文件放在 PrimuseKit (主 app + widget 都依赖), `perform()` 里
+///   只调本桥的闭包; 主 app 启动时把真正的实现注入进来。
+/// - 用户在 widget / Control Center 触发 intent 时,凡是 conform 了
+///   `AudioPlaybackIntent` 的,系统会把 `perform()` 路由到主 app 进程跑
+///   (必要时唤醒 app),那时闭包已经被注入,行为正确。
+@MainActor
+public final class PrimuseIntentBridge {
+    public static let shared = PrimuseIntentBridge()
+
+    public var togglePlayPause: @MainActor () -> Void = {}
+    /// Control Widget 的 toggle 走这个: 系统把"用户想要的下一帧状态"直接
+    /// 给我们 (true = 想播放, false = 想暂停), 我们对齐到实际播放器即可。
+    public var setPlaying: @MainActor (Bool) -> Void = { _ in }
+    public var next: @MainActor () async -> Void = {}
+    public var previous: @MainActor () async -> Void = {}
+    /// 返回找到并已经开播的歌曲描述(用于 Siri 的回话),没找到时返回 nil。
+    public var playSong: @MainActor (_ title: String, _ artist: String?) async -> String? = { _, _ in nil }
+    /// 返回播单名(用于回话),没找到 / 空播单返回 nil。
+    public var playPlaylist: @MainActor (_ name: String) async -> String? = { _ in nil }
+    public var shuffleLibrary: @MainActor () async -> Void = {}
+
+    private init() {}
+}

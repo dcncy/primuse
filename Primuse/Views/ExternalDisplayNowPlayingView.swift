@@ -1,0 +1,123 @@
+import SwiftUI
+import PrimuseKit
+
+/// 外接屏专属"现在播放"页 —— `externalDisplayNonInteractive` 屏不接受触摸,
+/// 所以这里只渲染信息,不放任何按钮。播控全部留在主屏 (iPad NowPlayingView)。
+///
+/// 设计:
+/// - 左 1/2: 巨幅封面(占屏高 80%), 加封面色 ambient gradient
+/// - 右 1/2: 标题 + 艺术家 + 大字滚动歌词
+/// - 没在播任何歌时: 简单 brand 占位, 不留空白
+struct ExternalDisplayNowPlayingView: View {
+    @Environment(AudioPlayerService.self) private var player
+    @Environment(MusicLibrary.self) private var library
+    @Environment(ThemeService.self) private var theme
+    @Environment(SourceManager.self) private var sourceManager
+    @Environment(MusicScraperService.self) private var scraperService
+
+    @State private var lyrics: [LyricLine] = []
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                // 跟主屏 NowPlayingView 一样的封面色 ambient,统一视觉
+                Color.black.ignoresSafeArea()
+                LinearGradient(
+                    colors: [theme.darkAccent, theme.darkAccent.opacity(0.55), .black],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.5), value: theme.colorID)
+
+                if player.currentSong != nil {
+                    activeBody(geo: geo)
+                } else {
+                    idleBody
+                }
+            }
+        }
+        .task(id: player.currentSong?.id) { await loadLyrics() }
+    }
+
+    @ViewBuilder
+    private func activeBody(geo: GeometryProxy) -> some View {
+        let artSize = min(geo.size.width * 0.42, geo.size.height * 0.82)
+
+        HStack(spacing: 60) {
+            // 左: 封面
+            CachedArtworkView(
+                coverRef: player.currentSong?.coverArtFileName,
+                songID: player.currentSong?.id ?? "",
+                size: artSize,
+                cornerRadius: 24,
+                sourceID: player.currentSong?.sourceID,
+                filePath: player.currentSong?.filePath,
+                revisionToken: player.coverRevision
+            )
+            .shadow(color: .black.opacity(0.40), radius: 48, y: 18)
+
+            // 右: 标题 + 歌词
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(player.currentSong?.title ?? "")
+                        .font(.system(size: 52, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                    Text(player.currentSong?.artistName ?? "")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.70))
+                        .lineLimit(1)
+                    if let album = player.currentSong?.albumTitle, !album.isEmpty {
+                        Text(album)
+                            .font(.system(size: 22, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.50))
+                            .lineLimit(1)
+                    }
+                }
+
+                if !lyrics.isEmpty {
+                    LyricsScrollView(
+                        lyrics: lyrics,
+                        player: player,
+                        songID: player.currentSong?.id,
+                        isScrapingCurrentSong: false,
+                        onScrape: {}
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else {
+                    Spacer()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .padding(.horizontal, 80)
+        .padding(.vertical, 60)
+    }
+
+    private var idleBody: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "music.note")
+                .font(.system(size: 96, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+            Text("猿音")
+                .font(.system(size: 64, weight: .bold))
+                .foregroundStyle(.white)
+            Text("从主屏开始播放")
+                .font(.system(size: 24))
+                .foregroundStyle(.white.opacity(0.55))
+        }
+    }
+
+    /// 复用 NowPlayingView 的 Tier1a (songID hash cache) 路径。外接屏只读
+    /// 不写,所以不需要参与 scrape / Tier2/3 fallback —— 主屏 NowPlayingView
+    /// 已经处理,把 cache 填好后,这里能立刻读到。
+    private func loadLyrics() async {
+        guard let song = player.currentSong else { lyrics = []; return }
+        if let cached = await MetadataAssetStore.shared.cachedLyrics(forSongID: song.id), !cached.isEmpty {
+            lyrics = cached
+        } else {
+            lyrics = []
+        }
+    }
+}

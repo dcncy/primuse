@@ -1,4 +1,5 @@
 import SwiftUI
+import SafariServices
 import PrimuseKit
 
 /// 听歌记录上报 (scrobble) 设置 — Last.fm / ListenBrainz 等。
@@ -22,10 +23,11 @@ struct ScrobbleSettingsView: View {
     /// 「使用自己的 application」高级区是否展开。如果用户已经粘过自己的
     /// key, 默认展开让他们能看见; 否则收起 (大部分人用 app 内置 default)。
     @State private var showLastFmAdvanced = false
-    /// 两步授权流程暂存的 token —— 第一步从 Safari 打开 last.fm 授权页时
-    /// 拿到, 第二步用户点「我已授权」时拿这个去换 sessionKey。
+    /// 两步授权流程暂存的 token —— 第一步打开 Last.fm 授权页时拿到,
+    /// 第二步在网页关闭/返回应用后拿这个去换 sessionKey。
     /// nil = 还没开始 / 已经完成 / 取消; non-nil = 等待用户授权确认中。
     @State private var lastFmPendingToken: String?
+    @State private var lastFmAuthSession: LastFmAuthSession?
 
     @State private var showClearQueueConfirm = false
 
@@ -51,11 +53,27 @@ struct ScrobbleSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .onAppear { loadStoredTokens() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            guard lastFmPendingToken != nil,
+                  !lastFmConnected,
+                  !isLoggingInLastFm else { return }
+            Task { await confirmLastFmAuthorization(showError: false) }
+        }
+        .sheet(item: $lastFmAuthSession, onDismiss: {
+            guard lastFmPendingToken != nil,
+                  !lastFmConnected,
+                  !isLoggingInLastFm else { return }
+            Task { await confirmLastFmAuthorization(showError: true) }
+        }) { session in
+            LastFmAuthSafariView(url: session.url)
+                .ignoresSafeArea()
+        }
         .alert("scrobble_lastfm_signout_confirm", isPresented: $showLastFmSignOutConfirm) {
             Button("scrobble_lastfm_signout", role: .destructive) {
                 LastFmCredentialsStore.signOut()
                 lastFmConnected = false
                 lastFmUsername = ""
+                lastFmPendingToken = nil
                 NotificationCenter.default.post(name: .scrobbleSettingsChanged, object: nil)
             }
             Button("cancel", role: .cancel) {}
@@ -164,15 +182,21 @@ struct ScrobbleSettingsView: View {
                     } label: {
                         Label("scrobble_lastfm_signout", systemImage: "rectangle.portrait.and.arrow.right")
                     }
-                } else if let _ = lastFmPendingToken {
-                    // Step 2: 已经打开过 Safari 授权页, 等用户回来确认。
+                } else if let token = lastFmPendingToken {
+                    // Step 2: 已经打开过授权页, 等用户回来后检查授权状态。
                     HStack {
                         Image(systemName: "safari").foregroundStyle(.blue)
                         Text("scrobble_lastfm_pending_hint").font(.subheadline)
                         Spacer()
                     }
                     Button {
-                        Task { await confirmLastFmAuthorization() }
+                        reopenLastFmAuthorization(token: token)
+                    } label: {
+                        Label("scrobble_lastfm_reopen_authorization", systemImage: "safari")
+                    }
+                    .disabled(isLoggingInLastFm)
+                    Button {
+                        Task { await confirmLastFmAuthorization(showError: true) }
                     } label: {
                         HStack {
                             if isLoggingInLastFm {
@@ -186,18 +210,12 @@ struct ScrobbleSettingsView: View {
                     .disabled(isLoggingInLastFm)
                     Button("scrobble_lastfm_cancel_pending", role: .destructive) {
                         lastFmPendingToken = nil
+                        LastFmCredentialsStore.savePendingAuthToken(nil)
                     }
                     .disabled(isLoggingInLastFm)
                 } else {
-                    // Step 0: 提示先登录 Last.fm —— 没登录的话授权页 Cloudflare
-                    // 直接 403, app 完全没办法绕过。
-                    Button {
-                        Task { await LastFmAuthService.openLoginPage() }
-                    } label: {
-                        Label("scrobble_lastfm_open_login", systemImage: "person.crop.circle.badge.questionmark")
-                    }
-
-                    // Step 1: 拿 token + 打开 Safari。
+                    // Step 1: 拿 token + 在 App 内打开 Last.fm 授权页。Last.fm
+                    // 会在同一网页内处理登录, 授权后用户点 Done 回到 App。
                     Button {
                         Task { await beginLastFmAuthorization() }
                     } label: {
@@ -250,22 +268,34 @@ struct ScrobbleSettingsView: View {
         }
     }
 
-    /// Step 1: 拿 token + 打开 Safari 授权页。完成后 token 暂存到
-    /// `lastFmPendingToken`, UI 切到 Step 2 (等用户回来点「我已授权」)。
+    /// Step 1: 拿 token + 打开 Last.fm 授权页。完成后 token 暂存到
+    /// `lastFmPendingToken`, UI 切到 Step 2 (等用户返回后检查授权状态)。
     private func beginLastFmAuthorization() async {
         isLoggingInLastFm = true
         defer { isLoggingInLastFm = false }
         do {
-            let token = try await LastFmAuthService.startLogin()
-            lastFmPendingToken = token
+            let request = try await LastFmAuthService.startLogin()
+            LastFmCredentialsStore.savePendingAuthToken(request.token)
+            lastFmPendingToken = request.token
+            lastFmAuthSession = LastFmAuthSession(token: request.token, url: request.url)
         } catch {
             lastFmError = error.localizedDescription
         }
     }
 
-    /// Step 2: 用户在 Safari 点完 Allow 回到 app, 点「我已授权」, 用暂存
-    /// 的 token 换 sessionKey。
-    private func confirmLastFmAuthorization() async {
+    private func reopenLastFmAuthorization(token: String) {
+        do {
+            let url = try LastFmAuthService.authorizationURL(token: token)
+            lastFmAuthSession = LastFmAuthSession(token: token, url: url)
+        } catch {
+            lastFmError = error.localizedDescription
+        }
+    }
+
+    /// Step 2: 用户在 Last.fm 点完 Allow 后关闭网页/回到 app, 用暂存
+    /// 的 token 换 sessionKey。`showError=false` 用于 foreground 自动探测,
+    /// 未授权时保持 pending, 不打扰用户。
+    private func confirmLastFmAuthorization(showError: Bool) async {
         guard let token = lastFmPendingToken else { return }
         isLoggingInLastFm = true
         defer { isLoggingInLastFm = false }
@@ -276,7 +306,9 @@ struct ScrobbleSettingsView: View {
             lastFmPendingToken = nil
             NotificationCenter.default.post(name: .scrobbleSettingsChanged, object: nil)
         } catch {
-            lastFmError = error.localizedDescription
+            if showError {
+                lastFmError = error.localizedDescription
+            }
         }
     }
 
@@ -324,6 +356,7 @@ struct ScrobbleSettingsView: View {
         lastFmAPIKey = LastFmCredentialsStore.loadAPIKey()
         lastFmAPISecret = LastFmCredentialsStore.loadAPISecret()
         lastFmConnected = LastFmCredentialsStore.isConnected()
+        lastFmPendingToken = lastFmConnected ? nil : LastFmCredentialsStore.loadPendingAuthToken()
         // 用户已经粘过自己的 key, 默认展开高级让他们看见; 否则收起
         showLastFmAdvanced = LastFmCredentialsStore.usingCustomKeys
     }
@@ -350,4 +383,23 @@ struct ScrobbleSettingsView: View {
         let result = await provider.validateCredentials()
         listenBrainzValid = result
     }
+}
+
+private struct LastFmAuthSession: Identifiable {
+    let token: String
+    let url: URL
+
+    var id: String { token }
+}
+
+private struct LastFmAuthSafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let controller = SFSafariViewController(url: url)
+        controller.dismissButtonStyle = .done
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }

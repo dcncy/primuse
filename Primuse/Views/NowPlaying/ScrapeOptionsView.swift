@@ -4,26 +4,11 @@ import PrimuseKit
 struct ScrapeOptionsView: View {
     let song: Song
     var onComplete: ((Song) -> Void)?
-    /// macOS 独立窗口模式下,关闭走 NSWindow 自身的红灯而不是
-    /// SwiftUI 的 .dismiss。callsite 注入这个闭包让 view 在 apply 完
-    /// 之后能主动 close 宿主 window。sheet 模式下保持为 nil,view
-    /// 自动 fallback 到 dismiss()。
-    var onCloseRequest: (() -> Void)?
 
     @Environment(MusicLibrary.self) private var library
     @Environment(MusicScraperService.self) private var scraperService
     @Environment(SourceManager.self) private var sourceManager
     @Environment(\.dismiss) private var dismiss
-
-    /// 关闭当前刮削视图 —— 优先走宿主注入的关闭回调 (window 红灯),
-    /// 没有就回落到 SwiftUI 的环境 dismiss (sheet)。
-    private func performClose() {
-        if let onCloseRequest {
-            onCloseRequest()
-        } else {
-            dismiss()
-        }
-    }
 
     @State private var mode: ScrapeMode = .options
     @State private var previewSource: ScrapeMode = .options
@@ -36,16 +21,16 @@ struct ScrapeOptionsView: View {
     @State private var isSearching = false
     @State private var errorMessage: String?
     @State private var manualSearchQuery = ""
-    /// 当前点了哪一条手动搜索结果。点完到 selectManualResult 完成 (跳到
-    /// preview) 之间有 1~3 秒网络等待,锁住这个 id 来:
-    ///   1) 在被点的 row 上画 ProgressView 提示进度
-    ///   2) 阻止用户重复点其他 row
-    @State private var loadingResultID: String?
     /// 手动刮削时每个源单次返回的搜索结果上限,持久化保存,默认 20。
     /// 在选项页"手动刮削"按钮上方可调,避免搜出来不够看 / 拉太多浪费。
     /// 自动刮削不用这个参数(每个源固定取 first item, 拉 15 候选写死, limit
     /// 大没意义)。
     @AppStorage("scraperSearchLimit") private var searchLimit: Int = 20
+    /// ID of the search-result row currently being fetched. Used to show a
+    /// per-row spinner so users see immediate feedback after tapping —
+    /// `selectManualResult` does network work (detail + cover + lyrics) and
+    /// only flips `mode = .preview` once everything is downloaded.
+    @State private var loadingItemID: String?
 
     // Per-field apply toggles (for preview)
     // 默认值：跟本地相同(unchanged)的字段不勾,跟本地不同(changed)的字段勾上,
@@ -103,117 +88,21 @@ struct ScrapeOptionsView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                Group {
-                    switch mode {
-                    case .options: optionsView
-                    case .preview: previewView
-                    case .manual: manualSearchView
-                    }
+            Group {
+                switch mode {
+                case .options: optionsView
+                case .preview: previewView
+                case .manual: manualSearchView
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Divider()
-                bottomActionBar
             }
             .navigationTitle("scrape_song")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar { toolbarContent }
-        }
-        #if os(macOS)
-        // 之前在 macOS 上裸 Form + 默认 sheet 大小,弹框被压成 ~520x420
-        // 渲染歪斜（标题挤、checkbox 间距怪、自动刮削那一行变成全宽 row）。
-        // 给 sheet 一个明确的 minSize,内容才能舒展开。
-        .frame(minWidth: 520, idealWidth: 580, minHeight: 460, idealHeight: 540)
-        #endif
-    }
-
-    /// macOS 上 (走 ScrapeWindowController) 关闭由 NSWindow 红灯负责,
-    /// toolbar 不再放任何 X 按钮,iOS 端用 dismiss + xmark 兜底。
-    /// macOS 下 toolbar 还需要一个 placeholder ToolbarItem 占位,
-    /// 不然 ToolbarContentBuilder 认为整个 builder 空,result builder 报
-    /// "expected expression of type 'Content'"。
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        #if os(macOS)
-        // 占位 —— 实际不渲染任何按钮,关闭走 NSWindow 红灯。
-        ToolbarItem(placement: .automatic) { Color.clear.frame(width: 0, height: 0) }
-        #else
-        ToolbarItem(placement: .cancellationAction) {
-            Button {
-                performClose()
-            } label: {
-                Image(systemName: "xmark")
-            }
-            .help(Text("close"))
-            .keyboardShortcut(.cancelAction)
-        }
-        #endif
-    }
-
-    private var backButtonTitle: LocalizedStringKey {
-        switch mode {
-        case .options: return ""
-        case .preview: return previewSource == .manual ? "back_to_results" : "back_to_options"
-        case .manual: return "back_to_options"
-        }
-    }
-
-    // MARK: - Bottom action bar
-
-    /// 统一底部按钮栏,各级动作集中在这一行:
-    ///   - 左: 返回 (非 options 级)
-    ///   - 右: 当前级的主操作
-    /// 这样无论第几级用户都能在同一位置找到完整的操作,不再需要切到
-    /// toolbar 找按钮,也不会出现"取消/返回错位"的现象。
-    @ViewBuilder
-    private var bottomActionBar: some View {
-        HStack(spacing: 10) {
-            if mode != .options {
-                Button {
-                    switch mode {
-                    case .preview:
-                        mode = (previewSource == .manual) ? .manual : .options
-                    case .manual:
-                        mode = .options
-                    case .options:
-                        break
-                    }
-                } label: {
-                    Label(backButtonTitle, systemImage: "chevron.backward")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("cancel") { dismiss() }
                 }
             }
-
-            Spacer()
-
-            switch mode {
-            case .options:
-                Button("manual_scrape") {
-                    Task { await manualSearch() }
-                }
-                .disabled(isSearching || isScraping)
-
-                Button("auto_scrape") {
-                    Task { await autoScrape() }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(isScraping || isSearching || (!scrapeMetadata && !scrapeCover && !scrapeLyrics))
-
-            case .preview:
-                Button("apply_changes") { applySelectedChanges() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .fontWeight(.semibold)
-                    .disabled(!hasAnySelectedChange)
-
-            case .manual:
-                EmptyView()
-            }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
     }
 
     // MARK: - Options (what to scrape)
@@ -225,14 +114,10 @@ struct ScrapeOptionsView: View {
                     CachedArtworkView(coverRef: song.coverArtFileName, songID: song.id, size: 56, cornerRadius: 8, sourceID: song.sourceID, filePath: song.filePath)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(song.title).font(.subheadline).fontWeight(.semibold).lineLimit(1)
-                        Text(song.artistName ?? "").font(.caption).foregroundStyle(Color.secondary).lineLimit(1)
+                        Text(song.artistName ?? "").font(.caption).foregroundStyle(Color(.systemGray)).lineLimit(1)
                         if song.duration.sanitizedDuration > 0 {
-                            Text(formatDuration(song.duration)).font(.caption2).foregroundStyle(Color.secondary.opacity(0.7))
+                            Text(formatDuration(song.duration)).font(.caption2).foregroundStyle(Color(.systemGray2))
                         }
-                    }
-                    Spacer()
-                    if isScraping || isSearching {
-                        ProgressView().controlSize(.small)
                     }
                 }
             }
@@ -243,9 +128,33 @@ struct ScrapeOptionsView: View {
                 Toggle("scrape_lyrics_toggle", isOn: $scrapeLyrics)
             }
 
-            // 手动搜索每个源返回上限 — 持久化到 AppStorage。auto/manual 触发
-             // 按钮在 toolbar 里 (macos+iOS 共用), 这里只放可调参数。
             Section {
+                // Auto scrape (preview before apply)
+                Button {
+                    Task { await autoScrape() }
+                } label: {
+                    HStack {
+                        Label("auto_scrape", systemImage: "wand.and.stars")
+                            .fontWeight(.medium)
+                        Spacer()
+                        if isScraping { ProgressView() }
+                    }
+                }
+                .disabled(isScraping || (!scrapeMetadata && !scrapeCover && !scrapeLyrics))
+
+                // Manual search
+                Button {
+                    Task { await manualSearch() }
+                } label: {
+                    HStack {
+                        Label("manual_scrape", systemImage: "magnifyingglass")
+                        Spacer()
+                        if isSearching { ProgressView() }
+                    }
+                }
+                .disabled(isSearching)
+
+                // 手动搜索每个源返回上限 — 持久化到 AppStorage
                 Picker(selection: $searchLimit) {
                     ForEach([10, 20, 30, 50, 100], id: \.self) { Text("\($0)").tag($0) }
                 } label: {
@@ -260,9 +169,6 @@ struct ScrapeOptionsView: View {
                 }
             }
         }
-        #if os(macOS)
-        .formStyle(.grouped)
-        #endif
     }
 
     // MARK: - Preview (confirm before applying)
@@ -321,7 +227,7 @@ struct ScrapeOptionsView: View {
                     if preview.hasCover {
                         Toggle(isOn: $applyCover) {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("cover").font(.caption).foregroundStyle(Color.secondary)
+                                Text("cover").font(.caption).foregroundStyle(Color(.systemGray))
                                 HStack(spacing: 8) {
                                     // Current cover
                                     VStack(spacing: 2) {
@@ -331,8 +237,8 @@ struct ScrapeOptionsView: View {
                                     Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
                                     // New cover (from in-memory data)
                                     VStack(spacing: 2) {
-                                        if let data = preview.coverData, let img = PlatformImage(data: data) {
-                                            Image(platformImage: img)
+                                        if let data = preview.coverData, let img = UIImage(data: data) {
+                                            Image(uiImage: img)
                                                 .resizable().aspectRatio(contentMode: .fill)
                                                 .frame(width: 56, height: 56)
                                                 .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -350,7 +256,7 @@ struct ScrapeOptionsView: View {
                     if preview.hasLyrics {
                         Toggle(isOn: $applyLyrics) {
                             HStack(spacing: 6) {
-                                Text("lyrics_word").font(.caption).foregroundStyle(Color.secondary).frame(width: 45, alignment: .leading)
+                                Text("lyrics_word").font(.caption).foregroundStyle(Color(.systemGray)).frame(width: 45, alignment: .leading)
                                 statusBadge(hasLocal: song.lyricsFileName != nil, hasScraped: true,
                                             isChanged: preview.updatedSong.lyricsFileName != song.lyricsFileName)
                                 if preview.lyricsCount > 0 {
@@ -374,11 +280,26 @@ struct ScrapeOptionsView: View {
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
+
+                Section {
+                    if previewSource == .manual {
+                        Button { mode = .manual } label: {
+                            Text(String(localized: "back_to_results"))
+                        }
+                    }
+                    Button { mode = .options } label: { Text("back_to_options") }
+                }
             }
         }
-        #if os(macOS)
-        .formStyle(.grouped)
-        #endif
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("apply_changes") {
+                    applySelectedChanges()
+                }
+                .fontWeight(.semibold)
+                .disabled(!hasAnySelectedChange)
+            }
+        }
     }
 
     @ViewBuilder
@@ -386,11 +307,11 @@ struct ScrapeOptionsView: View {
         if let scraped = scrapedValue {
             Toggle(isOn: isOn) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(label).font(.caption).foregroundStyle(Color.secondary)
+                    Text(label).font(.caption).foregroundStyle(Color(.systemGray))
                     if isChanged {
                         HStack(spacing: 4) {
-                            Text(localValue).font(.caption2).foregroundStyle(Color.secondary).lineLimit(1)
-                            Image(systemName: "arrow.right").font(.system(size: 8)).foregroundStyle(Color.secondary.opacity(0.7))
+                            Text(localValue).font(.caption2).foregroundStyle(Color(.systemGray)).lineLimit(1)
+                            Image(systemName: "arrow.right").font(.system(size: 8)).foregroundStyle(Color(.systemGray2))
                             Text(scraped).font(.caption2).fontWeight(.medium).foregroundStyle(.green).lineLimit(1)
                         }
                     } else {
@@ -398,7 +319,7 @@ struct ScrapeOptionsView: View {
                     }
                 }
             }
-            .tint(isChanged ? .green : Color.secondary)
+            .tint(isChanged ? .green : Color(.systemGray))
         }
     }
 
@@ -407,14 +328,14 @@ struct ScrapeOptionsView: View {
         if isChanged {
             HStack(spacing: 3) {
                 Image(systemName: hasLocal ? "checkmark" : "xmark")
-                    .font(.caption2).foregroundStyle(Color.secondary)
+                    .font(.caption2).foregroundStyle(Color(.systemGray))
                 Image(systemName: "arrow.right")
-                    .font(.system(size: 8)).foregroundStyle(Color.secondary.opacity(0.7))
+                    .font(.system(size: 8)).foregroundStyle(Color(.systemGray2))
                 Image(systemName: "checkmark")
                     .font(.caption2).foregroundStyle(.green)
             }
         } else {
-            Text(String(localized: "unchanged")).font(.caption2).foregroundStyle(Color.secondary.opacity(0.7))
+            Text(String(localized: "unchanged")).font(.caption2).foregroundStyle(Color(.systemGray2))
         }
     }
 
@@ -440,120 +361,89 @@ struct ScrapeOptionsView: View {
     // MARK: - Manual Search
 
     private var manualSearchView: some View {
-        // 之前在 List 上挂 .searchable,macOS 下系统会把搜索框塞进
-        // window 的 titlebar,跟 .navigationTitle 大标题分到上下两层,
-        // 视觉上"标题/搜索框上下错位"。改成在 List 上方内嵌一个手写的
-        // 搜索栏:跟 list 一起垂直排列,标题归标题、搜索归内容,layout
-        // 跟 macOS 26 / iOS 26 原生 sheet 风格一致。
-        VStack(spacing: 0) {
-            inlineSearchField
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
+        List {
+            if searchResults.isEmpty && !isSearching {
+                ContentUnavailableView("no_results", systemImage: "magnifyingglass",
+                    description: Text("no_scrape_results_desc"))
+            } else {
+                ForEach(searchResults) { item in
+                    Button {
+                        Task { await selectManualResult(item) }
+                    } label: {
+                        HStack(spacing: 10) {
+                            // Cover art thumbnail — overlay a spinner once tapped so
+                            // the user sees immediate feedback while the detail /
+                            // cover / lyrics requests are in flight.
+                            ScraperCoverThumbnail(
+                                urlString: item.coverUrl,
+                                externalId: item.externalId,
+                                sourceConfig: item.sourceConfig
+                            )
+                            .overlay {
+                                if loadingItemID == item.id {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.black.opacity(0.45))
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(.white)
+                                }
+                            }
+                            .opacity(loadingItemID == nil || loadingItemID == item.id ? 1 : 0.5)
 
-            List {
-                if searchResults.isEmpty && !isSearching {
-                    ContentUnavailableView("no_results", systemImage: "magnifyingglass",
-                        description: Text("no_scrape_results_desc"))
-                } else {
-                    ForEach(searchResults) { item in
-                        Button {
-                            // 立刻锁住 row id 让 UI 出反馈;loadingResultID
-                            // 在 selectManualResult 里清掉。
-                            loadingResultID = item.id
-                            Task { await selectManualResult(item) }
-                        } label: {
-                            HStack(spacing: 10) {
-                                ScraperCoverThumbnail(
-                                    urlString: item.coverUrl,
-                                    externalId: item.externalId,
-                                    sourceConfig: item.sourceConfig
-                                )
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(item.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
-                                        Spacer()
-                                        if loadingResultID == item.id {
-                                            ProgressView().controlSize(.small)
-                                        } else if let dur = item.durationText {
-                                            Text(dur).font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                                        }
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(item.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                                    Spacer()
+                                    if let dur = item.durationText {
+                                        Text(dur).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                                     }
-                                    HStack(spacing: 4) {
-                                        if let artist = item.artist {
-                                            Text(artist).font(.caption).foregroundStyle(Color.secondary)
-                                        }
-                                        if let album = item.album {
-                                            Text("·").font(.caption).foregroundStyle(Color.secondary.opacity(0.7))
-                                            Text(album).font(.caption).foregroundStyle(Color.secondary.opacity(0.7))
-                                        }
+                                }
+                                HStack(spacing: 4) {
+                                    if let artist = item.artist {
+                                        Text(artist).font(.caption).foregroundStyle(Color(.systemGray))
                                     }
-                                    .lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        Text(item.source).font(.caption2).foregroundStyle(.green)
-                                        if item.sourceConfig.type.supportsWordLevelLyrics {
-                                            HStack(spacing: 2) {
-                                                Image(systemName: "waveform").font(.system(size: 8))
-                                                Text("lyrics_word_level_badge")
-                                                    .font(.system(size: 9, weight: .semibold))
-                                            }
-                                            .foregroundStyle(item.sourceConfig.type.themeColor)
-                                            .padding(.horizontal, 5).padding(.vertical, 1)
-                                            .background(Capsule().fill(item.sourceConfig.type.themeColor.opacity(0.15)))
+                                    if let album = item.album {
+                                        Text("·").font(.caption).foregroundStyle(Color(.systemGray2))
+                                        Text(album).font(.caption).foregroundStyle(Color(.systemGray2))
+                                    }
+                                }
+                                .lineLimit(1)
+                                HStack(spacing: 4) {
+                                    Text(item.source).font(.caption2).foregroundStyle(.green)
+                                    if item.sourceConfig.type.supportsWordLevelLyrics {
+                                        HStack(spacing: 2) {
+                                            Image(systemName: "waveform").font(.system(size: 8))
+                                            Text("lyrics_word_level_badge")
+                                                .font(.system(size: 9, weight: .semibold))
                                         }
+                                        .foregroundStyle(item.sourceConfig.type.themeColor)
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Capsule().fill(item.sourceConfig.type.themeColor.opacity(0.15)))
                                     }
                                 }
                             }
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            // 当前正在加载的 row 高亮 + 其他 row 半透明,
-                            // 让用户清楚"点击已生效,后台在跑"。
-                            .opacity(loadingResultID == nil || loadingResultID == item.id ? 1 : 0.5)
+                            .opacity(loadingItemID == nil || loadingItemID == item.id ? 1 : 0.5)
                         }
-                        .buttonStyle(.plain)
-                        .listRowSeparator(.visible)
-                        // 任何 row 在 loading 时整个 list 不接受点击,防止
-                        // 重复触发 selectManualResult。
-                        .disabled(loadingResultID != nil)
+                        .padding(.vertical, 2)
                     }
                     .disabled(isScraping)
                 }
             }
-            #if os(macOS)
-            .listStyle(.inset)
-            #endif
-            .overlay {
-                if isSearching {
-                    ProgressView("searching").padding()
-                }
+        }
+        .searchable(text: $manualSearchQuery, prompt: Text("search_query"))
+        .onSubmit(of: .search) {
+            Task { await performManualSearch() }
+        }
+        .overlay {
+            if isSearching {
+                ProgressView("searching").padding()
             }
         }
-    }
-
-    /// 手写的搜索栏 —— 用 TextField + capsule 背景而不是 .searchable,
-    /// 因为后者在 macOS 上会被系统挪进 titlebar,跟 navigationTitle 分两行。
-    private var inlineSearchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField(String(localized: "search_query"), text: $manualSearchQuery)
-                .textFieldStyle(.plain)
-                .onSubmit {
-                    Task { await performManualSearch() }
-                }
-            if !manualSearchQuery.isEmpty {
-                Button { manualSearchQuery = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("back_to_options") { mode = .options }
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.background.secondary, in: .capsule)
         .onChange(of: searchLimit) { _, _ in
             // 用户在选项页改了 limit 后回来再搜,自动用新值;此处保险:已搜过
             // 的话立刻重搜让结果数量同步。
@@ -666,21 +556,13 @@ struct ScrapeOptionsView: View {
 
     private func selectManualResult(_ item: SearchResultItem) async {
         isScraping = true
-        // 整个流程结束 (success / fail) 都要解锁 row,defer 兜底。
-        defer {
-            isScraping = false
-            loadingResultID = nil
-        }
+        loadingItemID = item.id
+        defer { loadingItemID = nil }
 
         plog("👉 selectManualResult: src=\(item.sourceConfig.type.rawValue) title='\(item.title)' externalId=\(item.externalId.prefix(60))")
 
         do {
             let scraper = MusicScraperFactory.create(for: item.sourceConfig)
-
-            // detail 必须先拿到才知道最终 coverUrl,但 lyrics 可以跟 detail
-            // 并行,缩短一截网络等待。等 detail 回来后再启 cover 下载,
-            // cover 跟 lyrics 也并行。整体从 N1+N2+N3 串行变成 N1 + max(N2,N3)。
-            async let lyricsTask: ScraperLyricsResult? = (try? await scraper.getLyrics(externalId: item.externalId))
             let detail = try await scraper.getDetail(externalId: item.externalId)
             plog("👉 detail returned: title='\(detail?.title ?? "nil")' artist='\(detail?.artist ?? "nil")'")
 
@@ -706,25 +588,28 @@ struct ScrapeOptionsView: View {
                 )
             }
 
-            // 用 detail 的 coverUrl,fallback 到 search result 的 coverUrl。
+            // Download cover art if available (keep in memory, don't store to disk yet)
+            var hasCover = false
+            var coverData: Data?
+            // Prefer search result's coverUrl if detail doesn't have one
             let coverUrl = detail?.coverUrl ?? item.coverUrl
-            async let coverTask: Data? = {
-                guard let coverUrl else { return nil }
-                return try? await ConfigurableScraper.downloadResource(
-                    from: coverUrl,
-                    sourceConfig: item.sourceConfig,
-                    timeout: 10
-                )
-            }()
+            if let coverUrl,
+               let data = try? await ConfigurableScraper.downloadResource(
+                from: coverUrl,
+                sourceConfig: item.sourceConfig,
+                timeout: 10
+               ) {
+                coverData = data
+                hasCover = true
+            }
 
-            let coverData = await coverTask
-            let hasCover = coverData != nil
-
-            // Lyrics
+            // Download lyrics if available (keep in memory, don't store to disk yet)
             var hasLyrics = false
             var lyricsCount = 0
             var lyricsLines: [LyricLine]?
-            if let lyricsResult = await lyricsTask,
+            let lyricsResult = try? await scraper.getLyrics(externalId: item.externalId)
+            plog("👉 getLyrics returned: hasResult=\(lyricsResult != nil) hasLyrics=\(lyricsResult?.hasLyrics ?? false) lrcLen=\(lyricsResult?.lrcContent?.count ?? 0)")
+            if let lyricsResult,
                lyricsResult.hasLyrics,
                let lrc = lyricsResult.lrcContent, !lrc.isEmpty {
                 let parsed = LyricsParser.parse(lrc)
@@ -735,6 +620,8 @@ struct ScrapeOptionsView: View {
                     lyricsCount = parsed.count
                 }
             }
+
+            isScraping = false
 
             previewResult = ScrapePreview(
                 updatedSong: updated, coverData: coverData, lyricsCount: lyricsCount,
@@ -758,6 +645,7 @@ struct ScrapeOptionsView: View {
             previewSource = .manual
             mode = .preview
         } catch {
+            isScraping = false
             errorMessage = error.localizedDescription
         }
     }
@@ -810,21 +698,22 @@ struct ScrapeOptionsView: View {
             revision: song.revision
         )
 
-        // 先 close, 把 replaceSong (rebuildIndex/persistSnapshot/...) 和
-        // sidecar 网络写都挪到 sheet/window 关闭之后, 避免主线程阻塞导致用
-        // 户觉得"应用修改卡死"。Sidecar Task 在后台跑 NAS 登录时若被 iOS
+        // 先 dismiss, 把 replaceSong (rebuildIndex/persistSnapshot/...)
+        // 和 sidecar 网络写都挪到 sheet 关闭之后, 避免主线程阻塞导致用户
+        // 觉得"应用修改卡死"。Sidecar Task 在后台跑 NAS 登录时若被 iOS
         // 强杀, 进程级清理会终结它, 不会留下半成品。
         let lib = library
         let sm = sourceManager
         let songID = song.id
         let onCompleteRef = onComplete
-        performClose()
+        dismiss()
 
         Task { @MainActor in
             // Persist assets to disk (atomic, fast)
-            if needsCover, let data = coverData, let name = coverFileName {
+            if needsCover, let data = coverData {
                 MetadataAssetStore.shared.storeCoverSync(data, for: songID)
-                CachedArtworkView.invalidateCache(for: name)
+                // cacheKey 基于 songID, 用 hash 文件名 invalidate 不命中。
+                // 下面 onCompleteRef closure (line 264) 用 songID invalidate 才有效。
             }
             if needsLyrics, let lines = lyricsLines {
                 let wordLevel = lines.filter { $0.isWordLevel }.count
@@ -833,49 +722,70 @@ struct ScrapeOptionsView: View {
             }
 
             lib.replaceSong(final)
-            NotificationCenter.default.post(name: .primuseLyricsDidChange, object: final.id)
             onCompleteRef?(final)
 
-            // Sidecar (cover.jpg / .lrc) 写回 NAS — fire and forget,
-            // 不阻塞用户后续操作。失败只会落到 plog, 不影响本地。
+            // Sidecar (cover.jpg / .lrc) 写回 NAS — fire and forget。
+            //
+            // 关键: detached + 30s 超时。之前的实现是 Task { @MainActor in ... },
+            // 这意味着整段 (包括 await connector.connect → NAS 网络握手, await
+            // writeSidecars → NAS 上传) 都跑在 main actor 的 cooperative thread
+            // 上。任意一个 await 异常挂起 (如 NAS 不响应也不超时), main actor
+            // 上其他 Task 仍然能跑, 但代码路径里有 lib.replaceSong / cacheCover
+            // 等回到 main actor 的同步点 ── 一旦 NAS 写回到一半挂起, 主 actor
+            // 反应链卡住, 用户描述的 "UI 完全卡死、滑掉 app 第一次失败" 就是这种
+            // main actor cooperative thread 死锁。
+            //
+            // detached 让网络写完全走背景 executor; 关键的"回写 main actor 状态"
+            // (replaceSong / invalidateCache) 用 await MainActor.run 显式跳回,
+            // 网络挂起的时候 main actor 不被持有。
+            //
+            // withTimeout 兜底: 30 秒后强制取消, 即使 NAS 端有 bug 也不会无限期
+            // 占用 connector actor。
             if needsCover || needsLyrics {
-                Task { @MainActor in
+                let titleSnapshot = final.title
+                let songDir = (final.filePath as NSString).deletingLastPathComponent
+                let baseNameNoExt = ((final.filePath as NSString).lastPathComponent as NSString).deletingPathExtension
+                let finalSnapshot = final
+                Task.detached(priority: .utility) {
+                    plog("📝 Sidecar: writing back to source for '\(titleSnapshot)'")
                     do {
-                        plog("📝 Sidecar: writing back to source for '\(final.title)'")
-                        let connector = try await sm.auxiliaryConnector(for: final)
-                        let writeResult = await SidecarWriteService.shared.writeSidecars(
-                            for: final, using: connector,
+                        try await Self.writeSidecarWithTimeout(
+                            seconds: 30,
+                            sourceManager: sm,
+                            song: finalSnapshot,
                             coverData: needsCover ? coverData : nil,
                             lyricsLines: needsLyrics ? lyricsLines : nil
-                        )
-                        plog("📝 Sidecar: result cover=\(writeResult.coverWritten) lyrics=\(writeResult.lyricsWritten)")
+                        ) { writeResult in
+                            plog("📝 Sidecar: result cover=\(writeResult.coverWritten) lyrics=\(writeResult.lyricsWritten)")
 
-                        let songDir = (final.filePath as NSString).deletingLastPathComponent
-                        let baseNameNoExt = ((final.filePath as NSString).lastPathComponent as NSString).deletingPathExtension
-                        var refSong = final
-                        var needsUpdate = false
-
-                        if writeResult.coverWritten {
-                            let coverPath = (songDir as NSString).appendingPathComponent("\(baseNameNoExt)-cover.jpg")
-                            refSong.coverArtFileName = coverPath
-                            await MetadataAssetStore.shared.invalidateCoverCache(forSongID: songID)
-                            needsUpdate = true
+                            if writeResult.coverWritten {
+                                let coverPath = (songDir as NSString).appendingPathComponent("\(baseNameNoExt)-cover.jpg")
+                                var refSong = finalSnapshot
+                                refSong.coverArtFileName = coverPath
+                                // sidecar 已落盘 → 回写 hash cache 作为可信 mirror。
+                                // 不要先 invalidate 再 cacheCover ── 制造空窗期, 期间 view
+                                // reload 会拿不到本地 cache 被迫走 NAS, 拉到 HTTP 端缓存的旧
+                                // 文件就显示旧封面。直接覆写。
+                                if let data = coverData {
+                                    await MetadataAssetStore.shared.cacheCover(data, forSongID: songID)
+                                }
+                                // 不要把 song.lyricsFileName 改成 NAS 的 .lrc 路径 ──
+                                // 那只是给其他播放器看的备份, 内容是行级 (没字时间)。
+                                // 字级数据在本地 App Support hash JSON 里, song 必须
+                                // 一直指向那个, 否则下次读会从 NAS .lrc 拿行级歌词。
+                                await MainActor.run {
+                                    CachedArtworkView.invalidateCache(for: songID)
+                                    lib.replaceSong(refSong)
+                                }
+                            }
+                            if !writeResult.errors.isEmpty {
+                                plog("⚠️ Sidecar write errors: \(writeResult.errors)")
+                            }
                         }
-                        // 不要把 song.lyricsFileName 改成 NAS 的 .lrc 路径 ——
-                        // 那只是给其他播放器看的备份, 内容是行级 (没字时间)。
-                        // 字级数据在本地 App Support hash JSON 里, song 必须
-                        // 一直指向那个, 否则下次读会从 NAS .lrc 拿行级歌词,
-                        // 字级丢了。`writeResult.lyricsWritten` 仍然有效:
-                        // sidecar 写到 NAS 是为了被别的设备 / 别的播放器读到,
-                        // Primuse 自己用本地 cache。
-                        if needsUpdate {
-                            lib.replaceSong(refSong)
-                        }
-                        if !writeResult.errors.isEmpty {
-                            plog("⚠️ Sidecar write errors: \(writeResult.errors)")
-                        }
+                    } catch is CancellationError {
+                        plog("⚠️ Sidecar write timed out (30s) for '\(titleSnapshot)' ── 网络挂起被强制中断, 本地 cache 仍然是新的, 仅 NAS sidecar 未写。")
                     } catch {
-                        plog("⚠️ Sidecar write failed for '\(final.title)': \(error.localizedDescription)")
+                        plog("⚠️ Sidecar write failed for '\(titleSnapshot)': \(error.localizedDescription)")
                     }
                 }
             }
@@ -883,6 +793,45 @@ struct ScrapeOptionsView: View {
     }
 
     // MARK: - Helpers
+
+    /// 给 sidecar 写回流程加超时兜底。withThrowingTaskGroup race 真实工作和
+    /// sleep, 谁先完成谁赢, 输的被 cancelAll 中断。
+    ///
+    /// 必须用 detached 调用方调用本函数 ── 否则 sleep 这条 task 会和 caller 共享
+    /// main actor cooperative thread, 真 hang 时谁也跑不了。
+    private static func writeSidecarWithTimeout(
+        seconds: TimeInterval,
+        sourceManager: SourceManager,
+        song: Song,
+        coverData: Data?,
+        lyricsLines: [LyricLine]?,
+        applyResult: @escaping @Sendable (SidecarWriteService.WriteResult) async -> Void
+    ) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                // SourceManager 是 @MainActor, await 会切到 main actor 上跑
+                // auxiliaryConnector / connect; 真正的 NAS IO (writeSidecars)
+                // 走 SidecarWriteService actor (背景 executor), 不占 main actor。
+                let connector = try await sourceManager.auxiliaryConnector(for: song)
+                let writeResult = await SidecarWriteService.shared.writeSidecars(
+                    for: song,
+                    using: connector,
+                    coverData: coverData,
+                    lyricsLines: lyricsLines
+                )
+                await applyResult(writeResult)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw CancellationError()
+            }
+            // 等任意一个先完成。如果是真实工作完成 → 第二个 sleep task 被 cancelAll
+            // 中断; 如果是 sleep 先完成 (即 30s 超时) → 第二个 task 被 cancelAll
+            // 中断, throw 也被 group 抛给外层 catch。
+            try await group.next()
+            group.cancelAll()
+        }
+    }
 
     private func formatDuration(_ t: TimeInterval) -> String {
         t.formattedDuration
@@ -914,12 +863,12 @@ private struct ScraperCoverThumbnail: View {
     let externalId: String
     let sourceConfig: ScraperSourceConfig
 
-    @State private var image: PlatformImage?
+    @State private var image: UIImage?
 
     var body: some View {
         Group {
             if let image {
-                Image(platformImage: image)
+                Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
@@ -939,7 +888,7 @@ private struct ScraperCoverThumbnail: View {
                 sourceConfig: sourceConfig,
                 timeout: 10
             ),
-               let loaded = PlatformImage(data: data) {
+               let loaded = UIImage(data: data) {
                 image = loaded
             }
         }

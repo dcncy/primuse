@@ -91,14 +91,16 @@ final class ScanService {
         let resumeTotal = checkpoint?.totalCount ?? 0
 
         if !resumeSongs.isEmpty {
-            library.addSongs(resumeSongs)
+            // resume 阶段恢复 checkpoint 内容, 是部分扫描结果, 不应触发"已删除"
+            // 通知 (otherwise listener 会把还没扫到的歌的本地缓存全清)。
+            library.addSongs(resumeSongs, affectedSourceIDs: Set([source.id]), notifyRemovals: false)
             let acceptedCount = library.songs.filter { $0.sourceID == source.id }.count
             sourceStore.updateLocal(source.id) { $0.songCount = acceptedCount }
         }
 
         scanStates[source.id] = ScanState(
             isScanning: true,
-            currentFile: checkpoint?.currentFile ?? "",
+            currentFile: String(localized: "source_diag_preparing_scan"),
             scannedCount: resumeCount,
             totalCount: resumeTotal
         )
@@ -111,12 +113,26 @@ final class ScanService {
                 endBackgroundTask(for: source.id)
             }
 
+            let preflight = await sourceManager.diagnose(source: source, directories: normalizedDirs)
+            if preflight.blockingFailure != nil {
+                scanStates[source.id] = ScanState(
+                    isScanning: false,
+                    currentFile: sourceManager.scanFailureMessage(for: preflight),
+                    scannedCount: resumeCount,
+                    totalCount: resumeTotal
+                )
+                return
+            }
+
+            scanStates[source.id]?.currentFile = checkpoint?.currentFile ?? ""
+
             switch source.type {
             case .synology:
                 await scanSynology(
                     source: source,
                     directories: normalizedDirs,
                     resumeSongs: resumeSongs,
+                    sourceManager: sourceManager,
                     library: library,
                     sourceStore: sourceStore,
                     scraperService: scraperService
@@ -142,7 +158,16 @@ final class ScanService {
 
     /// Identifier used for BGProcessingTask scheduling.
     /// Must match `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
-    static let backgroundTaskIdentifier = "com.welape.yuanyin.scan-resume"
+    nonisolated static let backgroundTaskIdentifier = "com.welape.yuanyin.scan-resume"
+
+    /// 扫描期间向 library 批量提交的阈值。改大可以显著降低 main actor 上
+    /// rebuildIndex / persistSnapshot 的频率, 避免 1w+ 首库 scale 时出现
+    /// "扫描期间 UI 卡顿"。1w 首库下从原本的每 10 首提交一次 (1000 次
+    /// rebuildIndex) 降到每 200 首一次 (50 次), 主线程阻塞时间下降 20×。
+    private static let flushBatchSize = 200
+    /// 即便没攒够 batchSize, 距离上次 flush 超过这个间隔也强制 flush 一次
+    /// 让用户看到 "scanned X" 数字仍在动 (别等到扫描结束才一次性更新)。
+    private static let flushInterval: TimeInterval = 1.5
 
     /// Re-launch any source whose scan was interrupted (has a checkpoint with
     /// unfinished progress) and is not already running. Idempotent — safe to
@@ -242,6 +267,7 @@ final class ScanService {
         source: MusicSource,
         directories: [String],
         resumeSongs: [Song],
+        sourceManager: SourceManager,
         library: MusicLibrary,
         sourceStore: SourcesStore,
         scraperService: MusicScraperService?
@@ -286,6 +312,7 @@ final class ScanService {
                             source: source,
                             directories: directories,
                             resumeSongs: resumeSongs,
+                            sourceManager: sourceManager,
                             library: library,
                             sourceStore: sourceStore,
                             scraperService: scraperService
@@ -295,7 +322,10 @@ final class ScanService {
                 }
                 scanStates[source.id] = ScanState(
                     isScanning: false,
-                    currentFile: loginResult.errorMessage ?? "Login failed"
+                    currentFile: sourceManager.scanFailureMessage(
+                        for: SourceError.connectionFailed(loginResult.errorMessage ?? "Login failed"),
+                        source: source
+                    )
                 )
                 return
             }
@@ -315,6 +345,7 @@ final class ScanService {
         do {
             var lastSongs: [Song] = []
             var lastIncrementalUpdate = 0
+            var lastFlushAt = Date()
             for try await update in stream {
                 try Task.checkCancellation()
                 scanStates[source.id]?.scannedCount = update.scannedCount
@@ -322,8 +353,14 @@ final class ScanService {
                 scanStates[source.id]?.currentFile = update.currentFile
                 lastSongs = update.songs
 
-                if update.scannedCount - lastIncrementalUpdate >= 10 {
-                    library.addSongs(lastSongs)
+                let pendingDelta = update.scannedCount - lastIncrementalUpdate
+                let timeSinceFlush = Date().timeIntervalSince(lastFlushAt)
+                if pendingDelta >= Self.flushBatchSize || (pendingDelta > 0 && timeSinceFlush >= Self.flushInterval) {
+                    // 中间 flush ── lastSongs 是当前累积的部分扫描结果, 还没
+                    // 扫到的歌会被 addSongs 临时移除, 下次 flush 又补回。
+                    // 这种"伪移除"不该触发缓存清理, 否则扫描中用户的本地
+                    // 缓存被反复清空。
+                    library.addSongs(lastSongs, affectedSourceIDs: Set([source.id]), notifyRemovals: false)
                     let acceptedCount = library.songs.filter { $0.sourceID == source.id }.count
                     sourceStore.updateLocal(source.id) { $0.songCount = acceptedCount }
                     persistCheckpoint(
@@ -334,6 +371,7 @@ final class ScanService {
                         currentFile: update.currentFile
                     )
                     lastIncrementalUpdate = update.scannedCount
+                    lastFlushAt = Date()
                 }
             }
 
@@ -358,6 +396,7 @@ final class ScanService {
                     source: source,
                     directories: directories,
                     resumeSongs: resumeSongs,
+                    sourceManager: sourceManager,
                     library: library,
                     sourceStore: sourceStore,
                     scraperService: scraperService
@@ -366,7 +405,7 @@ final class ScanService {
             }
             scanStates[source.id] = ScanState(
                 isScanning: false,
-                currentFile: error.localizedDescription
+                currentFile: sourceManager.scanFailureMessage(for: error, source: source)
             )
             Self.notifyScanFailed(sourceName: source.name, error: error)
         }
@@ -404,6 +443,7 @@ final class ScanService {
         do {
             var lastSongs: [Song] = []
             var lastIncrementalUpdate = 0
+            var lastFlushAt = Date()
             for try await update in stream {
                 try Task.checkCancellation()
                 scanStates[source.id]?.scannedCount = update.scannedCount
@@ -412,12 +452,18 @@ final class ScanService {
                 scanStates[source.id]?.currentFile = update.currentFile
                 lastSongs = update.songs
 
-                // Flush every 10 *new* songs (not every 10 yields). With
-                // incremental scan, yields and new songs are the same, but
-                // when the scanner processes a song that was already in
-                // the library this still avoids needless DB churn.
-                if update.addedCount - lastIncrementalUpdate >= 10 {
-                    library.addSongs(lastSongs)
+                // Flush 阈值: 每 flushBatchSize 首 *新增* 一次, 或者距上次 flush
+                // 超过 flushInterval 也强制 flush。原本是每 10 首一次, 1w 首库
+                // 时 1000 次 rebuildIndex / persistSnapshot 把 main actor 卡到
+                // 用户能感觉到。
+                let pendingDelta = update.addedCount - lastIncrementalUpdate
+                let timeSinceFlush = Date().timeIntervalSince(lastFlushAt)
+                if pendingDelta >= Self.flushBatchSize || (pendingDelta > 0 && timeSinceFlush >= Self.flushInterval) {
+                    // 中间 flush ── lastSongs 是当前累积的部分扫描结果, 还没
+                    // 扫到的歌会被 addSongs 临时移除, 下次 flush 又补回。
+                    // 这种"伪移除"不该触发缓存清理, 否则扫描中用户的本地
+                    // 缓存被反复清空。
+                    library.addSongs(lastSongs, affectedSourceIDs: Set([source.id]), notifyRemovals: false)
                     let acceptedCount = library.songs.filter { $0.sourceID == source.id }.count
                     sourceStore.updateLocal(source.id) { $0.songCount = acceptedCount }
                     persistCheckpoint(
@@ -428,6 +474,7 @@ final class ScanService {
                         currentFile: update.currentFile
                     )
                     lastIncrementalUpdate = update.addedCount
+                    lastFlushAt = Date()
                 }
             }
 
@@ -461,7 +508,7 @@ final class ScanService {
             }
             scanStates[source.id] = ScanState(
                 isScanning: false,
-                currentFile: error.localizedDescription
+                currentFile: sourceManager.scanFailureMessage(for: error, source: source)
             )
             Self.notifyScanFailed(sourceName: source.name, error: error)
         }
@@ -491,7 +538,7 @@ final class ScanService {
         scraperService: MusicScraperService?,
         sourceManager: SourceManager? = nil
     ) {
-        library.addSongs(songs)
+        library.addSongs(songs, affectedSourceIDs: Set([sourceID]))
         // Use the post-tombstone count from the library, not the raw scan
         // count — otherwise a deleted-then-rescanned song shows as still
         // present in the source card while the library actually filters it.

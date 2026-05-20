@@ -62,6 +62,11 @@ actor QnapSource: MusicSourceConnector {
         return fileURL
     }
 
+    func streamingURL(for path: String) async throws -> URL? {
+        try await connect()
+        return await api.downloadURL(path: path)
+    }
+
     /// HTTP Range GET on QNAP download URL。downloadURL 返回的 URL 已带认证
     /// (sid query param), 标准 Range header 直接生效, 让 CloudPlaybackSource
     /// 边下边播替代整文件下载。

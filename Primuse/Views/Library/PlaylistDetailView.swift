@@ -1,12 +1,10 @@
 import SwiftUI
 import PrimuseKit
-#if os(macOS)
-import AppKit
-#endif
 
 struct PlaylistDetailView: View {
     @Environment(AudioPlayerService.self) private var player
     @Environment(MusicLibrary.self) private var library
+    @Environment(SourceManager.self) private var sourceManager
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
     let playlist: Playlist
@@ -22,10 +20,6 @@ struct PlaylistDetailView: View {
         library.songs(forPlaylist: playlist.id)
     }
 
-    private var playableSongs: [Song] {
-        songs.filteredPlayable()
-    }
-
     /// 给 .sheet 用 — URL 不是 Identifiable, 包一层。
     struct ExportShareItem: Identifiable {
         let id = UUID()
@@ -34,37 +28,56 @@ struct PlaylistDetailView: View {
 
     var body: some View {
         ScrollView {
-            #if os(macOS)
-            macHeader
-            #else
-            iosHeader
-            #endif
+            VStack(spacing: 20) {
+                // Playlist header
+                VStack(spacing: 8) {
+                    StoredCoverArtView(
+                        fileName: currentPlaylist?.coverArtPath,
+                        size: 180,
+                        cornerRadius: 14
+                    )
 
-            // Action buttons
-            if songs.isEmpty == false {
-                MediaDetailActionBar(
-                    canPlay: playableSongs.isEmpty == false,
-                    canShuffle: playableSongs.count > 1,
-                    playAction: playAll,
-                    shuffleAction: shuffleAll
-                )
-                #if os(macOS)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 12)
-                #else
-                .padding(.bottom, 8)
-                #endif
-            }
+                    Text(currentPlaylist?.name ?? playlist.name)
+                        .font(.title2)
+                        .fontWeight(.bold)
 
-            // Songs
-            if songs.isEmpty {
-                ContentUnavailableView(
-                    "no_songs",
-                    systemImage: "music.note",
-                    description: Text("no_songs_desc")
-                )
-                .padding(.top, 24)
-            } else {
+                    Text("\(songs.count) \(String(localized: "songs_count"))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 20)
+
+                // Action buttons
+                HStack(spacing: 12) {
+                    Button {
+                        playAll()
+                    } label: {
+                        Label("play_all", systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        player.shuffleEnabled = true
+                        playAll()
+                    } label: {
+                        Label("shuffle", systemImage: "shuffle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        sourceManager.downloadForOffline(songs: songs)
+                    } label: {
+                        Label("offline_download", systemImage: "arrow.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(songs.filteredPlayable().isEmpty)
+                }
+                .padding(.horizontal)
+
+                // Songs
                 LazyVStack(spacing: 0) {
                     ForEach(songs) { song in
                         SongRowView(
@@ -73,11 +86,7 @@ struct PlaylistDetailView: View {
                             showsActions: false,
                             context: SongRowView.context(for: song, sourcesStore: sourcesStore, backfill: backfill)
                         )
-                        #if os(macOS)
-                        .padding(.horizontal, 24)
-                        #else
                         .padding(.horizontal)
-                        #endif
                         .padding(.vertical, 8)
                         .onTapGesture { playSong(song) }
                         .contextMenu {
@@ -88,12 +97,7 @@ struct PlaylistDetailView: View {
                             }
                         }
 
-                        Divider()
-                            #if os(macOS)
-                            .padding(.leading, 24 + 50)
-                            #else
-                            .padding(.leading, 50)
-                            #endif
+                        Divider().padding(.leading, 50)
                     }
                 }
             }
@@ -118,17 +122,9 @@ struct PlaylistDetailView: View {
                 .disabled(songs.isEmpty)
             }
         }
-        #if os(iOS)
         .sheet(item: $exportShareItem) { item in
             ShareSheet(items: [item.url])
         }
-        #elseif os(macOS)
-        .onChange(of: exportShareItem?.url) { _, url in
-            guard let url else { return }
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-            exportShareItem = nil
-        }
-        #endif
         .alert(String(localized: "playlist_export_failed_title"),
                isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
             Button("ok", role: .cancel) {}
@@ -150,68 +146,15 @@ struct PlaylistDetailView: View {
         }
     }
 
-    #if os(macOS)
-    private var macHeader: some View {
-        HStack(alignment: .top, spacing: 20) {
-            StoredCoverArtView(
-                fileName: currentPlaylist?.coverArtPath,
-                size: 180,
-                cornerRadius: 10
-            )
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(currentPlaylist?.name ?? playlist.name)
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .lineLimit(2)
-
-                Text("\(songs.count) \(String(localized: "songs_count"))")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 24)
-        .padding(.bottom, 16)
-    }
-    #endif
-
-    private var iosHeader: some View {
-        VStack(spacing: 8) {
-            StoredCoverArtView(
-                fileName: currentPlaylist?.coverArtPath,
-                size: 180,
-                cornerRadius: 14
-            )
-
-            Text(currentPlaylist?.name ?? playlist.name)
-                .font(.title2)
-                .fontWeight(.bold)
-
-            Text("\(songs.count) \(String(localized: "songs_count"))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.top, 20)
-    }
-
     private func playAll() {
-        let queue = playableSongs
+        let queue = songs.filteredPlayable()
         guard let first = queue.first else { return }
         player.setQueue(queue, startAt: 0)
         Task { await player.play(song: first) }
     }
 
-    private func shuffleAll() {
-        player.shuffleEnabled = true
-        playAll()
-    }
-
     private func playSong(_ song: Song) {
-        let queue = playableSongs
+        let queue = songs.filteredPlayable()
         guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
         player.setQueue(queue, startAt: index)
         Task { await player.play(song: song) }

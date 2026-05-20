@@ -4,12 +4,12 @@ import PrimuseKit
 /// 重复歌曲管理 — 找 library 里 title+artist+duration 一致的多版本歌曲,
 /// 让用户保留一个 (推荐: 最高音质), 其他从 library 移除。
 ///
-/// **NAS 上的源文件不会被删**, 仅从 primuse 的 library 数据库中移除 +
-/// 写 tombstone 防止下次 scan 重新加入。如果用户想恢复, 在 source
-/// 设置里手动 delete tombstone 即可。
+/// 支持删除的源会同步删源端音频；同名歌词/封面 sidecar 只有在没有保留歌曲
+/// 继续使用时才删除。本地库记录、tombstone 和缓存统一由 SourceManager/MusicLibrary 链路处理。
 struct DuplicateSongsView: View {
     @Environment(MusicLibrary.self) private var library
     @Environment(SourcesStore.self) private var sourcesStore
+    @Environment(SourceManager.self) private var sourceManager
 
     @State private var groups: [DuplicateGroup] = []
     @State private var isScanning = false
@@ -55,7 +55,7 @@ struct DuplicateSongsView: View {
             isPresented: $showCleanAllConfirm
         ) {
             Button("dup_keep_best_action_short", role: .destructive) {
-                cleanAll()
+                Task { await cleanAll() }
             }
             Button("cancel", role: .cancel) {}
         } message: {
@@ -139,7 +139,7 @@ struct DuplicateSongsView: View {
                 }
 
                 Button {
-                    keepBest(of: group)
+                    Task { await keepBest(of: group) }
                 } label: {
                     HStack {
                         Image(systemName: "sparkles")
@@ -193,7 +193,7 @@ struct DuplicateSongsView: View {
             Spacer()
 
             Button(role: .destructive) {
-                deleteSingle(song: song, in: group)
+                Task { await deleteSingle(song: song) }
             } label: {
                 Image(systemName: "trash")
                     .font(.subheadline)
@@ -216,32 +216,52 @@ struct DuplicateSongsView: View {
         expandedGroupID = nil
     }
 
-    private func keepBest(of group: DuplicateGroup) {
-        let removed = group.redundantSongs.count
-        for song in group.redundantSongs {
-            library.deleteSong(song)
-        }
-        flashAction(String(format: String(localized: "dup_action_done_format"), removed))
-        Task { await rescan() }
+    private func keepBest(of group: DuplicateGroup) async {
+        let toRemove = group.redundantSongs
+        await deleteSourceFilesAndCaches(for: toRemove)
+        library.deleteSongs(toRemove)
+        updateSourceCounts(for: toRemove)
+        flashAction(String(format: String(localized: "dup_action_done_format"), toRemove.count))
+        await rescan()
     }
 
-    private func deleteSingle(song: Song, in group: DuplicateGroup) {
+    private func deleteSingle(song: Song) async {
+        await deleteSourceFilesAndCaches(for: [song])
         library.deleteSong(song)
+        updateSourceCounts(for: [song])
         flashAction(String(format: String(localized: "dup_action_done_format"), 1))
-        Task { await rescan() }
+        await rescan()
     }
 
-    private func cleanAll() {
-        var removed = 0
-        for group in groups {
-            for song in group.redundantSongs {
-                library.deleteSong(song)
-                removed += 1
-            }
+    private func cleanAll() async {
+        let toRemove = groups.flatMap(\.redundantSongs)
+        await deleteSourceFilesAndCaches(for: toRemove)
+        library.deleteSongs(toRemove)
+        updateSourceCounts(for: toRemove)
+        cleanedCount = toRemove.count
+        flashAction(String(format: String(localized: "dup_clean_all_done_format"), toRemove.count))
+        await rescan()
+    }
+
+    private func deleteSourceFilesAndCaches(for songs: [Song]) async {
+        let deletingIDs = Set(songs.map(\.id))
+        let retainedSongs = library.songs.filter { deletingIDs.contains($0.id) == false }
+        var result = SongFileDeletionResult()
+        for song in songs {
+            let deleteSidecars = sourceManager.shouldDeleteSidecars(for: song, retaining: retainedSongs)
+            let songResult = await sourceManager.deleteSourceFilesAndCaches(for: song, deleteSidecars: deleteSidecars)
+            result.merge(songResult)
         }
-        cleanedCount = removed
-        flashAction(String(format: String(localized: "dup_clean_all_done_format"), removed))
-        Task { await rescan() }
+        if result.hasFailures {
+            plog("⚠️ Duplicate cleanup source deletion failures: \(result.failedPaths.count)")
+        }
+    }
+
+    private func updateSourceCounts(for songs: [Song]) {
+        for sourceID in Set(songs.map(\.sourceID)) {
+            let remaining = library.songs.filter { $0.sourceID == sourceID }.count
+            sourcesStore.updateLocal(sourceID) { $0.songCount = remaining }
+        }
     }
 
     private func flashAction(_ msg: String) {

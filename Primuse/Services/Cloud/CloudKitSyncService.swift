@@ -39,6 +39,16 @@ final class CloudKitSyncService {
     nonisolated static let containerID = "iCloud.com.welape.yuanyin"
     nonisolated static let zoneID = CKRecordZone.ID(zoneName: "PrimuseSync")
 
+    /// 家庭共享 zone ── owner 在这里创建 CKShare, 邀请的 participant 通过
+    /// 系统 sharing 接受后能看到这个 zone 里的 record。
+    /// 哪些 record 类型进 family zone 由 `recordTypeIsShareable(_:)` 决定:
+    /// - shared: Playlist / SmartPlaylist / MusicSource / CloudAccount (家庭共曲库)
+    /// - private (留在 PrimuseSync): PlaybackHistory / ScraperConfig (个人偏好)
+    nonisolated static let familyZoneID = CKRecordZone.ID(zoneName: "PrimuseFamily")
+
+    /// 共享 CKShare 的固定 recordName, 跟 family zone 1:1 绑定。
+    nonisolated static let familyShareRecordName = "primuse.family.share"
+
     enum RecordType {
         static let playlist = "Playlist"
         static let smartPlaylist = "SmartPlaylist"
@@ -46,6 +56,39 @@ final class CloudKitSyncService {
         static let cloudAccount = "CloudAccount"
         static let playbackHistory = "PlaybackHistory"
         static let scraperConfig = "ScraperConfig"
+    }
+
+    /// 是否家庭共享, 启用后 shareable record 写到 family zone, 否则继续走老的
+    /// PrimuseSync zone (向后兼容现有用户)。用 UserDefaults 持久化 (CloudKit 自己
+    /// 那 share 状态由 server 维护, 本地只缓存开关)。
+    @MainActor
+    static var familySharingEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "primuse.familySharing.enabled") }
+        set { UserDefaults.standard.set(newValue, forKey: "primuse.familySharing.enabled") }
+    }
+
+    /// 哪些 record 类型属于"家庭共享内容"。匹配的 record 启用 family sharing
+    /// 后写入 familyZoneID, 否则一律 PrimuseSync。
+    nonisolated static func recordTypeIsShareable(_ recordType: String) -> Bool {
+        switch recordType {
+        case RecordType.playlist, RecordType.smartPlaylist,
+             RecordType.musicSource, RecordType.cloudAccount:
+            return true
+        default:
+            return false   // history / scraperConfig 属于个人偏好不共享
+        }
+    }
+
+    /// 当前应该用哪个 zone 写指定 recordType。共享开关 + 类型双决定:
+    /// - 未启用 family sharing → 一律 PrimuseSync
+    /// - 启用 + 共享类型 → family zone
+    /// - 启用 + 非共享类型 → 仍 PrimuseSync
+    @MainActor
+    static func zoneFor(recordType: String) -> CKRecordZone.ID {
+        if Self.familySharingEnabled, recordTypeIsShareable(recordType) {
+            return Self.familyZoneID
+        }
+        return Self.zoneID
     }
 
     /// Singleton ID used for the playback-history record (one per user).
@@ -152,6 +195,11 @@ final class CloudKitSyncService {
 
         // Make sure the zone exists by enqueueing a save (the engine de-dupes).
         engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zoneID))])
+        // Family zone 只有在启用家庭共享时才需要; 没启用时建出来也没坏处
+        // (空 zone), 但为了少跑一次 server roundtrip, 仅 enable 时主动 add。
+        if Self.familySharingEnabled {
+            engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.familyZoneID))])
+        }
 
         attachLocalChangeObservers()
         attachAccountChangeObserver()
@@ -521,7 +569,9 @@ final class CloudKitSyncService {
     }
 
     private func recordID(recordType: String, id: String) -> CKRecord.ID {
-        CKRecord.ID(recordName: "\(recordType)/\(id)", zoneID: Self.zoneID)
+        // 共享 record 进 family zone (启用家庭共享时), 个人 record 始终 PrimuseSync。
+        CKRecord.ID(recordName: "\(recordType)/\(id)",
+                    zoneID: Self.zoneFor(recordType: recordType))
     }
 
     /// On first start, push everything we have locally — including soft-deleted

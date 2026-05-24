@@ -803,6 +803,22 @@ final class SourceManager {
         let sanitized = song.filePath.replacingOccurrences(of: "/", with: "_")
         let fileURL = audioCacheDirectory(for: song.sourceID).appendingPathComponent(sanitized)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        // 完整性校验: 云盘断流 / 用户中途切歌时会留下 partial 文件
+        // (比如 1MB 但实际应该 9MB)。命中后 SFBDecoder 只能解码前面那段,
+        // 引擎播完触发 gapless boundary → 队列死循环。这里把不完整的
+        // 缓存当作未命中, 删掉强制重下。 song.fileSize<=0 表示元数据没拿到,
+        // 跳过校验避免误删。
+        if song.fileSize > 0,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+           let actual = attrs[.size] as? Int64 {
+            // 5% tolerance: 部分 sidecar / tag 改写后大小会差几 KB
+            let minAcceptable = Int64(Double(song.fileSize) * 0.95)
+            if actual < minAcceptable {
+                plog("🗑 cachedURL: 缓存不完整 '\(song.title)' actual=\(actual / 1024)KB expected=\(song.fileSize / 1024)KB — 删除并强制重下")
+                try? FileManager.default.removeItem(at: fileURL)
+                return nil
+            }
+        }
         let relativePath = "\(song.sourceID)/\(sanitized)"
         Task { await AudioCacheManager.shared.recordAccess(path: relativePath) }
         return fileURL

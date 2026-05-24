@@ -259,6 +259,13 @@ final class AudioPlayerService {
     private var needsPlaybackRecovery = false
     private var pendingRecoveryTime: TimeInterval = 0
 
+    /// 最近一段时间 gapless boundary 触发的时间戳, 用于侦测 partial-cache
+    /// 引起的死循环 (boundary 反复在几秒内连续触发, 队列里 1-2 首坏歌
+    /// 互相切来切去)。窗口外的记录会被丢掉。
+    private var recentBoundaryTimes: [Date] = []
+    private static let boundaryStormWindow: TimeInterval = 10
+    private static let boundaryStormThreshold = 4
+
     /// Seconds of buffered audio we let drain before forcibly advancing
     /// after a mid-stream decode error. Without this cap, the ~100 buffers
     /// already scheduled to the playerNode play out for ~20s before
@@ -2071,6 +2078,22 @@ final class AudioPlayerService {
         playID id: UUID
     ) async {
         transition.didBoundaryFire = true
+
+        // 防御性兜底: 10 秒内 boundary 触发 ≥4 次 = 队列里有 partial/坏掉
+        // 的歌反复切歌, 强制 pause 并 cancel 后续 gapless 准备, 避免占满
+        // CPU + 不停下载 + UI 像是 loading 卡死的体感。
+        let now = Date()
+        recentBoundaryTimes.append(now)
+        recentBoundaryTimes.removeAll { now.timeIntervalSince($0) > Self.boundaryStormWindow }
+        if recentBoundaryTimes.count >= Self.boundaryStormThreshold {
+            plog("⚠️ gapless boundary storm: \(recentBoundaryTimes.count) 次 / \(Int(Self.boundaryStormWindow))s — 暂停播放, 队列里可能有不完整的缓存文件")
+            recentBoundaryTimes.removeAll()
+            transition.shouldCancelPreparation = true
+            cancelGaplessTasks()
+            pause()
+            return
+        }
+
         let settings = playbackSettings.snapshot()
 
         // The user can switch Crossfade on after the gapless final buffer

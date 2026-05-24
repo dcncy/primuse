@@ -352,7 +352,9 @@ final class AudioPlayerService {
     func applyOutputSampleRateMatching(for song: Song) {
         guard playbackSettings.matchOutputSampleRate,
               let sr = song.sampleRate, sr > 0 else { return }
+        #if os(iOS)
         AudioSessionManager.shared.setPreferredSampleRate(Double(sr))
+        #endif
     }
 
     private func observeSpatialAudioSettings() {

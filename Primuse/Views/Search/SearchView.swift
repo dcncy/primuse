@@ -351,7 +351,11 @@ struct SearchView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
         .background(Color(.systemBackground))
+        #else
+        .background(Color(NSColor.windowBackgroundColor))
+        #endif
     }
 
     private func playSong(_ song: PrimuseKit.Song, lyricsHint: String? = nil, matchKind: LibrarySearchMatchKind? = nil) {

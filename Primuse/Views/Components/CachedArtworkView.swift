@@ -2,6 +2,11 @@ import SwiftUI
 import ImageIO
 import MusicKit
 import PrimuseKit
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 /// Loads cover art with a unified three-tier strategy:
 /// 1. Memory cache (NSCache, keyed by songID + size bucket)
@@ -171,7 +176,11 @@ struct CachedArtworkView: View {
     /// 清得多。
     private var artworkPixelSize: Int {
         let pt = size ?? 200
+        #if os(iOS)
         let scale = UIScreen.main.scale
+        #else
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        #endif
         return max(64, Int(pt * scale))
     }
 

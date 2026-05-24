@@ -250,10 +250,13 @@ struct PlaylistReorderSheet: View {
                     localSongs.move(fromOffsets: from, toOffset: to)
                 }
             }
+            #if os(iOS)
             .environment(\.editMode, .constant(.active))
+            #endif
             .navigationTitle(playlist.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                #if os(iOS)
                 ToolbarItem(placement: .topBarLeading) {
                     Button(String(localized: "cancel")) { dismiss() }
                 }
@@ -267,6 +270,20 @@ struct PlaylistReorderSheet: View {
                     }
                     .fontWeight(.semibold)
                 }
+                #else
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(String(localized: "done")) {
+                        if localSongs.map(\.id) != initialSongs.map(\.id) {
+                            onDone(localSongs)
+                        }
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+                #endif
             }
         }
     }

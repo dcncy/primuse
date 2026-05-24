@@ -2173,6 +2173,7 @@ struct CastDevicePickerSheet: View {
             .navigationTitle("cast_picker_title")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                #if os(iOS)
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: { renderer.refreshRemoteRenderers() }) {
                         Image(systemName: "arrow.clockwise")
@@ -2182,6 +2183,17 @@ struct CastDevicePickerSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(String(localized: "done")) { dismiss() }
                 }
+                #else
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: { renderer.refreshRemoteRenderers() }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .accessibilityLabel(Text("refresh"))
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "done")) { dismiss() }
+                }
+                #endif
             }
             .task {
                 // 进 sheet 立刻主动扫一遍, 不等下一次周期触发

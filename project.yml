@@ -96,6 +96,7 @@ targets:
         excludes:
           - "**/.DS_Store"
           - "**/AppSecrets.example.swift"
+          - "**/AppSecrets.local.swift*"
     resources:
       - path: Primuse/Resources
     dependencies:
@@ -365,6 +366,7 @@ targets:
           - "Info.plist"
           - "Info-macOS.plist"
           - "**/AppSecrets.example.swift"
+          - "**/AppSecrets.local.swift*"
     resources:
       - path: Primuse/Resources
     dependencies:

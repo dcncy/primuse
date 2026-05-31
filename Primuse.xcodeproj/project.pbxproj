@@ -3038,6 +3038,7 @@
 				);
 				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.welape.yuanyin;
+				PRODUCT_NAME = Primuse;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "Primuse/Primuse-Bridging-Header.h";
@@ -3285,6 +3286,7 @@
 				);
 				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.welape.yuanyin;
+				PRODUCT_NAME = Primuse;
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "Primuse/Primuse-Bridging-Header.h";

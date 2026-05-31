@@ -1,6 +1,6 @@
 # Primuse (猿音)
 
-原生 iOS 音乐播放器，支持从 NAS、媒体服务器、云盘及本地网络源串流播放，具备元数据刮削、歌词显示、跨设备同步和外部播放控制能力。
+原生 iOS / macOS 音乐播放器，支持从 NAS、媒体服务器、云盘及本地网络源串流播放，具备元数据刮削、歌词显示、跨设备同步和外部播放控制能力。
 
 > 🎉 **现已上架 App Store** — 在中国区 App Store 搜索「猿音」即可免费下载体验。
 
@@ -13,16 +13,59 @@
 ## 应用截图
 
 <p align="center">
-  <img src="https://nas.allbs.cn:8888/cloudpic/2026/04/16e6b1d0cf490560a30dccfc66a1b92f.PNG" width="200"/>
-  <img src="https://nas.allbs.cn:8888/cloudpic/2026/04/c69767db240b20945e2bf8053ec1c0fc.PNG" width="200"/>
-  <img src="https://nas.allbs.cn:8888/cloudpic/2026/04/b9389f9bc599fd6bc7afad498f0fe88d.PNG" width="200"/>
-  <img src="https://nas.allbs.cn:8888/cloudpic/2026/04/c34dddc9e8bf32dbc5f129e84201d986.PNG" width="200"/>
+  <img src="https://is2-ssl.mzstatic.com/image/thumb/PurpleSource221/v4/56/72/5e/56725ead-13f7-fb62-ef05-da8efe62f4c6/IMG_1783.PNG/0x0ss.png" width="200"/>
+  <img src="https://is2-ssl.mzstatic.com/image/thumb/PurpleSource221/v4/59/71/15/597115d0-a075-2d3f-7b6b-21b2af50136c/IMG_1784.PNG/0x0ss.png" width="200"/>
+  <img src="https://is2-ssl.mzstatic.com/image/thumb/PurpleSource221/v4/e8/2a/5c/e82a5c09-08ea-938b-1252-93e74123e2f8/IMG_1786.PNG/0x0ss.png" width="200"/>
+  <img src="https://is2-ssl.mzstatic.com/image/thumb/PurpleSource211/v4/55/48/e9/5548e9c8-b537-854c-14aa-ddd5deb6cd81/IMG_1787.PNG/0x0ss.png" width="200"/>
 </p>
 <p align="center">
-  <img src="https://nas.allbs.cn:8888/cloudpic/2026/04/945ac954ae775990d3ffd92b3645b7ce.PNG" width="200"/>
-  <img src="https://nas.allbs.cn:8888/cloudpic/2026/04/4ad53cb9feed2da77283888e94fb254d.PNG" width="200"/>
-  <img src="https://nas.allbs.cn:8888/cloudpic/2026/04/84594ca1f8ec44463645bb77644f1db2.PNG" width="200"/>
+  <img src="https://is2-ssl.mzstatic.com/image/thumb/PurpleSource211/v4/41/50/40/41504042-741a-7667-0797-f3e872ecd687/IMG_1788.PNG/0x0ss.png" width="200"/>
+  <img src="https://is2-ssl.mzstatic.com/image/thumb/PurpleSource221/v4/46/a9/82/46a9820f-e0fc-cb4f-f805-23c5be85c285/IMG_1789.PNG/0x0ss.png" width="200"/>
+  <img src="https://is2-ssl.mzstatic.com/image/thumb/PurpleSource211/v4/21/67/99/21679962-ad5e-5244-86f1-5d08c6402e39/IMG_1790.PNG/0x0ss.png" width="200"/>
 </p>
+
+## macOS 桌面版
+
+为 Mac 重新设计的原生桌面客户端，与 iOS 共享同一套音乐库、数据源与 iCloud 同步。
+
+<table>
+  <tr>
+    <td align="center"><img src="Docs/screenshots/macos/zh/home.png" width="420"/><br/>首页</td>
+    <td align="center"><img src="Docs/screenshots/macos/zh/player.png" width="420"/><br/>播放器</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="Docs/screenshots/macos/zh/search.png" width="420"/><br/>搜索</td>
+    <td align="center"><img src="Docs/screenshots/macos/zh/desktop-lyrics.png" width="420"/><br/>桌面歌词</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="Docs/screenshots/macos/zh/appearance.png" width="420"/><br/>外观</td>
+    <td align="center"><img src="Docs/screenshots/macos/zh/stats.png" width="420"/><br/>听歌统计</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="Docs/screenshots/macos/zh/metadata.png" width="420"/><br/>元数据刮削</td>
+    <td align="center"><img src="Docs/screenshots/macos/zh/duplicates.png" width="420"/><br/>重复歌曲清理</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="Docs/screenshots/macos/zh/settings.png" width="420"/><br/>设置</td>
+    <td align="center"><img src="Docs/screenshots/macos/zh/add-source.png" width="420"/><br/>添加音乐源</td>
+  </tr>
+</table>
+
+### macOS 专属能力
+
+- **原生桌面界面** — 自定义标题栏、可折叠侧边栏、底部播放控制条，专为大屏与鼠标/触控板设计
+- **迷你播放器** — 可收起为浮窗小窗（NSPanel），内含歌词页与播放队列页
+- **菜单栏播放器** — 状态栏弹出窗，随手控制播放
+- **桌面歌词** — 独立悬浮歌词窗口，支持双行 / 单行 / 竖排与锁定点击穿透
+- **外观自定义** — 主题、品牌色、应用图标切换，随专辑封面动态取色，浅色 / 深色模式
+- **桌面小组件** — 正在播放、快速访问等 WidgetKit 小组件，设置内可预览全部尺寸
+- **DLNA 投屏** — 发现局域网内的音响 / 电视并推送播放（CAST 面板）
+- **系统媒体键 / 快捷键** — 支持 Mac 键盘媒体键与自定义播放快捷键
+- **音频输出选择** — 在多个输出设备间切换
+- **完整资料库工具** — 智能歌单编辑、重复歌曲清理、标签编辑、歌单导入、独立元数据刮削窗口
+- **多屏播放** — 外接屏 Now Playing 大封面与大字歌词
+
+其余多源串流、音质处理、元数据刮削、跨设备同步等能力与 iOS 一致，详见下方功能特性。
 
 ## 功能特性
 

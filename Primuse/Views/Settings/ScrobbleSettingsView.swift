@@ -10,6 +10,7 @@ import PrimuseKit
 /// Last.fm 走 desktop auth flow (in-app Safari + 内置 API key);
 /// ListenBrainz 走用户 token 直接粘贴。
 struct ScrobbleSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var settings = ScrobbleSettingsStore.shared
     @State private var service = ScrobbleService.shared
 
@@ -121,48 +122,70 @@ struct ScrobbleSettingsView: View {
 
 
     #if os(macOS)
+    /// 工具弹框 —— 整面板铺满 `PMColor.bg` (浅色=米色 / 深色=炭色), 卡片用
+    /// 实色 `bgElev` 抬一层, 而不是之前那种半透明白面板叠白卡 (浅色下糊成
+    /// 一片白 → 设计反馈的「太白」)。结构: 顶栏 + 滚动卡片区 + 底栏。
     private var macBody: some View {
-        ZStack {
-            PMColor.bg.ignoresSafeArea()
+        VStack(spacing: 0) {
+            macHeader
+
+            Rectangle().fill(PMColor.divider).frame(height: 0.5)
+
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 18) {
-                    macPanel
+                VStack(alignment: .leading, spacing: 14) {
+                    macMasterCard
+
+                    if settings.isEnabled {
+                        macLastFmCard
+                        macListenBrainzCard
+                        macRulesCard
+                        macQueueCard
+                        macRecentReportsCard
+                    } else {
+                        macDisabledState
+                    }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 36)
-                .padding(.vertical, 34)
-                .padding(.bottom, 110)
+                .padding(18)
             }
+
+            macFooter
+        }
+        .frame(width: 560, height: 660)
+        .background(PMColor.bg)
+    }
+
+    private var macFooter: some View {
+        HStack(spacing: 8) {
+            Image(systemName: service.recentReports.isEmpty ? "lock.shield" : "checkmark.seal.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(service.recentReports.isEmpty ? PMColor.textFaint : PMColor.ok)
+            Text(verbatim: macFooterStatus)
+                .font(.system(size: 11.5))
+                .foregroundStyle(PMColor.textMuted)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button("完成") { dismiss() }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .frame(height: 28)
+                .background(PMColor.brand, in: .rect(cornerRadius: 6))
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 56)
+        .background(PMColor.bg)
+        .overlay(alignment: .top) {
+            Rectangle().fill(PMColor.divider).frame(height: 0.5)
         }
     }
 
-    private var macPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            macHeader
-            Divider().overlay(PMColor.divider)
-
-            VStack(alignment: .leading, spacing: 14) {
-                macMasterCard
-
-                if settings.isEnabled {
-                    macListenBrainzCard
-                    macLastFmCard
-                    macRulesCard
-                    macQueueCard
-                } else {
-                    macDisabledState
-                }
-            }
-            .padding(18)
-        }
-        .frame(width: 540)
-        .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(PMColor.bgElev.opacity(0.90))
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.22), radius: 28, y: 14)
+    private var macFooterStatus: String {
+        let n = service.recentReports.count
+        if n == 0 { return "Token 仅保存在本机钥匙串 · 暂无最近上报" }
+        return "最近上报 · \(n) 条成功"
     }
 
     private var macHeader: some View {
@@ -187,9 +210,19 @@ struct ScrobbleSettingsView: View {
 
             Spacer()
 
-            Text("SC-01")
+            Text("SCROB · ST-16")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(PMColor.textFaint)
+
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(PMColor.textMuted)
+                    .frame(width: 26, height: 26)
+                    .background(PMColor.glassBtn, in: .circle)
+            }
+            .buttonStyle(.plain)
+            .help(Text("close"))
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 18)
@@ -207,7 +240,7 @@ struct ScrobbleSettingsView: View {
                 }
             }
         }
-        .background(PMColor.card.opacity(0.72), in: .rect(cornerRadius: 12))
+        .background(PMColor.bgElev, in: .rect(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
@@ -231,7 +264,7 @@ struct ScrobbleSettingsView: View {
                         .font(.system(size: 12.5, design: .monospaced))
                         .padding(.horizontal, 10)
                         .frame(height: 32)
-                        .background(PMColor.bg.opacity(0.72), in: .rect(cornerRadius: 7))
+                        .background(PMColor.bg, in: .rect(cornerRadius: 7))
                         .overlay {
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
                                 .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
@@ -265,7 +298,7 @@ struct ScrobbleSettingsView: View {
             }
         }
         .padding(14)
-        .background(PMColor.card.opacity(0.72), in: .rect(cornerRadius: 12))
+        .background(PMColor.bgElev, in: .rect(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
@@ -350,7 +383,7 @@ struct ScrobbleSettingsView: View {
             }
         }
         .padding(14)
-        .background(PMColor.card.opacity(0.72), in: .rect(cornerRadius: 12))
+        .background(PMColor.bgElev, in: .rect(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
@@ -368,7 +401,7 @@ struct ScrobbleSettingsView: View {
                     .background(PMColor.glassBtn, in: .capsule)
             }
         }
-        .background(PMColor.card.opacity(0.72), in: .rect(cornerRadius: 12))
+        .background(PMColor.bgElev, in: .rect(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
@@ -393,7 +426,57 @@ struct ScrobbleSettingsView: View {
                 }
             }
         }
-        .background(PMColor.card.opacity(0.72), in: .rect(cornerRadius: 12))
+        .background(PMColor.bgElev, in: .rect(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
+        }
+    }
+
+    private var macRecentReportsCard: some View {
+        VStack(spacing: 0) {
+            macRow(icon: "clock.arrow.circlepath", title: "最近上报", subtitle: "最近成功提交到 Last.fm / ListenBrainz 的记录") {
+                Text("\(service.recentReports.count)")
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(PMColor.textMuted)
+            }
+
+            if service.recentReports.isEmpty {
+                Divider().overlay(PMColor.divider).padding(.leading, 44)
+                Text("暂无最近上报")
+                    .font(.system(size: 12))
+                    .foregroundStyle(PMColor.textFaint)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+            } else {
+                ForEach(Array(service.recentReports.prefix(5))) { report in
+                    Divider().overlay(PMColor.divider).padding(.leading, 44)
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: report.entry.title)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(PMColor.text)
+                                .lineLimit(1)
+                            Text(verbatim: "\(report.entry.artist) · \(relativeReportTime(report.submittedAt))")
+                                .font(.system(size: 11))
+                                .foregroundStyle(PMColor.textMuted)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Text(verbatim: report.provider.displayName)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(PMColor.brand)
+                            .padding(.horizontal, 7)
+                            .frame(height: 21)
+                            .background(PMColor.brand.opacity(0.12), in: .capsule)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                }
+            }
+        }
+        .background(PMColor.bgElev, in: .rect(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
@@ -414,7 +497,7 @@ struct ScrobbleSettingsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 34)
-        .background(PMColor.card.opacity(0.48), in: .rect(cornerRadius: 12))
+        .background(PMColor.bgElev.opacity(0.6), in: .rect(cornerRadius: 12))
     }
 
     private var lastFmSubtitle: String {
@@ -747,6 +830,19 @@ struct ScrobbleSettingsView: View {
                     showClearQueueConfirm = true
                 }
             }
+
+            if !service.recentReports.isEmpty {
+                ForEach(Array(service.recentReports.prefix(5))) { report in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(report.entry.title)
+                            .lineLimit(1)
+                        Text("\(report.provider.displayName) · \(report.entry.artist) · \(relativeReportTime(report.submittedAt))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
         } header: {
             Text("scrobble_queue_section")
         }
@@ -777,6 +873,13 @@ struct ScrobbleSettingsView: View {
         lastFmPendingToken = lastFmConnected ? nil : LastFmCredentialsStore.loadPendingAuthToken()
         // 用户已经粘过自己的 key, 默认展开高级让他们看见; 否则收起
         showLastFmAdvanced = LastFmCredentialsStore.usingCustomKeys
+    }
+
+    private func relativeReportTime(_ date: Date) -> String {
+        if Date().timeIntervalSince(date) < 60 { return "刚刚" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     private func saveListenBrainzToken() {

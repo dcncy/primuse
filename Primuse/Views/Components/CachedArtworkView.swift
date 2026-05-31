@@ -45,6 +45,7 @@ struct CachedArtworkView: View {
     @Environment(SourceManager.self) private var sourceManager
     @State private var image: PlatformImage?
     @State private var loadedIdentity: String?
+    @State private var cacheInvalidationRevision = 0
 
 
     /// Memory cache holds *already-decoded* PlatformImages. Cost is reported
@@ -138,6 +139,11 @@ struct CachedArtworkView: View {
         .task(id: loadIdentity) {
             await loadImage(for: loadIdentity)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .primuseArtworkDidInvalidate)) { note in
+            guard shouldReload(after: note) else { return }
+            Self.memoryCache.removeObject(forKey: cacheKey as NSString)
+            cacheInvalidationRevision += 1
+        }
     }
 
     /// body 拆出来 ── 直接写 if/else 链 SwiftUI ResultBuilder 类型推断超时,
@@ -148,7 +154,20 @@ struct CachedArtworkView: View {
             // Apple Music user library 的 song.artwork.url 返回 musicKit://
             // 自定义 scheme, URLSession 拉不到, 必须走 MusicKit 自家的
             // ArtworkImage SwiftUI view 让 framework 内部解码。
-            ArtworkImage(artwork, width: CGFloat(artworkPixelSize), height: CGFloat(artworkPixelSize))
+            //
+            // ArtworkImage 必须给定具体 width/height, 它不像普通 Image 那样
+            // .resizable() 会跟着容器伸缩 —— 给个固定大尺寸 (size==nil 时是
+            // 200pt) 在弹性网格 cell 里就会撑成一张巨图, 把整个网格挤裂。
+            // 用 GeometryReader 拿到容器真实边长再喂给它, 让 Apple Music 封面
+            // 跟其它来源的封面一样填满 cell。ArtworkImage 自身按 display scale
+            // 解码, 所以传点数即可, 不用再乘 scale。
+            GeometryReader { geo in
+                let side = max(geo.size.width, geo.size.height, 1)
+                ArtworkImage(artwork, width: side, height: side)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+            }
+            .aspectRatio(1, contentMode: .fit)
         } else if let image {
             Image(platformImage: image)
                 .resizable()
@@ -165,19 +184,6 @@ struct CachedArtworkView: View {
         guard sourceID == AppleMusicLibraryService.systemSourceID,
               let amID = filePath else { return nil }
         return AppServices.shared.appleMusicLibrary.cachedMusicKitSong(amID: amID)?.artwork
-    }
-
-    /// ArtworkImage 接受 Int 像素值。size 是 pt, 乘上 display scale 才是
-    /// 实际像素 — list cell 44pt × 3x = 132px, 比 ArtworkImage 默认拿 1x
-    /// 清得多。
-    private var artworkPixelSize: Int {
-        let pt = size ?? 200
-        #if os(iOS)
-        let scale = UIScreen.main.scale
-        #else
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        #endif
-        return max(64, Int(pt * scale))
     }
 
     private var placeholderView: some View {
@@ -207,7 +213,27 @@ struct CachedArtworkView: View {
     }
 
     private var loadIdentity: String {
-        "\(cacheKey)#rev\(revisionToken)"
+        let refIdentity = coverRef ?? ""
+        let sourceIdentity = "\(sourceID ?? "")|\(filePath ?? "")"
+        return "\(cacheKey)#ref\(refIdentity)#src\(sourceIdentity)#rev\(revisionToken)#inv\(cacheInvalidationRevision)"
+    }
+
+    private func shouldReload(after note: Notification) -> Bool {
+        if note.userInfo?["all"] as? Bool == true { return true }
+
+        let localTokens = Set([songID, coverRef, albumID, artistID].compactMap { $0 }.filter { !$0.isEmpty })
+        guard !localTokens.isEmpty else { return false }
+
+        var invalidatedTokens: [String] = []
+        if let token = note.object as? String, !token.isEmpty {
+            invalidatedTokens.append(token)
+        }
+        for key in ["songID", "oldRef", "newRef", "albumID", "artistID"] {
+            if let token = note.userInfo?[key] as? String, !token.isEmpty {
+                invalidatedTokens.append(token)
+            }
+        }
+        return invalidatedTokens.contains { localTokens.contains($0) }
     }
 
     private func loadImage(for identity: String) async {
@@ -476,10 +502,30 @@ struct CachedArtworkView: View {
             memoryCache.removeObject(forKey: "album_\(fileName)@\(bucket)" as NSString)
             memoryCache.removeObject(forKey: "artist_\(fileName)@\(bucket)" as NSString)
         }
+        postArtworkInvalidation(token: fileName)
     }
 
     static func clearMemoryCache() {
         memoryCache.removeAllObjects()
+        postArtworkInvalidation(token: nil, userInfo: ["all": true])
+    }
+
+    private static func postArtworkInvalidation(token: String?, userInfo: [AnyHashable: Any] = [:]) {
+        if Thread.isMainThread {
+            NotificationCenter.default.post(
+                name: .primuseArtworkDidInvalidate,
+                object: token,
+                userInfo: userInfo
+            )
+        } else {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .primuseArtworkDidInvalidate,
+                    object: token,
+                    userInfo: userInfo
+                )
+            }
+        }
     }
 }
 

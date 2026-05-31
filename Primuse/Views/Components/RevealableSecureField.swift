@@ -6,7 +6,9 @@ struct RevealableSecureField: View {
     #if os(iOS)
     var textContentType: UITextContentType? = .password
     #endif
-    var showsKeyboardHint = true
+    // 默认不显示「建议使用英文/半角」键盘提示 —— 它在每个密码/密钥字段里重复
+    // 出现, 噪音大且帮助有限。需要时调用处显式传 `showsKeyboardHint: true`。
+    var showsKeyboardHint = false
 
     @State private var isRevealed = false
 

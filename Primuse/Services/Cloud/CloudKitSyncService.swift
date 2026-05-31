@@ -43,7 +43,7 @@ final class CloudKitSyncService {
     /// 系统 sharing 接受后能看到这个 zone 里的 record。
     /// 哪些 record 类型进 family zone 由 `recordTypeIsShareable(_:)` 决定:
     /// - shared: Playlist / SmartPlaylist / MusicSource / CloudAccount (家庭共曲库)
-    /// - private (留在 PrimuseSync): PlaybackHistory / ScraperConfig (个人偏好)
+    /// - private (留在 PrimuseSync): PlaybackHistory / ListeningStats / ScraperConfig (个人偏好)
     nonisolated static let familyZoneID = CKRecordZone.ID(zoneName: "PrimuseFamily")
 
     /// 共享 CKShare 的固定 recordName, 跟 family zone 1:1 绑定。
@@ -55,6 +55,7 @@ final class CloudKitSyncService {
         static let musicSource = "MusicSource"
         static let cloudAccount = "CloudAccount"
         static let playbackHistory = "PlaybackHistory"
+        static let listeningStats = "ListeningStats"
         static let scraperConfig = "ScraperConfig"
     }
 
@@ -75,13 +76,13 @@ final class CloudKitSyncService {
              RecordType.musicSource, RecordType.cloudAccount:
             return true
         default:
-            return false   // history / scraperConfig 属于个人偏好不共享
+            return false   // history / stats / scraperConfig 属于个人偏好不共享
         }
     }
 
     /// 当前应该用哪个 zone 写指定 recordType + id。三层决定:
     /// - 未启用 family sharing → 一律 PrimuseSync
-    /// - 启用 + 非共享类型 (history / scraperConfig) → PrimuseSync
+    /// - 启用 + 非共享类型 (history / stats / scraperConfig) → PrimuseSync
     /// - 启用 + 共享类型 + 例外 record id → PrimuseSync
     ///   (「我喜欢」每人独立, 不进家庭共享; 升级前已在 PrimuseSync 的 record
     ///   也继续在那里, 不强制迁)
@@ -100,6 +101,8 @@ final class CloudKitSyncService {
 
     /// Singleton ID used for the playback-history record (one per user).
     static let playbackHistoryRecordName = "primuse.playbackHistory.singleton"
+    /// Singleton ID used for full listening stats (one per user).
+    static let listeningStatsRecordName = "primuse.listeningStats.singleton"
 
     // MARK: - Collaborators
 
@@ -128,6 +131,7 @@ final class CloudKitSyncService {
 
     /// Coalesces playback-history pushes to at most once per 5 minutes.
     private var pendingHistoryFlush: Task<Void, Never>?
+    private var pendingListeningStatsFlush: Task<Void, Never>?
     private static let historyThrottle: Duration = .seconds(300)
 
     /// Set true once the consumer calls `start()`. While false we don't propagate
@@ -490,6 +494,8 @@ final class CloudKitSyncService {
     func stop(updateStatus: Bool = true) {
         pendingHistoryFlush?.cancel()
         pendingHistoryFlush = nil
+        pendingListeningStatsFlush?.cancel()
+        pendingListeningStatsFlush = nil
         for token in observerTokens {
             NotificationCenter.default.removeObserver(token)
         }
@@ -516,6 +522,8 @@ final class CloudKitSyncService {
             sourcesChanged(ids: sourcesStore.allSources.map(\.id))
         case .playbackHistory:
             enqueueSaves(recordType: RecordType.playbackHistory, ids: [Self.playbackHistoryRecordName])
+        case .listeningStats:
+            enqueueSaves(recordType: RecordType.listeningStats, ids: [Self.listeningStatsRecordName])
         case .settings:
             scraperConfigsChanged(ids: scraperConfigStore.allConfigsIncludingDeleted.map(\.id))
             // KVS-mirrored UserDefaults keys: poke each so timestamps update.
@@ -755,6 +763,9 @@ final class CloudKitSyncService {
         observerTokens.append(nc.addObserver(forName: .primusePlaybackHistoryDidChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.playbackHistoryChanged() }
         })
+        observerTokens.append(nc.addObserver(forName: .primuseListeningStatsDidChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.listeningStatsChanged() }
+        })
     }
 
     // MARK: - Local-change hooks (called by stores after they persist locally)
@@ -836,6 +847,22 @@ final class CloudKitSyncService {
         }
     }
 
+    func listeningStatsChanged() {
+        guard isStarted, !isApplyingRemote else { return }
+        guard CloudSyncChannel.isEnabled(.listeningStats) else { return }
+        guard pendingListeningStatsFlush == nil else { return }
+
+        pendingListeningStatsFlush = Task { [weak self] in
+            try? await Task.sleep(for: Self.historyThrottle)
+            guard let self else { return }
+            self.pendingListeningStatsFlush = nil
+            self.enqueueSaves(
+                recordType: RecordType.listeningStats,
+                ids: [Self.listeningStatsRecordName]
+            )
+        }
+    }
+
     /// Maps a CloudKit record type to the channel that controls it. Used to
     /// gate inbound (apply-remote) processing.
     private static func channel(for recordType: String) -> CloudSyncChannel? {
@@ -845,6 +872,7 @@ final class CloudKitSyncService {
         case RecordType.musicSource: return .sources
         case RecordType.cloudAccount: return .sources
         case RecordType.playbackHistory: return .playbackHistory
+        case RecordType.listeningStats: return .listeningStats
         case RecordType.scraperConfig: return .settings
         default: return nil
         }
@@ -952,6 +980,9 @@ final class CloudKitSyncService {
         // honour the channel toggle).
         if CloudSyncChannel.isEnabled(.playbackHistory) {
             enqueueSaves(recordType: RecordType.playbackHistory, ids: [Self.playbackHistoryRecordName])
+        }
+        if CloudSyncChannel.isEnabled(.listeningStats) {
+            enqueueSaves(recordType: RecordType.listeningStats, ids: [Self.listeningStatsRecordName])
         }
     }
 
@@ -1069,6 +1100,8 @@ final class CloudKitSyncService {
             return populateScraperConfigRecord(record, configID: id)
         case RecordType.playbackHistory:
             return populatePlaybackHistoryRecord(record)
+        case RecordType.listeningStats:
+            return populateListeningStatsRecord(record)
         default:
             return false
         }
@@ -1100,6 +1133,8 @@ final class CloudKitSyncService {
             applyScraperConfigRecord(record)
         case RecordType.playbackHistory:
             applyPlaybackHistoryRecord(record)
+        case RecordType.listeningStats:
+            applyListeningStatsRecord(record)
         default:
             break
         }
@@ -1141,6 +1176,8 @@ final class CloudKitSyncService {
             scraperConfigStore.deleteFromRemote(id: id)
         case RecordType.playbackHistory:
             library.clearPlaybackHistory()
+        case RecordType.listeningStats:
+            PlayHistoryStore.shared.clearFromRemote()
         default:
             break
         }
@@ -1316,6 +1353,31 @@ final class CloudKitSyncService {
         guard let songIDs = record["songIDs"] as? [String] else { return }
         let identities = decodeIdentities(record[Self.songIdentitiesField] as? Data)
         library.applyRemotePlaybackHistory(songIDs: songIDs, identities: identities)
+    }
+
+    // MARK: - Listening stats mapping
+
+    private func populateListeningStatsRecord(_ record: CKRecord) -> Bool {
+        let entries = PlayHistoryStore.shared.entriesForSync
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        guard let data = try? encoder.encode(entries) else { return false }
+        record["payload"] = data
+        record["entryCount"] = entries.count
+        record["updatedAt"] = Date()
+        return true
+    }
+
+    private func applyListeningStatsRecord(_ record: CKRecord) {
+        guard let entries = decodeListeningStatsEntries(record) else { return }
+        PlayHistoryStore.shared.mergeRemoteEntries(entries)
+    }
+
+    private func decodeListeningStatsEntries(_ record: CKRecord) -> [PlayHistoryStore.Entry]? {
+        guard let data = record["payload"] as? Data else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return try? decoder.decode([PlayHistoryStore.Entry].self, from: data)
     }
 
     // MARK: - Song identity / cross-device resolution
@@ -1521,6 +1583,8 @@ extension CloudKitSyncService: CKSyncEngineDelegate {
             mergePlaylistRecord(local: local, server: server)
         case RecordType.playbackHistory:
             mergePlaybackHistoryRecord(local: local, server: server)
+        case RecordType.listeningStats:
+            mergeListeningStatsRecord(local: local, server: server)
         default:
             // MusicSource / ScraperConfig: payload is atomic, LWW on updatedAt.
             let localUpdated = (local["updatedAt"] as? Date) ?? .distantPast
@@ -1598,6 +1662,16 @@ extension CloudKitSyncService: CKSyncEngineDelegate {
                 let capped = Array(merged.prefix(100))
                 library.applyRemotePlaybackHistory(songIDs: capped)
             }
+        }
+    }
+
+    @MainActor
+    private func mergeListeningStatsRecord(local: CKRecord, server: CKRecord) {
+        let localEntries = decodeListeningStatsEntries(local) ?? []
+        let serverEntries = decodeListeningStatsEntries(server) ?? []
+
+        applyRemoteEnvelope {
+            PlayHistoryStore.shared.mergeRemoteEntries(localEntries + serverEntries)
         }
     }
 

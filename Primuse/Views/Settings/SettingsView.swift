@@ -1335,10 +1335,10 @@ struct FamilySharingSettingsView: View {
             }
 
             Section {
-                row("family_sharing_shared_playlists", value: "✓")
-                row("family_sharing_shared_smart", value: "✓")
-                row("family_sharing_shared_sources", value: "✓")
-                row("family_sharing_shared_apple_mirror", value: "✓")
+                row("family_sharing_shared_playlists", systemImage: "checkmark")
+                row("family_sharing_shared_smart", systemImage: "checkmark")
+                row("family_sharing_shared_sources", systemImage: "checkmark")
+                row("family_sharing_shared_apple_mirror", systemImage: "checkmark")
             } header: {
                 Text("family_sharing_shared_header")
             }
@@ -1375,6 +1375,17 @@ struct FamilySharingSettingsView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+        }
+    }
+
+    private func row(_ key: LocalizedStringKey, systemImage: String) -> some View {
+        HStack {
+            Text(key)
+                .font(.subheadline)
+            Spacer()
+            Image(systemName: systemImage)
+                .font(.subheadline)
+                .foregroundStyle(.green)
         }
     }
 

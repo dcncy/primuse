@@ -244,6 +244,7 @@ struct SourceTypeSelectionView: View {
         HStack(spacing: 10) {
             Spacer()
             Button("cancel") { dismiss() }
+                .buttonStyle(.plain)
                 .keyboardShortcut(.cancelAction)
                 .font(.system(size: 12))
                 .foregroundStyle(PMColor.text)

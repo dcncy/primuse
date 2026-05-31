@@ -158,7 +158,7 @@ struct RecentlyDeletedView: View {
     }
 
     private func daysRemaining(from deletedAt: Date) -> String {
-        let pruneAt = deletedAt.addingTimeInterval(30 * 24 * 60 * 60)
+        let pruneAt = deletedAt.addingTimeInterval(7 * 24 * 60 * 60)
         let interval = pruneAt.timeIntervalSinceNow
         let days = max(0, Int(interval / 86400))
         return String(format: NSLocalizedString("auto_remove_in_n_days", comment: ""), days)

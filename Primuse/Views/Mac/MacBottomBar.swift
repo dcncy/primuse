@@ -291,14 +291,12 @@ struct MacBottomBar: View {
                 AudioOutputPickerView()
             }
 
-            // 原生 Slider —— 可拖动。之前的自定义 DragGesture 滑块套在 GeometryReader
-            // 里, onChanged 改 value 触发重渲染会打断拖拽, 只剩点击生效。
-            Slider(value: Binding(
+            // AppKit slider opts out of window-background dragging, so volume
+            // drags do not move the hidden-titlebar window.
+            PMVolumeSlider(value: Binding(
                 get: { Double(engine.volume) },
                 set: { engine.volume = Float($0) }
-            ), in: 0...1)
-            .controlSize(.mini)
-            .tint(PMColor.text.opacity(0.85))
+            ))
             .frame(width: 72)
         }
     }

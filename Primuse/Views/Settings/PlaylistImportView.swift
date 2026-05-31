@@ -18,6 +18,10 @@ struct PlaylistImportView: View {
     @State private var importError: String?
     @State private var showFileImporter = false
     @State private var importedFromName: String = ""
+    @State private var showCSVExporter = false
+    @State private var csvDocument = PlaylistImportCSVDocument()
+    @State private var manualMatchEntry: PlaylistImporter.ImportEntry?
+    @State private var manualMatchQuery = ""
 
     var body: some View {
         Group {
@@ -32,6 +36,19 @@ struct PlaylistImportView: View {
             allowedContentTypes: importableTypes()
         ) { result in
             handleFile(result)
+        }
+        .fileExporter(
+            isPresented: $showCSVExporter,
+            document: csvDocument,
+            contentType: .commaSeparatedText,
+            defaultFilename: "\(importedFromName.isEmpty ? "unmatched-playlist" : importedFromName)-unmatched.csv"
+        ) { result in
+            if case .failure(let error) = result {
+                importError = error.localizedDescription
+            }
+        }
+        .sheet(item: $manualMatchEntry) { entry in
+            manualMatchSheet(entry)
         }
         .alert(String(localized: "playlist_import_err_title"),
                isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
@@ -107,7 +124,7 @@ struct PlaylistImportView: View {
             Divider().overlay(PMColor.divider)
             macFooter
         }
-        .frame(width: 620)
+        .frame(width: 760)
         .background {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(PMColor.bgElev.opacity(0.88))
@@ -140,9 +157,19 @@ struct PlaylistImportView: View {
 
             Spacer()
 
-            Text(preview == nil ? "PL-08" : "READY")
+            Text(preview == nil ? "PL-06" : "READY")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(PMColor.textFaint)
+
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(PMColor.textMuted)
+                    .frame(width: 26, height: 26)
+                    .background(PMColor.glassBtn, in: .circle)
+            }
+            .buttonStyle(.plain)
+            .help(Text("close"))
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 18)
@@ -192,11 +219,16 @@ struct PlaylistImportView: View {
 
     private func macPreview(_ p: PlaylistImporter.ImportPreview) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                macMetric(title: "匹配成功", value: "\(p.matchedCount)", color: PMColor.ok)
-                macMetric(title: "待确认", value: "\(p.missingCount)", color: p.missingCount > 0 ? PMColor.warn : PMColor.textFaint)
-                macMetric(title: "总条目", value: "\(p.entries.count)", color: PMColor.brand)
+            HStack(alignment: .center, spacing: 10) {
+                MacImportStatusPill(text: "\(p.matchedCount) 已匹配", color: PMColor.ok)
+                MacImportStatusPill(text: "\(p.missingCount) 待处理", color: p.missingCount > 0 ? PMColor.warn : PMColor.textFaint)
+                Spacer()
+                Text(verbatim: "\(p.entries.count) 个条目")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(PMColor.textFaint)
             }
+
+            macSegmentedProgress(p)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("歌单名称")
@@ -214,88 +246,182 @@ struct PlaylistImportView: View {
                     }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("条目预览")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(PMColor.textMuted)
-                    Spacer()
-                    if p.missingCount > 0 {
-                        Text("缺失条目不会写入新歌单")
-                            .font(.system(size: 11))
-                            .foregroundStyle(PMColor.textFaint)
-                    }
-                }
-
-                VStack(spacing: 0) {
-                    ForEach(Array(p.entries.prefix(12))) { entry in
-                        macEntryRow(entry)
-                        if entry.id != p.entries.prefix(12).last?.id {
-                            Divider().overlay(PMColor.divider).padding(.leading, 28)
-                        }
-                    }
-                    if p.entries.count > 12 {
-                        Text("还有 \(p.entries.count - 12) 个条目会在创建时一并处理")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(PMColor.textFaint)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                    }
-                }
-                .background(PMColor.card.opacity(0.62), in: .rect(cornerRadius: 10))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
-                }
-            }
+            macGroupedEntries(p)
         }
         .padding(22)
     }
 
+    private func macSegmentedProgress(_ p: PlaylistImporter.ImportPreview) -> some View {
+        let total = max(p.entries.count, 1)
+        let matched = CGFloat(p.matchedCount) / CGFloat(total)
+        let missing = CGFloat(p.missingCount) / CGFloat(total)
+
+        return GeometryReader { geo in
+            HStack(spacing: 3) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(PMColor.ok)
+                    .frame(width: max(0, geo.size.width * matched))
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(p.missingCount > 0 ? PMColor.warn : PMColor.textFaint.opacity(0.24))
+                    .frame(width: max(0, geo.size.width * missing))
+                if p.entries.isEmpty {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(PMColor.textFaint.opacity(0.18))
+                }
+            }
+        }
+        .frame(height: 5)
+        .clipShape(RoundedRectangle(cornerRadius: 2.5, style: .continuous))
+    }
+
+    private func macGroupedEntries(_ p: PlaylistImporter.ImportPreview) -> some View {
+        let matched = p.entries.filter { $0.matchedSong != nil }
+        let unmatched = p.entries.filter { $0.matchedSong == nil }
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("匹配结果")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PMColor.textMuted)
+                Spacer()
+                if p.missingCount > 0 {
+                    Text("未匹配条目不会写入新歌单")
+                        .font(.system(size: 11))
+                        .foregroundStyle(PMColor.textFaint)
+                }
+            }
+
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 12) {
+                    macEntryGroup(title: "已匹配", count: matched.count, color: PMColor.ok) {
+                        ForEach(matched) { entry in
+                            macEntryRow(entry, manualMatch: false)
+                            if entry.id != matched.last?.id {
+                                Divider().overlay(PMColor.divider).padding(.leading, 28)
+                            }
+                        }
+                    }
+
+                    macEntryGroup(title: "未匹配", count: unmatched.count, color: unmatched.isEmpty ? PMColor.textFaint : PMColor.warn) {
+                        if unmatched.isEmpty {
+                            Text("没有需要手动处理的条目")
+                                .font(.system(size: 12))
+                                .foregroundStyle(PMColor.textFaint)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                        } else {
+                            ForEach(unmatched) { entry in
+                                macEntryRow(entry, manualMatch: true)
+                                if entry.id != unmatched.last?.id {
+                                    Divider().overlay(PMColor.divider).padding(.leading, 28)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(1)
+            }
+            .frame(height: 300)
+        }
+    }
+
+    private func macEntryGroup<Content: View>(title: String,
+                                              count: Int,
+                                              color: Color,
+                                              @ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+                Text(verbatim: "\(title) (\(count))")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(PMColor.text)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(PMColor.bgElev.opacity(0.82))
+
+            Divider().overlay(PMColor.divider)
+
+            content()
+        }
+        .background(PMColor.card.opacity(0.62), in: .rect(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    /// 设计稿 PL-06 底栏: 左「导出未匹配 → CSV」(仅有缺失时), 右「取消 + 仅创建
+    /// 已匹配 (N)」。还没选文件时右侧主按钮换成「选择文件」。
     private var macFooter: some View {
         HStack(spacing: 10) {
-            Button {
-                preview = nil
-                playlistName = ""
-                importedFromName = ""
-            } label: {
-                Text(preview == nil ? "清空" : "重新选择")
-                    .font(.system(size: 12, weight: .medium))
+            if let preview, preview.missingCount > 0 {
+                Button {
+                    exportUnmatchedCSV(preview)
+                } label: {
+                    Label("导出未匹配 → CSV", systemImage: "square.and.arrow.up")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PMColor.text)
+                .frame(height: 28)
+                .padding(.horizontal, 12)
+                .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
+            } else if preview != nil {
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("更换文件", systemImage: "folder")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PMColor.textMuted)
+                .frame(height: 28)
+                .padding(.horizontal, 12)
+                .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(PMColor.textMuted)
-            .frame(height: 28)
-            .padding(.horizontal, 12)
-            .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
-            .disabled(preview == nil)
 
             Spacer()
 
-            Button {
-                showFileImporter = true
-            } label: {
-                Label(preview == nil ? "选择文件" : "更换文件", systemImage: "folder")
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(PMColor.text)
-            .frame(height: 28)
-            .padding(.horizontal, 12)
-            .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
+            Button("取消") { dismiss() }
+                .font(.system(size: 12, weight: .medium))
+                .buttonStyle(.plain)
+                .foregroundStyle(PMColor.text)
+                .frame(height: 28)
+                .padding(.horizontal, 14)
+                .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
 
-            Button {
-                confirm()
-            } label: {
-                Label("创建歌单", systemImage: "checkmark")
-                    .font(.system(size: 12, weight: .semibold))
+            if preview == nil {
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("选择文件", systemImage: "folder")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .frame(height: 28)
+                .padding(.horizontal, 14)
+                .background(PMColor.brand, in: .rect(cornerRadius: 6))
+            } else {
+                Button {
+                    confirm()
+                } label: {
+                    Text(verbatim: "仅创建已匹配 (\(preview?.matchedCount ?? 0))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(height: 28)
+                        .padding(.horizontal, 14)
+                        .background(canCreatePlaylist ? PMColor.brand : PMColor.textFaint.opacity(0.45), in: .rect(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canCreatePlaylist)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .frame(height: 28)
-            .padding(.horizontal, 14)
-            .background(canCreatePlaylist ? PMColor.brand : PMColor.textFaint.opacity(0.45), in: .rect(cornerRadius: 6))
-            .disabled(!canCreatePlaylist)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
@@ -334,7 +460,7 @@ struct PlaylistImportView: View {
         }
     }
 
-    private func macEntryRow(_ entry: PlaylistImporter.ImportEntry) -> some View {
+    private func macEntryRow(_ entry: PlaylistImporter.ImportEntry, manualMatch: Bool) -> some View {
         HStack(spacing: 10) {
             Image(systemName: entry.matchedSong == nil ? "questionmark.circle" : "checkmark.circle.fill")
                 .font(.system(size: 14, weight: .semibold))
@@ -363,6 +489,21 @@ struct PlaylistImportView: View {
                     .padding(.horizontal, 7)
                     .frame(height: 20)
                     .background(matchKindColor(kind).opacity(0.14), in: .capsule)
+            } else if manualMatch {
+                Button {
+                    manualMatchQuery = [entry.displayTitle, entry.displayArtist]
+                        .compactMap { $0 }
+                        .joined(separator: " ")
+                    manualMatchEntry = entry
+                } label: {
+                    Text("手动匹配…")
+                        .font(.system(size: 11.5, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PMColor.brand)
+                .padding(.horizontal, 9)
+                .frame(height: 23)
+                .background(PMColor.brand.opacity(0.12), in: .rect(cornerRadius: 6))
             }
         }
         .padding(.horizontal, 12)
@@ -514,6 +655,143 @@ struct PlaylistImportView: View {
         dismiss()
     }
 
+    #if os(macOS)
+    private func exportUnmatchedCSV(_ preview: PlaylistImporter.ImportPreview) {
+        let unmatched = preview.entries.filter { $0.matchedSong == nil }
+        csvDocument = PlaylistImportCSVDocument(text: unmatchedCSV(for: unmatched))
+        showCSVExporter = true
+    }
+
+    private func unmatchedCSV(for entries: [PlaylistImporter.ImportEntry]) -> String {
+        let header = ["title", "artist", "reason"].map(csvEscape).joined(separator: ",")
+        let rows = entries.map { entry in
+            [
+                entry.displayTitle,
+                entry.displayArtist ?? "",
+                "not_matched"
+            ].map(csvEscape).joined(separator: ",")
+        }
+        return ([header] + rows).joined(separator: "\n")
+    }
+
+    private func csvEscape(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+        if escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n") {
+            return "\"\(escaped)\""
+        }
+        return escaped
+    }
+
+    private func manualMatchSheet(_ entry: PlaylistImporter.ImportEntry) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass.circle.fill")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(PMColor.brand)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("手动匹配")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(PMColor.text)
+                    Text(entry.displayTitle)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(PMColor.textMuted)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+            .padding(18)
+
+            Divider().overlay(PMColor.divider)
+
+            TextField("搜索资料库歌曲", text: $manualMatchQuery)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(PMColor.card.opacity(0.78), in: .rect(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
+                }
+                .padding(16)
+
+            List(manualMatchResults, id: \.id) { song in
+                Button {
+                    applyManualMatch(entry: entry, song: song)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "music.note")
+                            .foregroundStyle(PMColor.brand)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(song.title)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(PMColor.text)
+                            Text([song.artistName, song.albumTitle].compactMap { $0 }.joined(separator: " · "))
+                                .font(.system(size: 11))
+                                .foregroundStyle(PMColor.textFaint)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.inset(alternatesRowBackgrounds: true))
+
+            Divider().overlay(PMColor.divider)
+
+            HStack {
+                Spacer()
+                Button("取消") { manualMatchEntry = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("使用第一项") {
+                    if let song = manualMatchResults.first {
+                        applyManualMatch(entry: entry, song: song)
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(manualMatchResults.isEmpty)
+            }
+            .padding(14)
+        }
+        .frame(width: 520, height: 520)
+        .background(PMColor.bg)
+    }
+
+    private var manualMatchResults: [Song] {
+        let query = manualMatchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return Array(library.songs.prefix(40)) }
+        let folded = query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        return library.songs
+            .filter { song in
+                [song.title, song.artistName, song.albumTitle]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
+                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    .contains(folded)
+            }
+            .prefix(40)
+            .map { $0 }
+    }
+
+    private func applyManualMatch(entry: PlaylistImporter.ImportEntry, song: Song) {
+        guard let current = preview else { return }
+        let entries = current.entries.map { item in
+            item.id == entry.id
+                ? PlaylistImporter.ImportEntry(
+                    displayTitle: item.displayTitle,
+                    displayArtist: item.displayArtist,
+                    matchedSong: song,
+                    matchKind: .fuzzy
+                )
+                : item
+        }
+        preview = PlaylistImporter.ImportPreview(suggestedName: current.suggestedName, entries: entries)
+        manualMatchEntry = nil
+    }
+    #endif
+
     // MARK: - Helpers
 
     private func importableTypes() -> [UTType] {
@@ -540,3 +818,51 @@ struct PlaylistImportView: View {
         }
     }
 }
+
+private struct PlaylistImportCSVDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.commaSeparatedText] }
+
+    var text: String = ""
+
+    init(text: String = "") {
+        self.text = text
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents,
+           let contents = String(data: data, encoding: .utf8) {
+            text = contents
+        } else {
+            text = ""
+        }
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
+}
+
+#if os(macOS)
+private struct MacImportStatusPill: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(verbatim: text)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(PMColor.text)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .background(color.opacity(0.12), in: .capsule)
+        .overlay {
+            Capsule(style: .continuous)
+                .strokeBorder(color.opacity(0.22), lineWidth: 0.5)
+        }
+    }
+}
+#endif

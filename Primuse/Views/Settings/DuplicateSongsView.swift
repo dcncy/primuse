@@ -11,6 +11,7 @@ struct DuplicateSongsView: View {
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(SourceManager.self) private var sourceManager
     @Environment(DuplicateCleanupService.self) private var cleaner
+    @Environment(\.dismiss) private var dismiss
 
     @State private var groups: [DuplicateGroup] = []
     @State private var isScanning = false
@@ -19,12 +20,29 @@ struct DuplicateSongsView: View {
     @State private var cleanedCount: Int = 0
     @State private var lastActionMessage: String?
     @State private var showAllGroups = false
+    #if os(macOS)
+    @State private var retentionStrategy: MacDuplicateRetentionStrategy = .highestBitrate
+    #endif
 
     /// 一次性最多渲染多少个 Section, 超过后下面给个「显示全部」按钮。
     /// SwiftUI Form 大量 Section + DisclosureGroup 会让 macOS 渲染掉帧,
     /// 100 是经验值: 用户该清的早就用「一键清理」按钮处理了, 看完整列表
     /// 是相对边缘的需求, 显式展开避免默认 paint 卡。
     private static let initialGroupRenderCap = 100
+
+    #if os(macOS)
+    private enum MacDuplicateRetentionStrategy: String, CaseIterable, Hashable {
+        case highestBitrate, largestFile, newest
+
+        var title: String {
+            switch self {
+            case .highestBitrate: return "保留最高码率"
+            case .largestFile: return "保留最大文件"
+            case .newest: return "保留最新加入"
+            }
+        }
+    }
+    #endif
 
     @ViewBuilder
     var body: some View {
@@ -140,155 +158,259 @@ struct DuplicateSongsView: View {
 
     #if os(macOS)
     private var macBody: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 16) {
-                duplicateSummaryCard
-
-                Text(verbatim: "按标题 + 艺术家 + 时长±1s 分组,标记最高音质版本为推荐保留。清理重复项只删除冗余音频；同名歌词/封面仍被保留版本使用时不会删除。")
-                    .font(.system(size: 11.5))
-                    .lineSpacing(3)
-                    .foregroundStyle(PMColor.textFaint)
-                    .padding(.horizontal, 14)
-
-                cleanAllCard
-
-                if let p = cleaner.progress {
-                    cleanupProgressCard(p)
+        duplicateCleanupArtboard
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(PMColor.bg.ignoresSafeArea())
+            .navigationTitle("dup_title")
+            .task { await rescan() }
+            .alert(
+                "dup_clean_all_confirm",
+                isPresented: $showCleanAllConfirm
+            ) {
+                Button("dup_keep_best_action_short", role: .destructive) {
+                    cleanAll()
                 }
-
-                if isScanning {
-                    scanningCard
-                } else if groups.isEmpty {
-                    emptyMacCard
-                } else {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(visibleGroups) { group in
-                            macGroupRow(group)
-                        }
-
-                        if !showAllGroups, groups.count > Self.initialGroupRenderCap {
-                            Button {
-                                showAllGroups = true
-                            } label: {
-                                Label(String(format: String(localized: "dup_show_all_format"),
-                                             groups.count - Self.initialGroupRenderCap),
-                                      systemImage: "list.bullet.indent")
-                                    .font(.system(size: 12.5, weight: .medium))
-                                    .foregroundStyle(PMColor.text)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(14)
-                                    .background(PMColor.bgElev, in: .rect(cornerRadius: 10))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+                Button("cancel", role: .cancel) {}
+            } message: {
+                Text(String(format: String(localized: "dup_clean_all_message_format"), totalRedundantCount))
+            }
+            .overlay(alignment: .bottom) {
+                if let msg = lastActionMessage {
+                    Text(msg)
+                        .font(.subheadline)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(.thinMaterial, in: Capsule())
+                        .padding(.bottom, 24)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .frame(maxWidth: 720, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.top, 26)
-            .padding(.bottom, 112)
-        }
-        .background(PMColor.bg.ignoresSafeArea())
-        .navigationTitle("dup_title")
-        .task { await rescan() }
-        .refreshable { await rescan() }
-        .alert(
-            "dup_clean_all_confirm",
-            isPresented: $showCleanAllConfirm
-        ) {
-            Button("dup_keep_best_action_short", role: .destructive) {
-                cleanAll()
+            .disabled(cleaner.progress != nil)
+            .onChange(of: cleaner.progress?.isFinished) { _, finished in
+                guard finished == true else { return }
+                let n = cleaner.lastCompletedCount
+                if n > 0 {
+                    flashAction(String(format: String(localized: "dup_clean_all_done_format"), n))
+                }
+                Task { await rescan() }
             }
-            Button("cancel", role: .cancel) {}
-        } message: {
-            Text(String(format: String(localized: "dup_clean_all_message_format"), totalRedundantCount))
+    }
+
+    private var duplicateCleanupArtboard: some View {
+        VStack(spacing: 0) {
+            duplicateMacHeader
+
+            duplicateSummaryCard
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+
+            duplicateGroupsScroll
+
+            cleanAllCard
         }
+        .frame(width: 820, height: 680)
+        .background(PMColor.bg)
+        .clipped()
+    }
+
+    private var duplicateMacHeader: some View {
+        HStack(spacing: 12) {
+            PMWindowTrafficLights()
+
+            Text(verbatim: "重复歌曲清理")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(PMColor.text)
+                .padding(.leading, 6)
+
+            Text(verbatim: "LIB-10 · DuplicateCleanupService")
+                .font(.system(size: 11))
+                .foregroundStyle(PMColor.textFaint)
+
+            Spacer(minLength: 0)
+        }
+        .frame(height: 44)
+        .padding(.horizontal, 16)
         .overlay(alignment: .bottom) {
-            if let msg = lastActionMessage {
-                Text(msg)
-                    .font(.subheadline)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.thinMaterial, in: Capsule())
-                    .padding(.bottom, 24)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            Rectangle().fill(PMColor.divider).frame(height: 0.5)
+        }
+    }
+
+    private var duplicateGroupsScroll: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            duplicateGroupsContent
+                .padding(.horizontal, 20)
+                .padding(.top, 6)
+                .padding(.bottom, 16)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await rescan() }
+    }
+
+    @ViewBuilder
+    private var duplicateGroupsContent: some View {
+        if let p = cleaner.progress {
+            cleanupProgressCard(p)
+                .padding(.bottom, 14)
+        }
+
+        if isScanning {
+            scanningCard
+        } else if groups.isEmpty {
+            emptyMacCard
+        } else {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(visibleGroups) { group in
+                    macGroupRow(group)
+                }
+
+                if !showAllGroups, groups.count > Self.initialGroupRenderCap {
+                    showAllDuplicateGroupsButton
+                }
             }
         }
-        .disabled(cleaner.progress != nil)
-        .onChange(of: cleaner.progress?.isFinished) { _, finished in
-            guard finished == true else { return }
-            let n = cleaner.lastCompletedCount
-            if n > 0 {
-                flashAction(String(format: String(localized: "dup_clean_all_done_format"), n))
-            }
-            Task { await rescan() }
+    }
+
+    private var showAllDuplicateGroupsButton: some View {
+        Button {
+            showAllGroups = true
+        } label: {
+            Label(String(format: String(localized: "dup_show_all_format"),
+                         groups.count - Self.initialGroupRenderCap),
+                  systemImage: "list.bullet.indent")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(PMColor.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(PMColor.bgElev, in: .rect(cornerRadius: 10))
         }
+        .buttonStyle(.plain)
     }
 
     private var duplicateSummaryCard: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "square.stack.3d.up")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(PMColor.text)
-                    .frame(width: 18)
-                Text("dup_groups_count")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(PMColor.text)
-                Spacer()
-                Text("\(groups.count)")
-                    .font(.system(size: 13, design: .monospaced))
+        HStack(spacing: 14) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(PMColor.brand)
+                .frame(width: 26, height: 26)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 0) {
+                    Text(verbatim: "扫描完成 · 发现 ")
+                    Text(verbatim: "\(groups.count)")
+                        .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(PMColor.brand)
+                    Text(verbatim: " 组重复 · 共 \(totalDuplicateFileCount) 个文件")
+                }
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(PMColor.text)
+                .lineLimit(1)
+
+                Text(verbatim: "按指纹 (acoustid) + 标题/艺术家匹配 · 可回收 \(recoverableSizeText)")
+                    .font(.system(size: 11))
                     .foregroundStyle(PMColor.textMuted)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
 
-            Rectangle().fill(PMColor.divider).frame(height: 0.5)
-
-            HStack(spacing: 12) {
-                Image(systemName: "trash")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(PMColor.text)
-                    .frame(width: 18)
-                Text("dup_redundant_count")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(PMColor.text)
-                Spacer()
-                Text("\(totalRedundantCount)")
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(PMColor.textMuted)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        }
-        .background(PMColor.bgElev, in: .rect(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
-        }
-    }
-
-    private var cleanAllCard: some View {
-        HStack {
-            Button(role: .destructive) {
-                showCleanAllConfirm = true
-            } label: {
-                Label("一键智能保留（删除所有冗余）", systemImage: "wand.and.stars")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(PMColor.text)
-                    .padding(.horizontal, 10)
-                    .frame(height: 24)
-                    .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .disabled(totalRedundantCount == 0)
             Spacer()
+
+            Picker("", selection: $retentionStrategy) {
+                ForEach(MacDuplicateRetentionStrategy.allCases, id: \.self) { strategy in
+                    Text(strategy.title).tag(strategy)
+                }
+            }
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(width: 130)
         }
         .padding(14)
         .background(PMColor.bgElev, in: .rect(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
+        }
+    }
+
+    @ViewBuilder
+    private var cleanAllCard: some View {
+        Group {
+            // 清理在 DuplicateCleanupService 里跑, 不绑这个窗口的生命周期 —— 清理
+            // 过程中底栏换成"在后台继续", 用户可以直接关掉窗口去用 app, 清理照常
+            // 进行; 重新打开本工具还能看到进度。
+            if let progress = cleaner.progress, !progress.isFinished {
+                cleaningFooter(progress)
+            } else {
+                idleFooter
+            }
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 64)
+        .background(PMColor.bg)
+        .overlay(alignment: .top) {
+            Rectangle().fill(PMColor.divider).frame(height: 0.5)
+        }
+    }
+
+    private var idleFooter: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 0) {
+                Text(verbatim: "将删除 ")
+                    .foregroundStyle(PMColor.textMuted)
+                Text(verbatim: "\(totalRedundantCount)")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(PMColor.bad)
+                Text(verbatim: " 个文件 · 回收 \(recoverableSizeText)")
+                    .foregroundStyle(PMColor.textMuted)
+            }
+            .font(.system(size: 12))
+
+            Spacer()
+
+            Button("取消") { dismiss() }
+                .font(.system(size: 12, weight: .medium))
+                .buttonStyle(.plain)
+                .foregroundStyle(PMColor.text)
+                .padding(.horizontal, 14)
+                .frame(height: 28)
+                .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
+
+            Button(role: .destructive) {
+                showCleanAllConfirm = true
+            } label: {
+                Text(verbatim: "清理重复 (放入最近删除)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(height: 28)
+                    .background(PMColor.bad, in: .rect(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .disabled(totalRedundantCount == 0)
+        }
+    }
+
+    private func cleaningFooter(_ progress: DuplicateCleanupService.Progress) -> some View {
+        HStack(spacing: 12) {
+            ProgressView().controlSize(.small)
+            HStack(spacing: 0) {
+                Text(verbatim: "正在后台清理 ")
+                    .foregroundStyle(PMColor.textMuted)
+                Text(verbatim: "\(progress.done) / \(progress.total)")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(PMColor.text)
+                Text(verbatim: " · 关闭窗口也会继续")
+                    .foregroundStyle(PMColor.textMuted)
+            }
+            .font(.system(size: 12))
+
+            Spacer()
+
+            Button("在后台继续") { dismiss() }
+                .font(.system(size: 12, weight: .semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .frame(height: 28)
+                .background(PMColor.brand, in: .rect(cornerRadius: 6))
         }
     }
 
@@ -350,112 +472,110 @@ struct DuplicateSongsView: View {
     }
 
     private func macGroupRow(_ group: DuplicateGroup) -> some View {
-        let expanded = expandedGroupID == group.id
-        return VStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    expandedGroupID = expanded ? nil : group.id
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(PMColor.textFaint)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                        .frame(width: 10)
+        let keepID = preferredSong(in: group).id
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                CachedArtworkView(
+                    coverRef: group.bestSong.coverArtFileName,
+                    songID: group.bestSong.id,
+                    size: 28,
+                    cornerRadius: 5,
+                    sourceID: group.bestSong.sourceID,
+                    filePath: group.bestSong.filePath
+                )
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(group.title)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(PMColor.text)
-                            .lineLimit(1)
-                        Text(group.artist.isEmpty ? "—" : group.artist)
-                            .font(.system(size: 11))
-                            .foregroundStyle(PMColor.textMuted)
-                            .lineLimit(1)
+                Text(group.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(PMColor.text)
+                    .lineLimit(1)
+
+                Text(verbatim: "· \(group.artist.isEmpty ? "—" : group.artist)")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(PMColor.textMuted)
+                    .lineLimit(1)
+
+                Text(verbatim: "\(group.count) 个副本")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(PMColor.brand)
+                    .padding(.horizontal, 7)
+                    .frame(height: 18)
+                    .background(PMColor.brand.opacity(0.14), in: .capsule)
+
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
+
+            VStack(spacing: 0) {
+                ForEach(Array(group.songs.enumerated()), id: \.element.id) { index, song in
+                    macSongRow(song: song, isBest: song.id == keepID)
+                    if index < group.songs.count - 1 {
+                        Rectangle().fill(PMColor.divider).frame(height: 0.5)
                     }
-
-                    Spacer()
-
-                    Text("\(group.count)")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(PMColor.brand)
-                        .padding(.horizontal, 8)
-                        .frame(height: 20)
-                        .background(PMColor.brand.opacity(0.14), in: .capsule)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-
-            if expanded {
-                Rectangle().fill(PMColor.divider).frame(height: 0.5)
-                ForEach(group.songs, id: \.id) { song in
-                    macSongRow(song: song, isBest: song.id == group.bestSong.id)
-                    Rectangle().fill(PMColor.divider).frame(height: 0.5)
-                }
-                Button {
-                    keepBest(of: group)
-                } label: {
-                    Label(String(format: String(localized: "dup_keep_best_action_format"), group.songs.count - 1),
-                          systemImage: "sparkles")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(PMColor.brand)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 34)
-                        .padding(.vertical, 10)
-                }
-                .buttonStyle(.plain)
+            .background(PMColor.bgElev, in: .rect(cornerRadius: 10))
+            .clipShape(.rect(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
             }
-        }
-        .background(PMColor.bgElev, in: .rect(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
         }
     }
 
     private func macSongRow(song: Song, isBest: Bool) -> some View {
         HStack(spacing: 12) {
-            PMFormatPill.forFormat(song.fileFormat.displayName)
-            if isBest {
-                Text("dup_best_badge")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(PMColor.ok)
-                    .padding(.horizontal, 6)
-                    .frame(height: 18)
-                    .background(PMColor.ok.opacity(0.14), in: .rect(cornerRadius: 4))
+            ZStack {
+                Circle()
+                    .strokeBorder(isBest ? Color.clear : PMColor.dividerStrong, lineWidth: 1.5)
+                    .background {
+                        Circle().fill(isBest ? PMColor.brand : Color.clear)
+                    }
+                if isBest {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                }
             }
+            .frame(width: 16, height: 16)
+            .frame(width: 22, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(qualityDescription(song))
-                    .font(.system(size: 11))
-                    .foregroundStyle(PMColor.textMuted)
-                    .lineLimit(1)
-                Text(sourceDescription(song))
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(PMColor.textFaint)
-                    .lineLimit(1)
-            }
+            Text(verbatim: "\(isBest ? "保留" : "删除") · \(duplicateSourceName(song))")
+                .font(.system(size: 12, weight: isBest ? .semibold : .regular))
+                .foregroundStyle(isBest ? PMColor.text : PMColor.textMuted)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer()
+            macFormatLabel(song)
+                .frame(width: 80, alignment: .leading)
 
-            Button(role: .destructive) {
-                deleteSingle(song: song)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(PMColor.bad)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .disabled(isBest)
-            .help(Text("delete"))
+            Text(bitrateText(song))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(PMColor.textMuted)
+                .frame(width: 70, alignment: .leading)
+
+            Text(sampleRateText(song))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(PMColor.textMuted)
+                .frame(width: 70, alignment: .leading)
+
+            Text(fileSizeText(song))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(PMColor.textMuted)
+                .frame(width: 80, alignment: .trailing)
         }
-        .padding(.horizontal, 34)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(isBest ? PMColor.brand.opacity(0.12) : Color.clear)
+    }
+
+    private func macFormatLabel(_ song: Song) -> some View {
+        let format = song.fileFormat.displayName.uppercased()
+        let text = format.isEmpty ? "—" : format
+        let isLossless = ["FLAC", "ALAC", "APE", "WAV", "AIFF"].contains(format)
+        return Text(verbatim: text)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(isLossless ? PMColor.flac : PMColor.textMuted)
     }
     #endif
 
@@ -604,7 +724,11 @@ struct DuplicateSongsView: View {
     }
 
     private func keepBest(of group: DuplicateGroup) {
+        #if os(macOS)
+        let toRemove = macRedundantSongs(in: group)
+        #else
         let toRemove = group.redundantSongs
+        #endif
         guard !toRemove.isEmpty else { return }
         cleaner.cleanup(toRemove)
     }
@@ -614,7 +738,11 @@ struct DuplicateSongsView: View {
     }
 
     private func cleanAll() {
+        #if os(macOS)
+        let toRemove = groups.flatMap { macRedundantSongs(in: $0) }
+        #else
         let toRemove = groups.flatMap(\.redundantSongs)
+        #endif
         cleaner.cleanup(toRemove)
     }
 
@@ -631,6 +759,76 @@ struct DuplicateSongsView: View {
     private var totalRedundantCount: Int {
         groups.reduce(0) { $0 + $1.songs.count - 1 }
     }
+
+    #if os(macOS)
+    private var totalDuplicateFileCount: Int {
+        groups.reduce(0) { $0 + $1.songs.count }
+    }
+
+    private var recoverableBytes: Int64 {
+        groups
+            .flatMap { macRedundantSongs(in: $0) }
+            .reduce(Int64(0)) { $0 + max(Int64(0), $1.fileSize) }
+    }
+
+    private var recoverableSizeText: String {
+        ByteCountFormatter.string(fromByteCount: recoverableBytes, countStyle: .file)
+    }
+
+    private func preferredSong(in group: DuplicateGroup) -> Song {
+        switch retentionStrategy {
+        case .highestBitrate:
+            return group.songs.sorted { lhs, rhs in
+                let leftBitRate = lhs.bitRate ?? 0
+                let rightBitRate = rhs.bitRate ?? 0
+                if leftBitRate != rightBitRate { return leftBitRate > rightBitRate }
+
+                let leftSampleRate = lhs.sampleRate ?? 0
+                let rightSampleRate = rhs.sampleRate ?? 0
+                if leftSampleRate != rightSampleRate { return leftSampleRate > rightSampleRate }
+
+                let leftBitDepth = lhs.bitDepth ?? 0
+                let rightBitDepth = rhs.bitDepth ?? 0
+                if leftBitDepth != rightBitDepth { return leftBitDepth > rightBitDepth }
+
+                return lhs.fileSize > rhs.fileSize
+            }.first ?? group.bestSong
+        case .largestFile:
+            return group.songs.max { $0.fileSize < $1.fileSize } ?? group.bestSong
+        case .newest:
+            return group.songs.max { newestDate($0) < newestDate($1) } ?? group.bestSong
+        }
+    }
+
+    private func macRedundantSongs(in group: DuplicateGroup) -> [Song] {
+        let keepID = preferredSong(in: group).id
+        return group.songs.filter { $0.id != keepID }
+    }
+
+    private func newestDate(_ song: Song) -> Date {
+        song.lastModified ?? song.dateAdded
+    }
+
+    private func duplicateSourceName(_ song: Song) -> String {
+        sourcesStore.allSources.first(where: { $0.id == song.sourceID })?.name ?? "未知来源"
+    }
+
+    private func bitrateText(_ song: Song) -> String {
+        guard let bitRate = song.bitRate, bitRate > 0 else { return "—" }
+        return "\(bitRate / 1000)k"
+    }
+
+    private func sampleRateText(_ song: Song) -> String {
+        guard let sampleRate = song.sampleRate, sampleRate > 0 else { return "—" }
+        let value = Double(sampleRate) / 1000
+        return value.rounded() == value ? "\(Int(value))k" : String(format: "%.1fk", value)
+    }
+
+    private func fileSizeText(_ song: Song) -> String {
+        guard song.fileSize > 0 else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: song.fileSize, countStyle: .file)
+    }
+    #endif
 
     private var visibleGroups: [DuplicateGroup] {
         if showAllGroups || groups.count <= Self.initialGroupRenderCap {

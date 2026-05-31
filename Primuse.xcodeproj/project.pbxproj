@@ -205,6 +205,7 @@
 		56581DE64A5C1BAFCBA11E93 /* AudioEffectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F4CE0ADBC65CBECCD665AC /* AudioEffectsView.swift */; };
 		570266111E119CB28993C949 /* StoredCoverArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9B1688ED9374813585EC4C6 /* StoredCoverArtView.swift */; };
 		574266CAE3D7A5B6DE1E1103 /* PlaybackState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A0BB7D64F2BBD76A56CD9C5 /* PlaybackState.swift */; };
+		5EC025BD11AA00FF00AA0020 /* WidgetSnapshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC025BD11AA00FF00AA0021 /* WidgetSnapshots.swift */; };
 		57471F7170F7CE62715F932D /* ScraperSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ED64A9CEF96E0A4A91703E4 /* ScraperSettingsStore.swift */; };
 		5775567CC35C0C5ECD9AA1D1 /* DuplicateDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2117016184001B6F46168B00 /* DuplicateDetector.swift */; };
 		57B10CD1215CEDDD755322AA /* UnsupportedSourceConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D55D0BB606ED1969120F51 /* UnsupportedSourceConnector.swift */; };
@@ -214,6 +215,7 @@
 		597C9FC6DA3A3EF903307FC9 /* AudioPlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F953DC4532B85C7AD604EF9 /* AudioPlayerService.swift */; };
 		5980823594F7E539787FAED3 /* SongListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B7EF9080A3A41EE3BE9D8E0 /* SongListView.swift */; };
 		5AA3AE3298DF7992046DF390 /* NowPlayingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC5ED08076B47DEE8ECB3AA /* NowPlayingWidget.swift */; };
+		5EC025BD11AA00FF00AA0001 /* SecondaryWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC025BD11AA00FF00AA0002 /* SecondaryWidgets.swift */; };
 		5AC4F6C2588690B0DF1E61AC /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB00031B96FBABEE4773C15 /* CloudKitSyncService.swift */; };
 		5AD01C4504371E9EE47EE591 /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D2741FA5052447F5E1B27A4 /* QueueView.swift */; };
 		5AF67F370EFCD4AA7528FEC6 /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB00031B96FBABEE4773C15 /* CloudKitSyncService.swift */; };
@@ -452,6 +454,7 @@
 		C704ABB3376C76160612D0D6 /* TagEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F7380ABF7CFF416B08F01F2 /* TagEditorView.swift */; };
 		C7EC780823A0FE47FF71BFFE /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 60849A3BA068DBB563EFA62E /* InfoPlist.strings */; };
 		C83D3E3D402A2494B21343D9 /* PrimuseWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FC0B19BA1149E4C3F22F6BF9 /* PrimuseWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5EC025BD11AA00FF00AA0012 /* PrimuseWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FC0B19BA1149E4C3F22F6BF9 /* PrimuseWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C87A6A4DE1FD7B3D1C4CA8CB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E8868307C8B45B391847C2B /* SettingsView.swift */; };
 		C885E78943983DD9E36A9A1B /* SpotlightIndexService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A140A9563DF6E39E6BF9CEF6 /* SpotlightIndexService.swift */; };
 		C936F656EB2BD541BD6D95FC /* LibraryDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F246393058D148228F7BA7B9 /* LibraryDatabase.swift */; };
@@ -589,6 +592,13 @@
 			remoteGlobalIDString = 077D3AF75542004A69D318FF;
 			remoteInfo = PrimuseWidgetExtension;
 		};
+		5EC025BD11AA00FF00AA0010 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 387532125516FECA27A69911 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 077D3AF75542004A69D318FF;
+			remoteInfo = PrimuseWidgetExtension;
+		};
 		60D0435B7708DC0DCE3A9879 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 387532125516FECA27A69911 /* Project object */;
@@ -659,6 +669,17 @@
 			files = (
 				C83D3E3D402A2494B21343D9 /* PrimuseWidgetExtension.appex in Embed Foundation Extensions */,
 				A66A3850F3D0EDA1863A81BC /* PrimuseActivityExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5EC025BD11AA00FF00AA0013 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5EC025BD11AA00FF00AA0012 /* PrimuseWidgetExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -776,6 +797,7 @@
 		39F6AE35FC2EC095FBF1EA0E /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
 		3A04A9461976D9D58E02D5BA /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		3A0BB7D64F2BBD76A56CD9C5 /* PlaybackState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackState.swift; sourceTree = "<group>"; };
+		5EC025BD11AA00FF00AA0021 /* WidgetSnapshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshots.swift; sourceTree = "<group>"; };
 		3A648FD6CF121358D543D0AB /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		3B638BB94F0E6542668978B3 /* NativeAudioDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAudioDecoder.swift; sourceTree = "<group>"; };
 		3B72B589474BA95C1C8DB18A /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
@@ -937,6 +959,7 @@
 		BBFD30EEE3734A8D6C23D94C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		BD05C51C265711C2B7239F9B /* CloudSyncChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncChannel.swift; sourceTree = "<group>"; };
 		BDC5ED08076B47DEE8ECB3AA /* NowPlayingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingWidget.swift; sourceTree = "<group>"; };
+		5EC025BD11AA00FF00AA0002 /* SecondaryWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryWidgets.swift; sourceTree = "<group>"; };
 		BEF1C4D090D0F65114B8F0D5 /* SMBSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBSource.swift; sourceTree = "<group>"; };
 		BEF71A3472A5B930D830BC84 /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
 		BFF0DF0592D356324C4E9A4C /* SMBBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBBrowserView.swift; sourceTree = "<group>"; };
@@ -1392,6 +1415,7 @@
 				80D713C15544A72530F3E0ED /* MusicSource.swift */,
 				69ABA8EAAB65A36313703E9D /* PinyinTransformer.swift */,
 				3A0BB7D64F2BBD76A56CD9C5 /* PlaybackState.swift */,
+				5EC025BD11AA00FF00AA0021 /* WidgetSnapshots.swift */,
 				38FB8C7B3EA4A58B80265EDC /* Playlist.swift */,
 				1EA5291A0332EE798C4EB2C5 /* PrimuseIntentBridge.swift */,
 				C04638250BE3489928491A07 /* RecentAlbumsStore.swift */,
@@ -1611,6 +1635,7 @@
 				1D6CD16F36EEEA61C94435DA /* PrimuseWidgetExtension.entitlements */,
 				6938B4831BD4508FCE2FB6C0 /* QuickAccessWidget.swift */,
 				5DB675457344DDF1B61FF4AF /* WidgetDesignSystem.swift */,
+				5EC025BD11AA00FF00AA0002 /* SecondaryWidgets.swift */,
 			);
 			path = PrimuseWidgetExtension;
 			sourceTree = "<group>";
@@ -1953,11 +1978,13 @@
 				29DAEBAA39668B9CACF2658B /* Resources */,
 				ED3825CB716426AE5C86A78E /* Frameworks */,
 				0DDA5696B080BC2C30F3E9B3 /* Embed Frameworks */,
+				5EC025BD11AA00FF00AA0013 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				FCDA98D377A73F75B463AA60 /* PBXTargetDependency */,
+				5EC025BD11AA00FF00AA0011 /* PBXTargetDependency */,
 			);
 			name = PrimuseMac;
 			packageProductDependencies = (
@@ -2185,6 +2212,7 @@
 				FF1BDF6B3543D685C762F962 /* PrimuseWidgetBundle.swift in Sources */,
 				C27FC4095CCA4C732D2E235A /* QuickAccessWidget.swift in Sources */,
 				2EFBCB657D83A2B64F03C9C3 /* WidgetDesignSystem.swift in Sources */,
+				5EC025BD11AA00FF00AA0001 /* SecondaryWidgets.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2217,6 +2245,7 @@
 				F7AF165E4C4ABC46FAECC7C0 /* PinyinTransformer.swift in Sources */,
 				C17A3B3D7E8B0D1508A0022B /* PlaybackActivityAttributes.swift in Sources */,
 				574266CAE3D7A5B6DE1E1103 /* PlaybackState.swift in Sources */,
+				5EC025BD11AA00FF00AA0020 /* WidgetSnapshots.swift in Sources */,
 				E1E6E2746C97E7523587FBF4 /* Playlist.swift in Sources */,
 				AFD5B53A36622430D2016CAE /* PrimuseIntentBridge.swift in Sources */,
 				8057E3B6274053DAFEA3F8F7 /* RecentAlbumsStore.swift in Sources */,
@@ -2758,6 +2787,11 @@
 			target = 077D3AF75542004A69D318FF /* PrimuseWidgetExtension */;
 			targetProxy = 45458E82C950F902ABBF664F /* PBXContainerItemProxy */;
 		};
+		5EC025BD11AA00FF00AA0011 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 077D3AF75542004A69D318FF /* PrimuseWidgetExtension */;
+			targetProxy = 5EC025BD11AA00FF00AA0010 /* PBXContainerItemProxy */;
+		};
 		AFB4789CAF63B29A33145B89 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 5E072160A1B3A61D5EFAF17C /* PrimuseActivityExtension */;
@@ -2878,6 +2912,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Config/PrimuseWidgetExtension.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Config/PrimuseWidgetExtension-macOS.entitlements";
 				INFOPLIST_FILE = PrimuseWidgetExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2885,7 +2920,10 @@
 					"@executable_path/../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.welape.yuanyin.widget;
-				SDKROOT = iphoneos;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -2936,6 +2974,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Config/PrimuseWidgetExtension.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Config/PrimuseWidgetExtension-macOS.entitlements";
 				INFOPLIST_FILE = PrimuseWidgetExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2943,7 +2982,10 @@
 					"@executable_path/../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.welape.yuanyin.widget;
-				SDKROOT = iphoneos;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

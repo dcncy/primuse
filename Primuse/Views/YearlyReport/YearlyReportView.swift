@@ -195,7 +195,7 @@ struct YearlyReportView: View {
                         .lineLimit(1)
 
                     Text(verbatim: meta.big)
-                        .font(.system(size: selected ? 52 : 34, weight: .bold))
+                        .font(.system(size: selected ? 56 : 34, weight: .bold))
                         .foregroundStyle(Color(red: 0.95, green: 0.93, blue: 0.90))
                         .lineLimit(3)
                         .minimumScaleFactor(0.62)
@@ -351,6 +351,14 @@ struct YearlyReportView: View {
             return ("最长连听", formatDuration(data.longestSession?.totalSec ?? 0), "\(data.longestSession?.songCount ?? 0) 首连续播放 · \(dateText(data.longestSession?.startedAt))", "clock.arrow.circlepath", false)
         case .timeOfDay:
             return ("晨听 vs 夜听", "\(Int(data.nightRatio * 100))% 夜听", "\(data.timeOfDayLabel)最活跃 · 高峰 \(data.peakHour):00", "moon.stars.fill", false)
+        case .genres:
+            let topGenre = data.topGenres.first
+            let names = data.topGenres.prefix(3).map(\.title).joined(separator: " · ")
+            return ("流派地图", topGenre?.title ?? "\(data.genreCount) 种流派", names.isEmpty ? "资料库补齐 genre 后这里会更丰富" : "今年最常出现的声音颜色", "guitars", false)
+        case .exploration:
+            let focus = Int((data.explorationTopArtistShare * 100).rounded())
+            let exploration = max(0, 100 - focus)
+            return ("探索度", "\(exploration)%", "Top 5 艺术家占 \(focus)% · \(data.personality?.exploration == .explorer ? "偏向探索" : "偏向深听")", "safari.fill", false)
         case .sources:
             return ("最常用源", topSource?.displayName ?? "暂无音乐源", "\(topSource?.playCount ?? 0) 次播放 · \(formatDuration(topSource?.totalSec ?? 0))", topSource?.iconSymbol ?? "externaldrive", false)
         case .peakMonth:
@@ -475,6 +483,8 @@ struct YearlyReportView: View {
         case .topSongs: TopSongsCard(data: data)
         case .moments: MomentsCard(data: data)
         case .timeOfDay: TimeOfDayCard(data: data)
+        case .genres: GenreCard(data: data)
+        case .exploration: ExplorationCard(data: data)
         case .personality: PersonalityCard(data: data)
         case .sources: SourcesCard(data: data)
         case .peakMonth: PeakMonthCard(data: data)
@@ -612,6 +622,8 @@ struct YearlyReportView: View {
         case .topSongs: TopSongsCard(data: data)
         case .moments: MomentsCard(data: data)
         case .timeOfDay: TimeOfDayCard(data: data)
+        case .genres: GenreCard(data: data)
+        case .exploration: ExplorationCard(data: data)
         case .personality: PersonalityCard(data: data)
         case .sources: SourcesCard(data: data)
         case .peakMonth: PeakMonthCard(data: data)
@@ -626,7 +638,7 @@ enum YearlyReportCard: Int, CaseIterable {
     // 人格放倒数第二 ── 是整段叙事的"点睛之笔", 让用户看完所有数据再揭晓
     // 人格类型, 仪式感更强。closing 是收尾的告别。
     case hero, overview, firstSong, topArtistHero, topArtistsList, topSongs
-    case moments, timeOfDay, sources, peakMonth, personality, closing
+    case moments, timeOfDay, genres, exploration, sources, peakMonth, personality, closing
 
     /// 顶部副标题 (在 progress 条下方显示)
     var subtitle: String {
@@ -639,6 +651,8 @@ enum YearlyReportCard: Int, CaseIterable {
         case .topSongs: return "Top 歌曲"
         case .moments: return "高光时刻"
         case .timeOfDay: return "时段画像"
+        case .genres: return "流派画像"
+        case .exploration: return "探索度"
         case .sources: return "音乐源画像"
         case .peakMonth: return "代表月份"
         case .personality: return "音乐人格"
@@ -677,6 +691,10 @@ enum YearlyReportCard: Int, CaseIterable {
             case 14...18: return [Color(red: 0.85, green: 0.45, blue: 0.30), Color(red: 0.40, green: 0.20, blue: 0.55)]
             default: return [Color(red: 0.10, green: 0.10, blue: 0.30), Color(red: 0.25, green: 0.15, blue: 0.45)]
             }
+        case .genres:
+            return [Color(red: 0.14, green: 0.42, blue: 0.36), Color(red: 0.56, green: 0.26, blue: 0.42)]
+        case .exploration:
+            return [Color(red: 0.18, green: 0.36, blue: 0.62), Color(red: 0.52, green: 0.30, blue: 0.20)]
         case .personality:
             return [Color(red: 0.45, green: 0.20, blue: 0.55), Color(red: 0.20, green: 0.30, blue: 0.55)]
         case .sources:

@@ -7,6 +7,10 @@ import PrimuseKit
 /// 当前项的 accent 着色与圆角背景, 跟设计稿的 sidebar 节奏完全一致。
 struct MacSidebar: View {
     @Binding var selection: MacRoute
+    /// 「工具」区的点击回调 —— 由 `MacContentView` 接住后弹 `.sheet`。工具不进
+    /// 路由, 所以走独立回调而非 `selection`。
+    var onOpenTool: (MacTool) -> Void = { _ in }
+    @Environment(AudioPlayerService.self) private var player
     @Environment(MusicLibrary.self) private var library
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(\.pmAppearance) private var mode
@@ -37,22 +41,7 @@ struct MacSidebar: View {
 
     private var brandHeader: some View {
         HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [PMColor.brand, PMColor.brand.opacity(0.7)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 28, height: 28)
-                .overlay {
-                    // 设计稿要求左侧 logo 用一个中文字符 monogram (设计 demo 用的是
-                    // "猿" 字), 比 SF Symbol 更切合品牌名 "猿音 Primuse"。
-                    Text(verbatim: "猿")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .shadow(color: PMColor.brand.opacity(0.35), radius: 4, y: 2)
+            BrandMonogram(slot: .sidebar)
 
             // 中文 "猿音" 是主名, Latin "Primuse" 副名小一号。两段 tracking 略收紧。
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -97,6 +86,9 @@ struct MacSidebar: View {
             item(route: .section(.artists), icon: "music.mic",
                  title: LibrarySection.artists.title,
                  trailing: countLabel(library.visibleArtists.count))
+            // "我喜欢的" 作为资料库的固定快捷入口 (设计稿 LIB 侧栏)。它底层就是
+            // likedSongsPlaylistID 那个系统歌单, 所以下面的「歌单」分区会把它过滤掉,
+            // 避免同一个东西出现两次。
             item(route: .liked, icon: "heart.fill",
                  title: "sidebar_liked_songs",
                  trailing: countLabel(library.songs(forPlaylist: MusicLibrary.likedSongsPlaylistID).count))
@@ -112,8 +104,17 @@ struct MacSidebar: View {
             HStack(spacing: 4) {
                 sectionHeader("playlists_title")
                 Spacer()
-                Button {
-                    NotificationCenter.default.post(name: .primuseSidebarRequestNewPlaylist, object: nil)
+                Menu {
+                    Button {
+                        NotificationCenter.default.post(name: .primuseSidebarRequestNewPlaylist, object: nil)
+                    } label: {
+                        Label("new_playlist", systemImage: "music.note.list")
+                    }
+                    Button {
+                        NotificationCenter.default.post(name: .primuseSidebarRequestNewSmartPlaylist, object: nil)
+                    } label: {
+                        Label("new_smart_playlist", systemImage: "sparkles")
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 10, weight: .semibold))
@@ -121,18 +122,32 @@ struct MacSidebar: View {
                         .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
                 .help(Text("new_playlist"))
                 .padding(.trailing, 4)
             }
 
-            ForEach(library.playlists.prefix(6), id: \.id) { playlist in
+            // 智能歌单排在普通歌单上面 (跟歌单总览页的分区顺序一致)。
+            ForEach(sidebarSmartPlaylists.prefix(6), id: \.id) { smart in
+                item(route: .smartPlaylist(smart), icon: "sparkles",
+                     title: LocalizedStringKey(smart.name))
+                .contextMenu {
+                    smartPlaylistContextMenu(for: smart)
+                }
+            }
+
+            ForEach(sidebarPlaylists.prefix(6), id: \.id) { playlist in
                 item(route: .playlist(playlist), icon: "music.note.list",
                      title: LocalizedStringKey(playlist.name),
                      trailing: countLabel(library.songs(forPlaylist: playlist.id).count))
+                .contextMenu {
+                    playlistContextMenu(for: playlist)
+                }
             }
 
-            if library.playlists.isEmpty {
+            if sidebarPlaylists.isEmpty && sidebarSmartPlaylists.isEmpty {
                 Text("sidebar_playlists_empty")
                     .font(.system(size: 11))
                     .foregroundStyle(PMColor.textFaint)
@@ -198,14 +213,47 @@ struct MacSidebar: View {
         VStack(alignment: .leading, spacing: 1) {
             sectionHeader("mac_sidebar_tools")
 
-            item(route: .playlistImport, icon: "tray.and.arrow.down",
-                 title: "Import Playlist (M3U8/JSON)")
-            item(route: .duplicates, icon: "arrow.triangle.2.circlepath",
-                 title: "Duplicate Song Cleanup")
-            item(route: .scrobble, icon: "waveform.path.ecg",
-                 title: "Scrobble Configuration")
+            toolItem(.playlistImport, icon: "tray.and.arrow.down",
+                     title: "Import Playlist (M3U8/JSON)")
+            toolItem(.duplicates, icon: "arrow.triangle.2.circlepath",
+                     title: "Duplicate Song Cleanup")
+            toolItem(.scrobble, icon: "waveform.path.ecg",
+                     title: "Scrobble Configuration")
         }
         .padding(.horizontal, 6)
+    }
+
+    /// 工具行 —— 跟 `item` 长得一样, 但点击是弹 sheet (`onOpenTool`) 而不是
+    /// 切路由, 所以永远不显示选中态。右侧带一个箭头暗示"打开面板"。
+    @ViewBuilder
+    private func toolItem(_ tool: MacTool, icon: String, title: LocalizedStringKey) -> some View {
+        Button {
+            onOpenTool(tool)
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(PMColor.text.opacity(0.78))
+                    .frame(width: 18, height: 18)
+
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(PMColor.text.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 4)
+
+                Image(systemName: "arrow.up.forward")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(PMColor.textFaint)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .pmRowBackground(selected: false)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers
@@ -262,16 +310,94 @@ struct MacSidebar: View {
         )
     }
 
+    @ViewBuilder
+    private func playlistContextMenu(for playlist: Playlist) -> some View {
+        let playable = library.songs(forPlaylist: playlist.id).filteredPlayable()
+
+        Button {
+            select(.playlist(playlist))
+        } label: {
+            Label("open", systemImage: "arrow.right.circle")
+        }
+
+        Button {
+            playPlaylist(playlist)
+        } label: {
+            Label("play_all", systemImage: "play.fill")
+        }
+        .disabled(playable.isEmpty)
+
+        Button {
+            player.shuffleEnabled = true
+            playPlaylist(playlist)
+        } label: {
+            Label("shuffle", systemImage: "shuffle")
+        }
+        .disabled(playable.isEmpty)
+
+        Button {
+            player.appendToQueue(playable)
+        } label: {
+            Label("add_to_queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+        }
+        .disabled(playable.isEmpty)
+
+        Button {
+            player.insertNextInQueue(playable)
+        } label: {
+            Label("up_next", systemImage: "text.line.first.and.arrowtriangle.forward")
+        }
+        .disabled(playable.isEmpty)
+
+        if canDeletePlaylist(playlist.id) {
+            Divider()
+            Button(role: .destructive) {
+                deletePlaylist(playlist)
+            } label: {
+                Label("delete_playlist", systemImage: "trash")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func smartPlaylistContextMenu(for smart: SmartPlaylist) -> some View {
+        Button {
+            select(.smartPlaylist(smart))
+        } label: {
+            Label("open", systemImage: "arrow.right.circle")
+        }
+
+        Button {
+            playSmart(smart)
+        } label: {
+            Label("play_all", systemImage: "play.fill")
+        }
+
+        Button {
+            player.shuffleEnabled = true
+            playSmart(smart)
+        } label: {
+            Label("shuffle", systemImage: "shuffle")
+        }
+
+        Divider()
+        Button(role: .destructive) {
+            deleteSmart(smart)
+        } label: {
+            Label("delete", systemImage: "trash")
+        }
+    }
+
     private func isSelected(_ route: MacRoute) -> Bool {
         switch (selection, route) {
         case (.home, .home), (.stats, .stats), (.search, .search),
-             (.sources, .sources), (.playlistImport, .playlistImport),
-             (.duplicates, .duplicates), (.scrobble, .scrobble),
-             (.liked, .liked):
+             (.sources, .sources), (.liked, .liked):
             return true
         case (.section(let a), .section(let b)):
             return a == b
         case (.playlist(let a), .playlist(let b)):
+            return a.id == b.id
+        case (.smartPlaylist(let a), .smartPlaylist(let b)):
             return a.id == b.id
         case (.source(let a), .source(let b)):
             return a == b
@@ -285,6 +411,51 @@ struct MacSidebar: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             selection = route
+        }
+    }
+
+    private func playPlaylist(_ playlist: Playlist) {
+        let queue = library.songs(forPlaylist: playlist.id).filteredPlayable()
+        guard let first = queue.first else { return }
+        player.setQueue(queue, startAt: 0)
+        Task { await player.play(song: first) }
+    }
+
+    /// 「歌单」分区展示的歌单 —— 过滤掉 liked 系统歌单, 因为它已经作为
+    /// 「资料库 · 我喜欢的」固定入口出现了, 不重复。
+    private var sidebarPlaylists: [Playlist] {
+        library.playlists.filter { $0.id != MusicLibrary.likedSongsPlaylistID }
+    }
+
+    private var sidebarSmartPlaylists: [SmartPlaylist] {
+        library.smartPlaylists
+    }
+
+    private func canDeletePlaylist(_ playlistID: String) -> Bool {
+        !AppleMusicLibraryService.isAppleMusicMirrorPlaylist(playlistID)
+            && playlistID != MusicLibrary.likedSongsPlaylistID
+    }
+
+    private func deletePlaylist(_ playlist: Playlist) {
+        guard canDeletePlaylist(playlist.id) else { return }
+        library.deletePlaylist(id: playlist.id)
+        if case .playlist(let selectedPlaylist) = selection, selectedPlaylist.id == playlist.id {
+            select(.home)
+        }
+    }
+
+    private func playSmart(_ smart: SmartPlaylist) {
+        let queue = SmartPlaylistEngine.match(smart, in: library, history: PlayHistoryStore.shared)
+            .filteredPlayable()
+        guard let first = queue.first else { return }
+        player.setQueue(queue, startAt: 0)
+        Task { await player.play(song: first) }
+    }
+
+    private func deleteSmart(_ smart: SmartPlaylist) {
+        library.deleteSmartPlaylist(id: smart.id)
+        if case .smartPlaylist(let selectedSmart) = selection, selectedSmart.id == smart.id {
+            select(.home)
         }
     }
 
@@ -319,6 +490,7 @@ struct MacSidebar: View {
 
 extension Notification.Name {
     static let primuseSidebarRequestNewPlaylist = Notification.Name("primuse.sidebar.newPlaylist")
+    static let primuseSidebarRequestNewSmartPlaylist = Notification.Name("primuse.sidebar.newSmartPlaylist")
 }
 
 #endif

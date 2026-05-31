@@ -127,7 +127,7 @@ final class AppServices {
             store?.allSources.first(where: { $0.id == sourceID })?.cloudAccountID
         }
 
-        let pruneThreshold = Date(timeIntervalSinceNow: -30 * 24 * 60 * 60)
+        let pruneThreshold = Date(timeIntervalSinceNow: -7 * 24 * 60 * 60)
         library.prunePlaylists(deletedBefore: pruneThreshold)
         store.pruneSources(deletedBefore: pruneThreshold)
         ScraperConfigStore.shared.pruneConfigs(deletedBefore: pruneThreshold)

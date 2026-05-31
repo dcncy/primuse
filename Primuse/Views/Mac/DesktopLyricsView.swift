@@ -228,11 +228,19 @@ struct DesktopLyricsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .vertical:
-            // 纵向排版 —— 左为当前行 (用户色),右为下一行 (白色提示)。
+            // 纵向排版 —— 右为当前行 (用户色),左为下一行 (白色提示)。
             // 字号根据行字数 + panel 高度自动收缩,避免超出 panel 高度
             // 顶到工具按钮区域。
             let activeText = active?.text ?? placeholder
             HStack(alignment: .top, spacing: 14) {
+                if let next {
+                    verticalColumn(next.text,
+                                   fontSize: fittedFontSize(text: next.text,
+                                                            in: size,
+                                                            base: nextFontSize(in: size)),
+                                   weight: .medium,
+                                   color: .white.opacity(0.6))
+                }
                 if let active, active.isWordLevel {
                     verticalWordColumn(active,
                                        fontSize: fittedFontSize(text: activeText,
@@ -248,14 +256,6 @@ struct DesktopLyricsView: View {
                                                             base: activeFontSize(in: size)),
                                    weight: .semibold,
                                    color: lyricsColor)
-                }
-                if let next {
-                    verticalColumn(next.text,
-                                   fontSize: fittedFontSize(text: next.text,
-                                                            in: size,
-                                                            base: nextFontSize(in: size)),
-                                   weight: .medium,
-                                   color: .white.opacity(0.6))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

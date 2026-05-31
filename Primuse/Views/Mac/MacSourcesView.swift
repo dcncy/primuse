@@ -38,16 +38,22 @@ struct MacSourcesView: View {
             SourceTypeSelectionView { source in sourceStore.add(source) }
         }
         .sheet(item: $editingSource) { source in
+            // 不要再套外层 .frame —— AddSourceView 自己已经定了 560/620/660 的尺寸,
+            // 外面再压一个更小的 520×460 会把内容挤变形 (编辑态错位的根因)。新增
+            // 走 SourceTypeSelectionView 也是不套 frame, 这样两条路径表现一致。
             AddSourceView(sourceType: source.type, editingSource: source) { updated in
                 updateSource(updated.id) { $0 = updated }
                 scanService.removeSynologyAPI(for: updated.id)
                 Task { await sourceManager.refreshConnector(for: updated.id) }
             }
-            .frame(minWidth: 520, minHeight: 460)
         }
         .sheet(item: $connectingSource) { source in
+            // 这个 sheet 里既有 (云盘/Synology 的) 授权小步骤, 也有 940 宽的树形
+            // 目录浏览器。macOS 的 sheet 会按"首屏内容"定窗宽, 之后切到更宽的浏览
+            // 步骤时不会自己变大 → 浏览器被挤到溢出、左右两侧裁切。把固定 ideal
+            // 尺寸放在最外层 (不随步骤变), 让窗口一开始就按浏览器的尺寸来。
             connectionSheet(for: source)
-                .frame(minWidth: 640, minHeight: 480)
+                .frame(minWidth: 880, idealWidth: 940, minHeight: 600, idealHeight: 680)
         }
         .onReceive(NotificationCenter.default.publisher(for: CloudDirectoryNameStore.didChangeNotification)) { _ in
             cloudDirectoryNameRefreshID = UUID()

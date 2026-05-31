@@ -25,6 +25,43 @@ struct ConnectionFlowView: View {
     enum FlowStep { case connecting, otp, password, browsing, failed }
 
     var body: some View {
+        Group {
+            #if os(macOS)
+            // macOS 浏览步骤换成设计稿的树形浏览器 (自带 traffic-light 窗头 +
+            // 返回/完成 底栏), 不再套 NavigationStack —— 否则会和它的窗头叠两层。
+            if step == .browsing {
+                synologyMacBrowser
+            } else {
+                authFlow
+            }
+            #else
+            authFlow
+            #endif
+        }
+        .interactiveDismissDisabled(step == .connecting)
+        .onAppear { startConnection() }
+        .alert(
+            String(localized: "ssl_trust_title"),
+            isPresented: Binding(
+                get: { sslTrustDomain != nil },
+                set: { if !$0 { resolveSSLTrust(approved: false) } }
+            )
+        ) {
+            Button(String(localized: "trust_domain"), role: .destructive) {
+                resolveSSLTrust(approved: true)
+            }
+            Button(String(localized: "dont_trust"), role: .cancel) {
+                resolveSSLTrust(approved: false)
+            }
+        } message: {
+            if let domain = sslTrustDomain {
+                Text("ssl_trust_message \(domain)")
+            }
+        }
+    }
+
+    /// 连接 / 二步验证 / 选目录(iOS) 的 NavigationStack 主体。
+    private var authFlow: some View {
         NavigationStack {
             Group {
                 switch step {
@@ -53,27 +90,43 @@ struct ConnectionFlowView: View {
                 }
             }
         }
-        .interactiveDismissDisabled(step == .connecting)
-        .onAppear { startConnection() }
-        .alert(
-            String(localized: "ssl_trust_title"),
-            isPresented: Binding(
-                get: { sslTrustDomain != nil },
-                set: { if !$0 { resolveSSLTrust(approved: false) } }
-            )
-        ) {
-            Button(String(localized: "trust_domain"), role: .destructive) {
-                resolveSSLTrust(approved: true)
-            }
-            Button(String(localized: "dont_trust"), role: .cancel) {
-                resolveSSLTrust(approved: false)
-            }
-        } message: {
-            if let domain = sslTrustDomain {
-                Text("ssl_trust_message \(domain)")
-            }
-        }
     }
+
+    #if os(macOS)
+    /// Synology 的树形浏览器 —— 复用通用 `MacDirTreeBrowser`, 把 Synology 的
+    /// FileItem 映射成 RemoteFileItem; 根目录用已拿到的共享文件夹列表。
+    private var synologyMacBrowser: some View {
+        MacDirTreeBrowser(
+            title: "浏览 \(source.type.displayName) · \(source.name)",
+            subtitle: synologyConnectionString,
+            rootTitle: source.name,
+            selectedDirectories: $selectedDirectories,
+            load: { path in
+                if path == "/" {
+                    return rootItems.map(Self.mapSynologyItem)
+                }
+                guard let api = synologyAPI else { return [] }
+                let items = try await api.listDirectory(path: path)
+                return items.map(Self.mapSynologyItem)
+            }
+        )
+    }
+
+    private var synologyConnectionString: String {
+        let host = source.host ?? ""
+        return host.isEmpty ? source.type.displayName.lowercased() : "synology://\(host)"
+    }
+
+    private static func mapSynologyItem(_ item: SynologyAPI.FileItem) -> RemoteFileItem {
+        RemoteFileItem(
+            name: item.name,
+            path: item.path,
+            isDirectory: item.isDirectory,
+            size: item.size,
+            modifiedDate: nil
+        )
+    }
+    #endif
 
     private func resolveSSLTrust(approved: Bool) {
         if approved, let domain = sslTrustDomain {

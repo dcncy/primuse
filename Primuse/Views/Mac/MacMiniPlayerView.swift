@@ -33,12 +33,13 @@ struct MacMiniPlayerView: View {
             VStack(spacing: 0) {
                 miniTopBar
 
-                VStack(spacing: 12) {
+                VStack(spacing: bottomMode == .none ? 8 : 12) {
                     coverArea
                     metaArea
                     scrubber
-                    // 传输键(播放/暂停/上下首…)折叠态也常驻,方便不展开就能控制播放。
-                    transport
+                    if bottomMode != .none {
+                        transport
+                    }
 
                     // 歌词/队列 tab 只在展开态出现(底部面板的切换条)。
                     if bottomMode != .none {
@@ -54,10 +55,10 @@ struct MacMiniPlayerView: View {
                         .padding(.horizontal, 18)
                         .padding(.top, 14)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    footerToolbar
                 } else {
                     Spacer(minLength: 0)
                 }
+                footerToolbar
             }
             .animation(.easeInOut(duration: 0.28), value: bottomMode)
         }
@@ -68,6 +69,7 @@ struct MacMiniPlayerView: View {
                 ? MiniPlayerWindowController.collapsedHeight
                 : MiniPlayerWindowController.expandedHeight
         )
+        .pmWindowDragRegion()
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         // mini player 卡片恒为深色背景,强制 dark colorScheme,让歌词 / 队列里
         // 的 .primary / .secondary / .tertiary 解析成浅色 —— 否则浅色系统外观下
@@ -108,7 +110,8 @@ struct MacMiniPlayerView: View {
             .help(Text("close"))
         }
         .padding(.trailing, 12)
-        .frame(height: 40)
+        .frame(height: bottomMode == .none ? 32 : 40)
+        .pmWindowDragRegion()
         // 不放背景色带 + 分隔线:控件直接浮在 ambient 渐变上,顶部不再有断层色带。
     }
 
@@ -143,20 +146,22 @@ struct MacMiniPlayerView: View {
 
     /// 折叠态居中显示的 96pt 封面 — 跟设计稿 NP-Mini 一致。
     private var coverArea: some View {
-        Group {
+        let coverSize: CGFloat = bottomMode == .none ? 76 : 96
+        let cornerRadius: CGFloat = bottomMode == .none ? 8 : 10
+        return Group {
             if let song = player.currentSong {
                 CachedArtworkView(
                     coverRef: song.coverArtFileName, songID: song.id,
-                    size: 96, cornerRadius: 10,
+                    size: coverSize, cornerRadius: cornerRadius,
                     sourceID: song.sourceID, filePath: song.filePath
                 )
             } else {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: cornerRadius)
                     .fill(.white.opacity(0.12))
-                    .frame(width: 96, height: 96)
+                    .frame(width: coverSize, height: coverSize)
                     .overlay {
                         Image(systemName: "music.note")
-                            .font(.system(size: 30))
+                            .font(.system(size: bottomMode == .none ? 24 : 30))
                             .foregroundStyle(.white.opacity(0.55))
                     }
             }
@@ -258,14 +263,12 @@ struct MacMiniPlayerView: View {
                 .foregroundStyle(.white.opacity(0.62))
                 .frame(width: 14)
 
-            // 原生 Slider —— 可拖动调节。自定义 DragGesture 滑块在 GeometryReader 里
-            // onChanged 改 value 会打断拖拽,且无边框窗口的拖动背景会抢走手势。
-            Slider(value: Binding(
+            // AppKit slider opts out of window-background dragging, so volume
+            // drags stay on the control in this borderless panel.
+            PMVolumeSlider(value: Binding(
                 get: { Double(engine.volume) },
                 set: { engine.volume = Float($0) }
-            ), in: 0...1)
-            .controlSize(.mini)
-            .tint(.white.opacity(0.85))
+            ))
             .frame(width: 64)
 
             PlayerMoreMenu {
@@ -277,7 +280,7 @@ struct MacMiniPlayerView: View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, bottomMode == .none ? 8 : 10)
         .overlay(alignment: .top) {
             Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5)
         }
@@ -439,6 +442,9 @@ struct MacMiniPlayerView: View {
             .padding(.vertical, 4)
         }
         .scrollIndicators(.hidden)
+        // 系统「总是显示滚动条」时 .scrollIndicators(.hidden) 不生效, 直接在底层
+        // NSScrollView 上强制隐藏。
+        .pmForceHideScrollers()
     }
 
     private func queueRow(index: Int, song overrideSong: Song? = nil, isPlaying: Bool = false) -> some View {
@@ -482,7 +488,7 @@ struct MacMiniPlayerView: View {
     private var lyricsList: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .center, spacing: 14) {
                     if lyrics.isEmpty {
                         if player.currentSong == nil {
                             Color.clear.frame(height: 1)
@@ -498,7 +504,7 @@ struct MacMiniPlayerView: View {
                             let active = i == currentIndex
                             miniLyricLine(line: line, index: i, isActive: active)
                                 .id(line.id)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(maxWidth: .infinity, alignment: .center)
                                 .contentShape(Rectangle())
                                 .onTapGesture { player.seek(to: line.timestamp) }
                                 .animation(.easeInOut(duration: 0.25), value: currentIndex)
@@ -514,6 +520,7 @@ struct MacMiniPlayerView: View {
                     proxy.scrollTo(lyrics[new].id, anchor: .center)
                 }
             }
+            .pmForceHideScrollers()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -536,6 +543,7 @@ struct MacMiniPlayerView: View {
                 .font(.system(size: fontSize, weight: weight))
                 .foregroundStyle(isActive ? .primary : .secondary)
                 .opacity(isActive ? 1 : 0.55)
+                .multilineTextAlignment(.center)
         }
     }
 

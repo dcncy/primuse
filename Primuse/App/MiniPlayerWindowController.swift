@@ -23,9 +23,9 @@ import PrimuseKit
 final class MiniPlayerWindowController: NSWindowController, NSWindowDelegate {
     @AppStorage("miniPlayerVisible") private var visible: Bool = false
 
-    /// 折叠态(无歌词/队列面板)高度 —— 封面 + 标题 + 进度 + 传输键(折叠态也常驻
-    /// 播放控制)。展开态再加 tab + 歌词/队列面板 + 底栏。
-    static let collapsedHeight: CGFloat = 296
+    /// 折叠态(无歌词/队列面板)高度 —— 设计稿 NP-Mini 是 300×220;
+    /// 底部 footer 常驻, 展开态再加歌词/队列面板与完整传输键。
+    static let collapsedHeight: CGFloat = 220
     static let expandedHeight: CGFloat = 540
     static let fixedWidth: CGFloat = 300
 
@@ -40,7 +40,7 @@ final class MiniPlayerWindowController: NSWindowController, NSWindowDelegate {
             defer: false
         )
         panel.isFloatingPanel = true
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false
         panel.isOpaque = false
         panel.backgroundColor = .clear  // 圆角外透明,圆角由内容 clipShape 决定
         panel.hasShadow = true

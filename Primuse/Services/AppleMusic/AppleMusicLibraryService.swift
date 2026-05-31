@@ -71,6 +71,10 @@ final class AppleMusicLibraryService {
     /// 不大 (大部分用户几百到几千首), 一次性拉全。失败时 state=.failed, UI
     /// 显示错误并允许重试。
     func sync() {
+        guard AppleMusicFeatureSettings.syncUserLibraryEnabled else {
+            cancel()
+            return
+        }
         guard syncTask == nil else { return }
         guard appleMusic.authState == .authorized else {
             state = .failed("Apple Music 未授权, 去 Settings → Apple Music 启用")
@@ -89,6 +93,7 @@ final class AppleMusicLibraryService {
     /// ApplicationMusicPlayer queue 能装上 user library 全集; 已经在跑的 sync
     /// 任务会被 await 直接复用, 不会重复触发。
     func ensureCachePopulated() async {
+        guard AppleMusicFeatureSettings.syncUserLibraryEnabled else { return }
         if !songCache.isEmpty { return }
         guard appleMusic.authState == .authorized else { return }
         if let existing = syncTask {

@@ -4,6 +4,10 @@ import PrimuseKit
 @MainActor
 @Observable
 final class MusicScraperService {
+    nonisolated static let sidecarCoverWriteEnabledKey = "primuse.sidecar.coverWriteEnabled"
+    nonisolated static let sidecarLyricsWriteEnabledKey = "primuse.sidecar.lyricsWriteEnabled"
+    nonisolated static let sidecarWriteTimeoutKey = "primuse.sidecar.writeTimeout"
+
     private let sourceManager: SourceManager
     private let metadataService = MetadataService()
     private var scrapingTask: Task<Void, Never>?
@@ -89,6 +93,9 @@ final class MusicScraperService {
             // task 写 cache 已经晚了 (UI 不会再 reload)。
             let lyricsLines = result.lyricsLines
             let coverData = result.coverData
+            let sidecarSettings = Self.sidecarSettings()
+            let sidecarCoverData = sidecarSettings.coverEnabled ? coverData : nil
+            let sidecarLyricsLines = sidecarSettings.lyricsEnabled ? lyricsLines : nil
             if let coverData {
                 await MetadataAssetStore.shared.cacheCover(coverData, forSongID: updatedSong.id)
                 updatedSong.coverArtFileName = MetadataAssetStore.shared.expectedCoverFileName(for: updatedSong.id)
@@ -101,8 +108,8 @@ final class MusicScraperService {
             library.replaceSong(updatedSong)
 
             // Write sidecar files to source (cover.jpg, .lrc) and update Song refs
-            plog("📝 Sidecar: coverData=\(coverData?.count ?? 0)B lyricsLines=\(lyricsLines?.count ?? 0) for '\(updatedSong.title)'")
-            if coverData != nil || lyricsLines != nil {
+            plog("📝 Sidecar: coverData=\(sidecarCoverData?.count ?? 0)B lyricsLines=\(sidecarLyricsLines?.count ?? 0) for '\(updatedSong.title)'")
+            if sidecarCoverData != nil || sidecarLyricsLines != nil {
                 let songForWrite = updatedSong
                 let sourceManager = self.sourceManager
                 let songID = updatedSong.id
@@ -110,10 +117,10 @@ final class MusicScraperService {
                     do {
                         plog("📝 Sidecar: getting auxiliary connector for '\(songForWrite.title)' source=\(songForWrite.sourceID)")
                         let writeResult = try await MusicScraperService.writeSidecarWithTimeout(
-                            seconds: 30,
+                            seconds: sidecarSettings.timeout,
                             sourceManager: sourceManager,
                             for: songForWrite,
-                            coverData: coverData, lyricsLines: lyricsLines
+                            coverData: sidecarCoverData, lyricsLines: sidecarLyricsLines
                         )
                         plog("📝 Sidecar: result cover=\(writeResult.coverWritten) lyrics=\(writeResult.lyricsWritten) errors=\(writeResult.errors)")
 
@@ -151,7 +158,7 @@ final class MusicScraperService {
                             plog("⚠️ Sidecar write errors: \(writeResult.errors)")
                         }
                     } catch is CancellationError {
-                        plog("⚠️ Sidecar write timed out (30s) for '\(songForWrite.title)'")
+                        plog("⚠️ Sidecar write timed out (\(Int(sidecarSettings.timeout))s) for '\(songForWrite.title)'")
                     } catch {
                         plog("⚠️ Sidecar write skipped for '\(songForWrite.title)': \(error.localizedDescription)")
                     }
@@ -251,8 +258,9 @@ final class MusicScraperService {
                             shouldWriteLyrics = result.lyricsLines != nil
                         }
 
-                        let coverData = shouldWriteCover ? result.coverData : nil
-                        let lyricsLines = shouldWriteLyrics ? result.lyricsLines : nil
+                        let sidecarSettings = Self.sidecarSettings()
+                        let coverData = shouldWriteCover && sidecarSettings.coverEnabled ? result.coverData : nil
+                        let lyricsLines = shouldWriteLyrics && sidecarSettings.lyricsEnabled ? result.lyricsLines : nil
 
                         if coverData != nil || lyricsLines != nil {
                             let songForWrite = updatedSong
@@ -270,7 +278,7 @@ final class MusicScraperService {
 
                                 do {
                                     let writeResult = try await MusicScraperService.writeSidecarWithTimeout(
-                                        seconds: 30,
+                                        seconds: sidecarSettings.timeout,
                                         sourceManager: sourceManager,
                                         for: songForWrite,
                                         coverData: coverData, lyricsLines: lyricsLines
@@ -307,7 +315,7 @@ final class MusicScraperService {
                                         plog("⚠️ Batch sidecar errors for '\(songForWrite.title)': \(writeResult.errors)")
                                     }
                                 } catch is CancellationError {
-                                    plog("⚠️ Batch sidecar timed out (30s) for '\(songForWrite.title)'")
+                                    plog("⚠️ Batch sidecar timed out (\(Int(sidecarSettings.timeout))s) for '\(songForWrite.title)'")
                                 } catch {
                                     plog("⚠️ Batch sidecar skipped for '\(songForWrite.title)': \(error.localizedDescription)")
                                 }
@@ -606,5 +614,19 @@ final class MusicScraperService {
             group.cancelAll()
             return result
         }
+    }
+
+    private nonisolated static func sidecarSettings() -> (coverEnabled: Bool, lyricsEnabled: Bool, timeout: TimeInterval) {
+        let defaults = UserDefaults.standard
+        let coverEnabled = defaults.object(forKey: sidecarCoverWriteEnabledKey) == nil
+            ? true
+            : defaults.bool(forKey: sidecarCoverWriteEnabledKey)
+        let lyricsEnabled = defaults.object(forKey: sidecarLyricsWriteEnabledKey) == nil
+            ? true
+            : defaults.bool(forKey: sidecarLyricsWriteEnabledKey)
+        let timeout = defaults.object(forKey: sidecarWriteTimeoutKey) == nil
+            ? 30
+            : defaults.double(forKey: sidecarWriteTimeoutKey)
+        return (coverEnabled, lyricsEnabled, max(5, min(120, timeout)))
     }
 }

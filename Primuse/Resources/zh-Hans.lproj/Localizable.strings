@@ -148,7 +148,9 @@
 "cat_local" = "本地";
 "edit_source" = "编辑音乐源";
 "edit" = "编辑";
+"open" = "打开";
 "delete" = "删除";
+"delete_playlist" = "删除歌单";
 "disable" = "禁用";
 "enable" = "启用";
 "disabled" = "已禁用";
@@ -414,6 +416,7 @@
 
 // MARK: - 播放器更多功能
 "add_to_playlist" = "添加到歌单";
+"add_to_queue" = "加入播放队列";
 "playlists_title" = "歌单";
 "sleep_timer" = "睡眠定时器";
 "sleep_timer_active" = "定时器已开启";
@@ -527,7 +530,7 @@
 // MARK: - 最近删除（回收站）
 "recently_deleted" = "最近删除";
 "recently_deleted_empty" = "没有最近删除项";
-"recently_deleted_empty_desc" = "歌单、音乐源和刮削配置删除后会在此保留 30 天。";
+"recently_deleted_empty_desc" = "歌单、音乐源和刮削配置删除后会在此保留 7 天。";
 "recently_deleted_playlists" = "歌单";
 "recently_deleted_sources" = "音乐源";
 "recently_deleted_scraper_configs" = "刮削配置";
@@ -1201,7 +1204,7 @@
 "1. Ten Years · Eason Chan" = "1. 十年 · 陈奕迅";
 "10-Band Equalizer" = "10 段均衡器";
 "1–12 seconds" = "1-12 秒";
-"3 Sizes · Glanceable + Interactive" = "3 种尺寸 · Glanceable + Interactive";
+"3 Sizes · Glanceable + Interactive" = "3 种尺寸 · 一眼可读 + 可交互";
 "4 Recent Covers" = "4 张近期封面";
 "About" = "关于";
 "Account" = "账号";
@@ -1256,7 +1259,7 @@
 "Custom (minutes)" = "自定义 (分钟)";
 "Custom Source" = "自定义源";
 "Dark" = "深色";
-"Dark · Medium" = "深色 · Medium";
+"Dark · Medium" = "深色 · 中号";
 "December Exclusive · STATS-05" = "12 月专属 · STATS-05";
 "Default 500 MB" = "默认 500 MB";
 "Default · Warm Wood Listening Room" = "默认 · 暖木听音室";
@@ -1286,6 +1289,7 @@
 "From URL" = "从 URL";
 "Gapless Playback" = "Gapless 无缝播放";
 "Go to System Settings → Privacy to re-enable" = "前往 系统设置 → 隐私 重新启用";
+"Higher frequency updates sooner but uses more energy" = "刷新越频繁，状态越及时，但耗电也会更高";
 "Import" = "导入";
 "Import Playlist (M3U8/JSON)" = "导入歌单 (M3U8/JSON)";
 "Import Scraping Sources" = "导入刮削源";
@@ -1301,14 +1305,14 @@
 "Library Sync" = "资料库同步";
 "Light" = "浅色";
 "Listening Stats" = "听歌统计";
-"Listening Stats · Medium" = "听歌统计 · Medium";
+"Listening Stats · Medium" = "听歌统计 · 中号";
 "Live Data" = "实时数据";
 "Live Lyrics Follow" = "实时歌词跟随";
 "Lyrics" = "歌词";
 "Lyrics / Stats / Music Sources" = "歌词 / 统计 / 音乐源";
 "Lyrics Font Scale" = "歌词字号缩放";
 "Lyrics Translation" = "歌词翻译";
-"Lyrics · Medium" = "歌词 · Medium";
+"Lyrics · Medium" = "歌词 · 中号";
 "META-01 · Drag to Reorder · Higher Items Take Priority" = "META-01 · 拖拽排序 · 上面优先级高";
 "META-03 · Custom Source JSON" = "META-03 · 自定义源 JSON";
 "META-03 · Paste JSON or Import from URL" = "META-03 · 粘贴 JSON 或从 URL 导入";
@@ -1323,7 +1327,8 @@
 "Minimal Data Look" = "极简数据感";
 "Most Played This Month" = "本月最常听";
 "Music Sources" = "音乐源";
-"Music Sources · Small" = "音乐源 · Small";
+"Medium 342×155" = "中号 342×155";
+"Music Sources · Small" = "音乐源 · 小号";
 "MusicKit Connected" = "MusicKit 已连接";
 "Mutually exclusive with Gapless" = "跟 Gapless 互斥";
 "No Scan" = "无扫描";
@@ -1334,7 +1339,7 @@
 "Now Playing" = "正在播放";
 "Now Playing · 3 Sizes" = "正在播放 · 3 种尺寸";
 "Now Playing · FLAC" = "正在播放 · FLAC";
-"Now Playing · Playing" = "Now Playing · 正在播放";
+"Now Playing · Playing" = "正在播放 · 播放中";
 "Off" = "关闭";
 "Open System Settings" = "去系统设置";
 "Open-Source Licenses…" = "开源许可证…";
@@ -1349,7 +1354,8 @@
 "Preset" = "预设";
 "Primuse is a native macOS player for NAS / media-server enthusiasts, built on SFBAudioEngine. This design covers 200+ features: Set A uses .glassEffect() on macOS 26+, Set B falls back to .regularMaterial.\n\n© 2026 Primuse Project · Made for lossless lovers." = "Primuse 是一款面向 NAS / 媒体服务器烧友的原生 macOS 播放器,基于 SFBAudioEngine。本设计稿覆盖 200+ 功能点,A 套使用 macOS 26+ 的 .glassEffect(),B 套 fallback 到 .regularMaterial。\n\n© 2026 Primuse Project · Made for lossless lovers.";
 "Processing…" = "处理中…";
-"Push Now Playing to Widget" = "向 Widget 推送 Now Playing";
+"Push Now Playing to Widget" = "向桌面小组件推送正在播放";
+"Push to Widget" = "推送到小组件";
 "Push Status" = "推送状态";
 "RG Mode" = "RG 模式";
 "Re-Scrape" = "重新刮削";
@@ -1357,7 +1363,7 @@
 "Recent Playback Errors" = "最近播放错误";
 "Recently Deleted" = "最近删除";
 "Recently Played" = "最近播放";
-"Recently Played · Small" = "最近播放 · Small";
+"Recently Played · Small" = "最近播放 · 小号";
 "Refresh Frequency" = "刷新频率";
 "Refresh Now" = "立即刷新";
 "Remaining" = "剩余";
@@ -1367,11 +1373,14 @@
 "Restore Defaults" = "恢复默认";
 "Restricted by Screen Time or MDM" = "由屏幕使用时间或 MDM 限制";
 "Reverb" = "混响 (Reverb)";
+"Expires" = "到期";
 "SHA256: Manually Trusted · Stored Locally" = "SHA256:手动信任 · 本机存储";
+"SHA256: Waiting for next connection" = "SHA256:等待下次连接捕获";
 "SRC-29 · Cross-Process Cache" = "SRC-29 · 跨进程缓存";
 "ST-09 · Custom Metadata Scraping Sources" = "ST-09 · 元数据刮削自定义源";
 "ST-09 · Includes Connection Credentials" = "ST-09 · 包含连接凭据";
 "ST-09 · Recoverable Within 30 Days" = "ST-09 · 30 天内可恢复";
+"ST-09 · Recoverable Within 7 Days" = "ST-09 · 7 天内可恢复";
 "ST-10 · The SSL certificates for these domains aren't in the system Keychain — you've trusted them manually" = "ST-10 · 这些域名的 SSL 证书不在系统钥匙串里,你已手动信任";
 "ST-10 · Trust self-signed certificates for this domain only" = "ST-10 · 仅信任该域名的自签证书";
 "Scrape Entire Library" = "全库刮削";
@@ -1387,7 +1396,9 @@
 "Sidebar Widget" = "侧边小组件";
 "Slate" = "Slate 石板";
 "Sleep Timer" = "睡眠定时器";
-"Small 155×155 · Medium 342×155 · Large 342×342 · Matches design ST-07 sizes" = "Small 155×155 · Medium 342×155 · Large 342×342 · 与设计稿 ST-07 尺寸一致";
+"Large 342×342" = "大号 342×342";
+"Small 155" = "小号 155";
+"Small 155×155 · Medium 342×155 · Large 342×342 · Matches design ST-07 sizes" = "小号 155×155 · 中号 342×155 · 大号 342×342 · 与设计稿 ST-07 尺寸一致";
 "Source Configuration" = "源配置";
 "Spatial Audio" = "空间音频";
 "Standard HIG accent" = "系统标准 HIG accent";
@@ -1405,6 +1416,7 @@
 "Target Language" = "目标语言";
 "Terracotta" = "赤陶 Terracotta";
 "The main process pushes NowPlaying state to the WidgetKit extension through the App Group container" = "主进程通过 App Group 容器把 NowPlaying 状态推给 WidgetKit Extension";
+"The main process pushes state to the WidgetKit extension through the App Group container" = "主进程通过 App Group 容器把播放状态推给 WidgetKit 扩展";
 "Theme" = "主题";
 "This Month's Listening" = "本月听歌";
 "Throwback Mix" = "闯入听昔";
@@ -1430,7 +1442,8 @@
 "Word-by-Word Lyrics" = "逐字歌词";
 "Works on physical iOS devices; ignored by some hardware" = "iOS 真机有效, 部分硬件忽略";
 "Year in Review" = "年度报告";
-"Year in Review · Medium" = "年度报告 · Medium";
+"Widget Gallery" = "小组件图库";
+"Year in Review · Medium" = "年度报告 · 中号";
 "Your 2026\n847 hours listened" = "你的 2026\n已听 847 小时";
 "Yu Xi Tan" = "虞兮叹";
 "failed" = "失败";

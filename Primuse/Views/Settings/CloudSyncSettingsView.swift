@@ -15,6 +15,7 @@ struct CloudSyncSettingsView: View {
     @AppStorage(CloudSyncChannel.playbackHistory.defaultsKey) private var syncPlaybackHistory: Bool = true
     @AppStorage(CloudSyncChannel.settings.defaultsKey) private var syncSettings: Bool = true
     @AppStorage(CloudSyncChannel.credentials.defaultsKey) private var syncCredentials: Bool = true
+    @AppStorage(CloudSyncChannel.listeningStats.defaultsKey) private var syncListeningStats: Bool = true
     @State private var isSyncingNow = false
 
     var body: some View {
@@ -95,6 +96,7 @@ struct CloudSyncSettingsView: View {
                 channelToggle("synced_playback_history", systemImage: "clock.arrow.circlepath", isOn: $syncPlaybackHistory, channel: .playbackHistory)
                 channelToggle("synced_settings", systemImage: "slider.horizontal.3", isOn: $syncSettings, channel: .settings)
                 channelToggle("synced_credentials", systemImage: "lock.shield", isOn: $syncCredentials, channel: .credentials)
+                channelToggle("stats_title", systemImage: "chart.bar.xaxis", isOn: $syncListeningStats, channel: .listeningStats)
             } header: {
                 Text("synced_items")
             } footer: {

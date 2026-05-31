@@ -148,7 +148,9 @@
 "cat_local" = "Local";
 "edit_source" = "Edit Source";
 "edit" = "Edit";
+"open" = "Open";
 "delete" = "Delete";
+"delete_playlist" = "Delete Playlist";
 "disable" = "Disable";
 "enable" = "Enable";
 "disabled" = "Disabled";
@@ -414,6 +416,7 @@
 
 // MARK: - Player More Features
 "add_to_playlist" = "Add to Playlist";
+"add_to_queue" = "Add to Queue";
 "playlists_title" = "Playlists";
 "sleep_timer" = "Sleep Timer";
 "sleep_timer_active" = "Timer Active";
@@ -527,7 +530,7 @@
 // MARK: - Recently Deleted
 "recently_deleted" = "Recently Deleted";
 "recently_deleted_empty" = "Nothing recently deleted";
-"recently_deleted_empty_desc" = "Deleted playlists, music sources and scraper configs are kept here for 30 days.";
+"recently_deleted_empty_desc" = "Deleted playlists, music sources and scraper configs are kept here for 7 days.";
 "recently_deleted_playlists" = "Playlists";
 "recently_deleted_sources" = "Music Sources";
 "recently_deleted_scraper_configs" = "Scraper Configs";

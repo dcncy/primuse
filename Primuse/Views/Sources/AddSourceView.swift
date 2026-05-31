@@ -126,6 +126,7 @@ struct AddSourceView: View {
             HStack(spacing: 8) {
                 Spacer()
                 Button("cancel") { dismiss() }
+                    .buttonStyle(.plain)
                     .keyboardShortcut(.cancelAction)
                     .font(.system(size: 12))
                     .foregroundStyle(PMColor.text)
@@ -135,6 +136,7 @@ struct AddSourceView: View {
                     .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(PMColor.cardBorder, lineWidth: 0.5) }
 
                 Button("save") { saveSource() }
+                    .buttonStyle(.plain)
                     .keyboardShortcut(.defaultAction)
                     .disabled(canSave == false)
                     .font(.system(size: 12, weight: .semibold))

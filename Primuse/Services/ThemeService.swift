@@ -37,6 +37,13 @@ final class ThemeService {
     // MARK: - Public API
 
     func updateFromCoverArt(fileName: String?, songID: String? = nil) {
+        #if os(macOS)
+        guard MacUIPreferences.shared.coverDrivenAmbient else {
+            resetToDefault()
+            return
+        }
+        #endif
+
         guard (fileName != nil && !fileName!.isEmpty) || songID != nil else {
             resetToDefault()
             return

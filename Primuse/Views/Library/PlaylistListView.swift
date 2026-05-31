@@ -3,11 +3,16 @@ import PrimuseKit
 
 struct PlaylistListView: View {
     @Environment(MusicLibrary.self) private var library
+    @Environment(AudioPlayerService.self) private var player
     @State private var showNewPlaylist = false
     @State private var newPlaylistName = ""
+    @State private var newPlaylistDescription = ""
     @State private var showSmartEditor = false
 
-    private var playlists: [Playlist] { library.playlists }
+    // liked 系统歌单已作为「资料库 · 我喜欢的」固定入口展示, 歌单总览里不再重复列出。
+    private var playlists: [Playlist] {
+        library.playlists.filter { $0.id != MusicLibrary.likedSongsPlaylistID }
+    }
     private var smartPlaylists: [SmartPlaylist] { library.smartPlaylists }
 
     var body: some View {
@@ -220,13 +225,7 @@ struct PlaylistListView: View {
                                         }
                                         .buttonStyle(.plain)
                                         .contextMenu {
-                                            if !isSystemPlaylist(playlist.id) {
-                                                Button(role: .destructive) {
-                                                    library.deletePlaylist(id: playlist.id)
-                                                } label: {
-                                                    Label("delete", systemImage: "trash")
-                                                }
-                                            }
+                                            playlistContextMenu(for: playlist)
                                         }
                                     }
                                 }
@@ -245,14 +244,22 @@ struct PlaylistListView: View {
         .navigationDestination(for: SmartPlaylist.self) { smart in
             SmartPlaylistDetailView(smartPlaylistID: smart.id)
         }
-        .alert("new_playlist", isPresented: $showNewPlaylist) {
-            TextField("playlist_name", text: $newPlaylistName)
-            Button("cancel", role: .cancel) {
-                newPlaylistName = ""
-            }
-            Button("create") {
-                createPlaylist()
-            }
+        .sheet(isPresented: $showNewPlaylist) {
+            MacNewPlaylistSheet(
+                name: $newPlaylistName,
+                description: $newPlaylistDescription,
+                onCancel: {
+                    newPlaylistName = ""
+                    newPlaylistDescription = ""
+                    showNewPlaylist = false
+                },
+                onCreate: { name in
+                    _ = library.createPlaylist(name: name)
+                    newPlaylistName = ""
+                    newPlaylistDescription = ""
+                    showNewPlaylist = false
+                }
+            )
         }
         .sheet(isPresented: $showSmartEditor) {
             SmartPlaylistEditorView(existing: nil)
@@ -421,6 +428,49 @@ struct PlaylistListView: View {
                 .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
         }
     }
+
+    @ViewBuilder
+    private func playlistContextMenu(for playlist: Playlist) -> some View {
+        let playable = library.songs(forPlaylist: playlist.id).filteredPlayable()
+
+        Button {
+            playPlaylist(playlist)
+        } label: {
+            Label("play_all", systemImage: "play.fill")
+        }
+        .disabled(playable.isEmpty)
+
+        Button {
+            player.shuffleEnabled = true
+            playPlaylist(playlist)
+        } label: {
+            Label("shuffle", systemImage: "shuffle")
+        }
+        .disabled(playable.isEmpty)
+
+        Button {
+            player.appendToQueue(playable)
+        } label: {
+            Label("add_to_queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+        }
+        .disabled(playable.isEmpty)
+
+        Button {
+            player.insertNextInQueue(playable)
+        } label: {
+            Label("up_next", systemImage: "text.line.first.and.arrowtriangle.forward")
+        }
+        .disabled(playable.isEmpty)
+
+        if !isSystemPlaylist(playlist.id) {
+            Divider()
+            Button(role: .destructive) {
+                library.deletePlaylist(id: playlist.id)
+            } label: {
+                Label("delete_playlist", systemImage: "trash")
+            }
+        }
+    }
     #endif
 
     private func createPlaylist() {
@@ -444,4 +494,146 @@ struct PlaylistListView: View {
             library.deleteSmartPlaylist(id: smartPlaylists[index].id)
         }
     }
+
+    private func playPlaylist(_ playlist: Playlist) {
+        let queue = library.songs(forPlaylist: playlist.id).filteredPlayable()
+        guard let first = queue.first else { return }
+        player.setQueue(queue, startAt: 0)
+        Task { await player.play(song: first) }
+    }
 }
+
+#if os(macOS)
+struct MacNewPlaylistSheet: View {
+    @Binding var name: String
+    @Binding var description: String
+    var onCancel: () -> Void
+    var onCreate: (String) -> Void
+
+    private var canCreate: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: "新建歌单")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(PMColor.text)
+                    Text(verbatim: "PL-01")
+                        .font(.system(size: 11))
+                        .foregroundStyle(PMColor.textMuted)
+                }
+                Spacer()
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PMColor.textMuted)
+                        .frame(width: 26, height: 26)
+                        .background(PMColor.glassBtn, in: .circle)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+
+            Rectangle().fill(PMColor.divider).frame(height: 0.5)
+
+            VStack(alignment: .center, spacing: 16) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(PMColor.rowHover)
+                    .frame(width: 120, height: 120)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(PMColor.dividerStrong, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    }
+                    .overlay {
+                        VStack(spacing: 6) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 22, weight: .medium))
+                            Text(verbatim: "拖入封面")
+                                .font(.system(size: 10.5))
+                            Text(verbatim: "或用第一首歌")
+                                .font(.system(size: 9))
+                                .opacity(0.70)
+                        }
+                        .foregroundStyle(PMColor.textFaint)
+                    }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(verbatim: "名称")
+                        .font(.system(size: 11))
+                        .foregroundStyle(PMColor.textMuted)
+                    TextField("", text: $name, prompt: Text(verbatim: "深夜驾驶"))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(PMColor.text)
+                        .padding(.horizontal, 12)
+                        .frame(height: 34)
+                        .background(PMColor.bgElev, in: .rect(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(PMColor.brand, lineWidth: 1.5)
+                        }
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(verbatim: "描述(可选)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(PMColor.textMuted)
+                    TextEditor(text: $description)
+                        .font(.system(size: 12))
+                        .scrollContentBackground(.hidden)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(height: 64)
+                        .background(PMColor.bgElev, in: .rect(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(PMColor.dividerStrong, lineWidth: 0.5)
+                        }
+                }
+            }
+            .padding(20)
+
+            Spacer(minLength: 0)
+
+            Rectangle().fill(PMColor.divider).frame(height: 0.5)
+            HStack {
+                Spacer()
+                Button("取消", action: onCancel)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(PMColor.text)
+                    .padding(.horizontal, 14)
+                    .frame(height: 28)
+                    .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
+                Button("创建") {
+                    onCreate(name.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .frame(height: 28)
+                .background(canCreate ? PMColor.brand : PMColor.textFaint, in: .rect(cornerRadius: 6))
+                .disabled(!canCreate)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+        }
+        .frame(width: 420, height: 460)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(PMColor.bg.opacity(0.86))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
+        }
+    }
+}
+#endif

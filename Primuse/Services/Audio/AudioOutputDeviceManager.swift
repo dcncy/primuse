@@ -17,12 +17,33 @@ final class AudioOutputDeviceManager {
         let isAirPlay: Bool
         let isBluetooth: Bool
         let isBuiltIn: Bool
+        let nominalSampleRate: Double?
 
         var symbolName: String {
             if isAirPlay { return "airplayaudio" }
             if isBluetooth { return "headphones" }
             if isBuiltIn { return "hifispeaker" }
             return "speaker.wave.2"
+        }
+
+        var typeLabel: String {
+            if isAirPlay { return "AirPlay" }
+            if isBluetooth { return "Bluetooth" }
+            if isBuiltIn { return "Built-in" }
+            return "Core Audio"
+        }
+
+        var sampleRateText: String? {
+            guard let nominalSampleRate, nominalSampleRate > 0 else { return nil }
+            let khz = nominalSampleRate / 1_000
+            if khz.rounded() == khz {
+                return "\(Int(khz)) kHz"
+            }
+            return String(format: "%.1f kHz", khz)
+        }
+
+        var subtitle: String {
+            [typeLabel, sampleRateText].compactMap { $0 }.joined(separator: " · ")
         }
     }
 
@@ -67,13 +88,15 @@ final class AudioOutputDeviceManager {
             guard hasOutputStreams(deviceID: id) else { return nil }
             let name = readString(id: id, selector: kAudioObjectPropertyName) ?? "Device \(id)"
             let transport = readUInt32(id: id, selector: kAudioDevicePropertyTransportType) ?? 0
+            let nominalSampleRate = readDouble(id: id, selector: kAudioDevicePropertyNominalSampleRate)
             return Device(
                 id: id,
                 name: name,
                 isAirPlay: transport == kAudioDeviceTransportTypeAirPlay,
                 isBluetooth: transport == kAudioDeviceTransportTypeBluetooth ||
                              transport == kAudioDeviceTransportTypeBluetoothLE,
-                isBuiltIn: transport == kAudioDeviceTransportTypeBuiltIn
+                isBuiltIn: transport == kAudioDeviceTransportTypeBuiltIn,
+                nominalSampleRate: nominalSampleRate
             )
         }
     }
@@ -128,6 +151,18 @@ final class AudioOutputDeviceManager {
         )
         var value: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value)
+        return status == noErr ? value : nil
+    }
+
+    private func readDouble(id: AudioDeviceID, selector: AudioObjectPropertySelector) -> Double? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: Double = 0
+        var size = UInt32(MemoryLayout<Double>.size)
         let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value)
         return status == noErr ? value : nil
     }

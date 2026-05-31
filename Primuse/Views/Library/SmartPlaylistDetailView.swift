@@ -211,8 +211,42 @@ struct SmartPlaylistDetailView: View {
                 player.shuffleEnabled = true
                 playAll()
             },
-            onMore: { showEditor = true }
+            moreMenu: smartMoreMenu(smart)
         )
+    }
+
+    /// header 右上角"更多"菜单: 编辑规则 / 离线 / 删除。删除走这里 + 侧栏右键,
+    /// 不再放在规则编辑器弹框里。
+    private func smartMoreMenu(_ smart: SmartPlaylist) -> AnyView {
+        let playable = matched.filteredPlayable()
+        return AnyView(MacHeaderMoreMenu(sections: [
+            [
+                .init(icon: "play.fill", title: String(localized: "play_all"),
+                      enabled: !playable.isEmpty, action: playAll),
+                .init(icon: "shuffle", title: String(localized: "shuffle"),
+                      enabled: !playable.isEmpty) {
+                    player.shuffleEnabled = true
+                    playAll()
+                },
+            ],
+            [
+                .init(icon: "slider.horizontal.3", title: "编辑规则") { showEditor = true },
+                .init(icon: "arrow.down.circle", title: String(localized: "offline_download"),
+                      enabled: !playable.isEmpty) {
+                    sourceManager.downloadForOffline(songs: matched)
+                },
+            ],
+            [
+                .init(icon: "trash", title: String(localized: "delete"),
+                      isDestructive: true) { deleteSmart(smart) },
+            ],
+        ]))
+    }
+
+    private func deleteSmart(_ smart: SmartPlaylist) {
+        library.deleteSmartPlaylist(id: smart.id)
+        // 删完回到首页 (歌单总览页已移除), 同时清详情栈避免压着空详情。
+        NotificationCenter.default.post(name: .primuseSelectPlaylists, object: nil)
     }
 
     private func macRuleCard(_ smart: SmartPlaylist) -> some View {
@@ -251,22 +285,14 @@ struct SmartPlaylistDetailView: View {
     }
 
     private func macToolbar(_ smart: SmartPlaylist) -> some View {
+        // 只留"歌曲"小标题。下载 / 编辑入口都在上方: 编辑在"智能规则"卡片的
+        // "编辑规则"按钮, 下载/编辑/删除在 header 右上角"更多"菜单, 不再重复。
         HStack(spacing: 8) {
             Text("songs_count")
                 .font(.system(size: 11, weight: .semibold))
                 .textCase(.uppercase)
                 .foregroundStyle(PMColor.textFaint)
             Spacer()
-            PMRoundBtn(icon: "arrow.down.circle", size: 26, iconSize: 12, style: .glass,
-                       help: "offline_download") {
-                sourceManager.downloadForOffline(songs: matched)
-            }
-            .disabled(matched.filteredPlayable().isEmpty)
-
-            PMRoundBtn(icon: "slider.horizontal.3", size: 26, iconSize: 12, style: .glass,
-                       help: "edit") {
-                showEditor = true
-            }
         }
         .padding(.top, -2)
     }

@@ -26,6 +26,23 @@ struct ArtistDetailView: View {
         songs.count
     }
 
+    private var monthlyListenCount: Int {
+        let target = artist.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !target.isEmpty else { return 0 }
+        return PlayHistoryStore.shared.entries(in: .month).filter {
+            $0.artistName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == target
+        }.count
+    }
+
+    private var monthlyListenText: String {
+        "本月听 \(monthlyListenCount) 次"
+    }
+
+    private var playCountsBySongID: [String: Int] {
+        Dictionary(grouping: PlayHistoryStore.shared.entries, by: \.songID)
+            .mapValues(\.count)
+    }
+
     private let columns = [
         GridItem(.adaptive(minimum: 100), spacing: 12)
     ]
@@ -100,12 +117,12 @@ struct ArtistDetailView: View {
                         .foregroundStyle(Color.white.opacity(0.72))
 
                     Text(artist.name)
-                        .font(.system(size: 48, weight: .bold))
+                        .font(.system(size: 56, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.72)
 
-                    Text(verbatim: "\(visibleSongCount) \(String(localized: "songs_count")) · \(albums.count) \(String(localized: "albums_count"))")
+                    Text(verbatim: "\(visibleSongCount) \(String(localized: "songs_count")) · \(albums.count) \(String(localized: "albums_count")) · \(monthlyListenText)")
                         .font(.system(size: 13))
                         .foregroundStyle(Color.white.opacity(0.74))
                 }
@@ -165,7 +182,7 @@ struct ArtistDetailView: View {
             macSectionTitle(String(localized: "albums_section"))
 
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 18, alignment: .top)],
+                columns: Array(repeating: GridItem(.flexible(), spacing: 18, alignment: .top), count: 4),
                 alignment: .leading,
                 spacing: 22
             ) {
@@ -212,6 +229,12 @@ struct ArtistDetailView: View {
 
                 PMFormatPill.forFormat(song.fileFormat.displayName)
                     .frame(width: 70, alignment: .leading)
+
+                Text(verbatim: "\(playCountsBySongID[song.id, default: 0]) 次")
+                    .font(.system(size: 11, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(PMColor.textMuted)
+                    .frame(width: 54, alignment: .trailing)
 
                 Text(song.duration.formattedDuration)
                     .font(.system(size: 11, design: .monospaced))

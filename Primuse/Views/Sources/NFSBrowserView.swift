@@ -103,7 +103,7 @@ private struct NFSDirectoryBrowserView: View {
                     .padding(.horizontal, 40)
                     Spacer()
                 } else {
-                    directoryList
+                    browserContent
                 }
 
                 BrowserBottomBar(
@@ -168,6 +168,24 @@ private struct NFSDirectoryBrowserView: View {
             }
         }
         .directoryBrowserListStyle()
+    }
+
+    @ViewBuilder
+    private var browserContent: some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            directoryList
+            Rectangle().fill(PMColor.divider).frame(width: 0.5)
+            DirectoryPreviewPane(
+                title: displayName(for: currentPath),
+                path: displayBreadcrumb(for: currentPath).isEmpty ? currentPath : displayBreadcrumb(for: currentPath),
+                items: items,
+                selectedCount: selectedDirectories.count
+            )
+        }
+        #else
+        directoryList
+        #endif
     }
 
     private func enterDirectory(_ item: RemoteFileItem) {

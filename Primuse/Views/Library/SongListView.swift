@@ -1,11 +1,15 @@
 import SwiftUI
 import PrimuseKit
+#if os(macOS)
+import AppKit
+#endif
 
 struct SongListView: View {
     @Environment(AudioPlayerService.self) private var player
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
     @Environment(MusicLibrary.self) private var library
+    @Environment(MusicScraperService.self) private var scraperService
     let songs: [Song]
     @State private var sortOrder: SongSortOrder = .title
     @State private var cachedSortedSongs: [Song] = []
@@ -17,6 +21,20 @@ struct SongListView: View {
     /// trigger an O(N log N) re-sort on the main thread, and a 1k-song
     /// list mid-scan would be visibly stuttery.
     @State private var lastSortedIDSet: Set<String> = []
+    #if os(macOS)
+    @State private var macViewMode: MacSongsViewMode = .list
+    @State private var macRowDensity: MacSongsRowDensity = .standard
+    @State private var visibleColumns: Set<MacSongsColumn> = MacSongsColumn.defaultVisible
+    /// 当前选中的数据源过滤 (nil = 全部)。设计稿 SourceFilterChips 是可点切换的。
+    @State private var selectedSourceID: String? = nil
+    @State private var showViewOptions = false
+    @State private var showAddVisibleToPlaylist = false
+    @State private var contextSongID: String?
+    @State private var showContextAddToPlaylist = false
+    @State private var showContextSongInfo = false
+    @State private var showContextTagEditor = false
+    @State private var exportError: String?
+    #endif
 
     enum SongSortOrder: String, CaseIterable {
         case title, artist, album, dateAdded, format
@@ -32,11 +50,118 @@ struct SongListView: View {
         }
     }
 
+    #if os(macOS)
+    private enum MacSongsViewMode: String, CaseIterable, Hashable {
+        case list, compact, grid
+
+        var title: String {
+            switch self {
+            case .list: return "列表"
+            case .compact: return "紧凑"
+            case .grid: return "网格"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .list: return "list.bullet"
+            case .compact: return "text.justify"
+            case .grid: return "square.grid.3x3"
+            }
+        }
+    }
+
+    private enum MacSongsRowDensity: String, CaseIterable, Hashable {
+        case compact, standard, relaxed
+
+        var title: String {
+            switch self {
+            case .compact: return "紧凑"
+            case .standard: return "标准"
+            case .relaxed: return "宽松"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .compact: return "chevron.up"
+            case .standard: return "line.3.horizontal"
+            case .relaxed: return "chevron.down"
+            }
+        }
+
+        var verticalPadding: CGFloat {
+            switch self {
+            case .compact: return 3
+            case .standard: return 6
+            case .relaxed: return 10
+            }
+        }
+    }
+
+    private enum MacSongsColumn: String, CaseIterable, Hashable, Identifiable {
+        case artist, album, format, duration, plays, source, year, rating, dateAdded, bitRate
+
+        var id: String { rawValue }
+
+        static let defaultVisible: Set<MacSongsColumn> = [.artist, .album, .format, .duration, .plays, .source]
+
+        var title: String {
+            switch self {
+            case .artist: return "艺术家"
+            case .album: return "专辑"
+            case .format: return "格式 / 采样率"
+            case .duration: return "时长"
+            case .plays: return "播放次数"
+            case .source: return "源"
+            case .year: return "年份"
+            case .rating: return "评分"
+            case .dateAdded: return "日期添加"
+            case .bitRate: return "比特率"
+            }
+        }
+    }
+    #endif
+
     var body: some View {
         content
             .onAppear { recomputeSorted() }
             .onChange(of: sortOrder) { _, _ in recomputeSorted() }
             .onChange(of: songs) { _, _ in updateSortedSongsIfNeeded() }
+            #if os(macOS)
+            .sheet(isPresented: $showAddVisibleToPlaylist) {
+                MacAddVisibleSongsToPlaylistSheet(
+                    songs: filteredSongs.filteredPlayable(),
+                    onClose: { showAddVisibleToPlaylist = false }
+                )
+                .frame(width: 420, height: 520)
+            }
+            .sheet(isPresented: $showContextAddToPlaylist) {
+                if let song = selectedContextSong {
+                    AddToPlaylistSheet(song: song)
+                }
+            }
+            .sheet(isPresented: $showContextSongInfo) {
+                if let song = selectedContextSong {
+                    SongInfoSheet(song: song)
+                }
+            }
+            .sheet(isPresented: $showContextTagEditor) {
+                if let song = selectedContextSong {
+                    TagEditorView(song: song) { updated in
+                        player.syncSongMetadata(updated)
+                        player.forceRefreshNowPlayingArtwork()
+                    }
+                }
+            }
+            .alert("导出失败",
+                   isPresented: Binding(get: { exportError != nil },
+                                        set: { if !$0 { exportError = nil } })) {
+                Button("done", role: .cancel) {}
+            } message: {
+                Text(exportError ?? "")
+            }
+            #endif
     }
 
     @ViewBuilder
@@ -80,7 +205,8 @@ struct SongListView: View {
                     iconSystemName: "music.note",
                     coverSong: songs.first(where: { $0.coverArtFileName?.isEmpty == false }),
                     onPlay: { playLibrary(shuffled: false) },
-                    onShuffle: { playLibrary(shuffled: true) }
+                    onShuffle: { playLibrary(shuffled: true) },
+                    moreMenu: AnyView(listMoreMenu)
                 )
 
                 VStack(alignment: .leading, spacing: PMSpace.l) {
@@ -91,7 +217,7 @@ struct SongListView: View {
                         ContentUnavailableView.search(text: searchText)
                             .padding(.top, 48)
                     } else {
-                        songTable
+                        macSongsContent
                     }
                 }
                 .padding(.horizontal, PMSpace.xxxl)
@@ -105,12 +231,21 @@ struct SongListView: View {
     private var sourceFilterChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                sourceChip(title: String(localized: "search_chip_all"), count: songs.count, color: nil, active: true)
+                sourceChip(title: String(localized: "search_chip_all"),
+                           count: songs.count, color: nil,
+                           active: selectedSourceID == nil) {
+                    selectedSourceID = nil
+                }
 
                 ForEach(sourcesStore.allSources.prefix(5), id: \.id) { source in
                     let count = songs.filter { $0.sourceID == source.id }.count
                     if count > 0 {
-                        sourceChip(title: source.name, count: count, color: sourceColor(source), active: false)
+                        sourceChip(title: source.name, count: count,
+                                   color: sourceColor(source),
+                                   active: selectedSourceID == source.id) {
+                            // 再点一次已选中的源 = 取消过滤回到全部。
+                            selectedSourceID = (selectedSourceID == source.id) ? nil : source.id
+                        }
                     }
                 }
             }
@@ -118,27 +253,32 @@ struct SongListView: View {
         }
     }
 
-    private func sourceChip(title: String, count: Int, color: Color?, active: Bool) -> some View {
-        HStack(spacing: 6) {
-            if let color {
-                Circle()
-                    .fill(color)
-                    .frame(width: 6, height: 6)
+    private func sourceChip(title: String, count: Int, color: Color?, active: Bool,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let color {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 6, height: 6)
+                }
+                Text(verbatim: title)
+                    .lineLimit(1)
+                Text(verbatim: count.formatted())
+                    .monospacedDigit()
+                    .opacity(0.65)
             }
-            Text(verbatim: title)
-                .lineLimit(1)
-            Text(verbatim: count.formatted())
-                .monospacedDigit()
-                .opacity(0.65)
+            .font(.system(size: 11.5, weight: active ? .semibold : .medium))
+            .foregroundStyle(active ? .white : PMColor.text)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(active ? PMColor.brand : PMColor.glassBtn, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(active ? .clear : PMColor.cardBorder, lineWidth: 0.5)
+            }
+            .contentShape(Capsule())
         }
-        .font(.system(size: 11.5, weight: active ? .semibold : .medium))
-        .foregroundStyle(active ? .white : PMColor.text)
-        .padding(.horizontal, 10)
-        .frame(height: 24)
-        .background(active ? PMColor.brand : PMColor.glassBtn, in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(active ? .clear : PMColor.cardBorder, lineWidth: 0.5)
-        }
+        .buttonStyle(.plain)
     }
 
     private func sourceColor(_ source: MusicSource) -> Color {
@@ -202,17 +342,59 @@ struct SongListView: View {
                 }
             }
             .menuStyle(.borderlessButton)
+            // 自己画了 chevron.down, 隐藏系统 Menu 默认的小箭头, 否则两个箭头叠一起。
+            .menuIndicator(.hidden)
             .fixedSize()
 
-            PMRoundBtn(icon: "music.note.list", size: 26, iconSize: 12, style: .glass,
-                       help: "library_title") {}
+            viewModeSegment
+
+            PMRoundBtn(icon: "slider.horizontal.3", size: 26, iconSize: 12, style: .glass,
+                       help: "视图选项") {
+                showViewOptions.toggle()
+            }
+            .popover(isPresented: $showViewOptions, arrowEdge: .bottom) {
+                viewOptionsPopover
+            }
         }
         .padding(.top, -4)
+    }
+
+    private var viewModeSegment: some View {
+        HStack(spacing: 1) {
+            ForEach(MacSongsViewMode.allCases, id: \.self) { mode in
+                Button {
+                    macViewMode = mode
+                } label: {
+                    Image(systemName: mode.icon)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(macViewMode == mode ? PMColor.brand : PMColor.textMuted)
+                        .frame(width: 26, height: 22)
+                        .background(macViewMode == mode ? PMColor.bgElev : .clear, in: .rect(cornerRadius: 5))
+                        .shadow(color: macViewMode == mode ? .black.opacity(0.12) : .clear, radius: 2, y: 1)
+                }
+                .buttonStyle(.plain)
+                .help(Text(verbatim: mode.title))
+            }
+        }
+        .padding(2)
+        .background(PMColor.glassBtn, in: .rect(cornerRadius: 7))
     }
 
     private var librarySubtitle: String {
         let playableCount = songs.filter(\.isPlayable).count
         return "\(songs.count) \(String(localized: "songs_count")) · \(playableCount) \(String(localized: "home_playable")) · \(totalDuration.formattedShort)"
+    }
+
+    @ViewBuilder
+    private var macSongsContent: some View {
+        switch macViewMode {
+        case .list:
+            songTable
+        case .compact:
+            compactSongList
+        case .grid:
+            songGrid
+        }
     }
 
     private var songTable: some View {
@@ -242,12 +424,36 @@ struct SongListView: View {
             // 3 个 flex 列等分 — 之前 artist 加 layoutPriority(0.2) 反而导致 SwiftUI
             // 把所有 flexible 空间全分给它, title / album 被压成 0 宽显示空。
             Text("sort_title").frame(maxWidth: .infinity, alignment: .leading)
-            Text("sort_artist").frame(maxWidth: .infinity, alignment: .leading)
-            Text("sort_album").frame(maxWidth: .infinity, alignment: .leading)
-            Text("sort_format").frame(width: 100, alignment: .leading)
-            Text("track_duration_short").frame(width: 80, alignment: .trailing)
-            Text("home_playable_count_short").frame(width: 80, alignment: .trailing)
-            Text("source").frame(width: 60, alignment: .leading)
+            if visibleColumns.contains(.artist) {
+                Text("sort_artist").frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if visibleColumns.contains(.album) {
+                Text("sort_album").frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if visibleColumns.contains(.format) {
+                Text("sort_format").frame(width: 100, alignment: .leading)
+            }
+            if visibleColumns.contains(.duration) {
+                Text("track_duration_short").frame(width: 80, alignment: .trailing)
+            }
+            if visibleColumns.contains(.plays) {
+                Text("home_playable_count_short").frame(width: 80, alignment: .trailing)
+            }
+            if visibleColumns.contains(.source) {
+                Text("source").frame(width: 60, alignment: .leading)
+            }
+            if visibleColumns.contains(.year) {
+                Text("year_label").frame(width: 54, alignment: .trailing)
+            }
+            if visibleColumns.contains(.rating) {
+                Text("rating").frame(width: 54, alignment: .trailing)
+            }
+            if visibleColumns.contains(.dateAdded) {
+                Text("sort_date_added").frame(width: 92, alignment: .trailing)
+            }
+            if visibleColumns.contains(.bitRate) {
+                Text("Bitrate").frame(width: 70, alignment: .trailing)
+            }
         }
         .font(.system(size: 10.5, weight: .semibold))
         .tracking(0.6)
@@ -309,84 +515,578 @@ struct SongListView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                // Artist
-                Text(song.artistName ?? "—")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(PMColor.textMuted)
+                if visibleColumns.contains(.artist) {
+                    Text(song.artistName ?? "—")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(PMColor.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if visibleColumns.contains(.album) {
+                    Text(song.albumTitle ?? "—")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(PMColor.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if visibleColumns.contains(.format) {
+                    HStack(spacing: 6) {
+                        PMFormatPill.forFormat(song.fileFormat.displayName)
+                        if let sr = song.sampleRate, sr > 0 {
+                            Text(verbatim: "\(sr / 1000)k")
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundStyle(PMColor.textFaint)
+                        }
+                    }
+                    .frame(width: 100, alignment: .leading)
+                }
+
+                if visibleColumns.contains(.duration) {
+                    Text(song.duration.formattedDuration)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(PMColor.textMuted)
+                        .frame(width: 80, alignment: .trailing)
+                }
+
+                if visibleColumns.contains(.plays) {
+                    playCountText(plays)
+                        .frame(width: 80, alignment: .trailing)
+                }
+
+                if visibleColumns.contains(.source) {
+                    sourceCell(source)
+                        .frame(width: 60, alignment: .leading)
+                }
+
+                if visibleColumns.contains(.year) {
+                    Text(song.year.map(String.init) ?? "—")
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(PMColor.textMuted)
+                        .frame(width: 54, alignment: .trailing)
+                }
+
+                if visibleColumns.contains(.rating) {
+                    Text(verbatim: "—")
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(PMColor.textFaint)
+                        .frame(width: 54, alignment: .trailing)
+                }
+
+                if visibleColumns.contains(.dateAdded) {
+                    Text(song.dateAdded, style: .date)
+                        .font(.system(size: 11))
+                        .foregroundStyle(PMColor.textMuted)
+                        .lineLimit(1)
+                        .frame(width: 92, alignment: .trailing)
+                }
+
+                if visibleColumns.contains(.bitRate) {
+                    Text(song.bitRate.map { "\($0 / 1000)k" } ?? "—")
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(PMColor.textMuted)
+                        .frame(width: 70, alignment: .trailing)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, macRowDensity.verticalPadding)
+            .pmRowBackground(selected: isCurrent)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu { macSongContextMenu(for: song) }
+    }
+
+    /// 用源类型 hash 出稳定彩色点 (跟 sidebar 同算法)。
+    @ViewBuilder
+    private func playCountText(_ plays: Int) -> some View {
+        if plays > 0 {
+            Text("\(plays)")
+                .font(.system(size: 11.5, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(PMColor.textMuted)
+        } else {
+            Text(verbatim: "—")
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(PMColor.textFaint)
+        }
+    }
+
+    private func sourceCell(_ source: MusicSource?) -> some View {
+        HStack(spacing: 5) {
+            if let source {
+                Circle()
+                    .fill(macSourceDotColor(for: source))
+                    .frame(width: 6, height: 6)
+                Text(verbatim: source.name.components(separatedBy: "·").first?
+                    .trimmingCharacters(in: .whitespaces) ?? source.name)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(PMColor.textFaint)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(verbatim: "—")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(PMColor.textFaint)
+            }
+        }
+    }
 
-                // Album
-                Text(song.albumTitle ?? "—")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(PMColor.textMuted)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    private var compactSongList: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(Array(filteredSongs.enumerated()), id: \.element.id) { index, song in
+                compactSongRow(song, index: index)
+            }
+        }
+        .padding(.top, 8)
+    }
 
-                // Format pill + sample rate
-                HStack(spacing: 6) {
-                    PMFormatPill.forFormat(song.fileFormat.displayName)
-                    if let sr = song.sampleRate, sr > 0 {
-                        Text(verbatim: "\(sr / 1000)k")
+    private func compactSongRow(_ song: Song, index: Int) -> some View {
+        let isCurrent = player.currentSong?.id == song.id
+        return Button { playSong(song) } label: {
+            HStack(spacing: 12) {
+                ZStack(alignment: .leading) {
+                    if isCurrent {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(PMColor.brand)
+                    } else {
+                        Text("\(index + 1)")
                             .font(.system(size: 10.5, design: .monospaced))
                             .foregroundStyle(PMColor.textFaint)
                     }
                 }
-                .frame(width: 100, alignment: .leading)
+                .frame(width: 28, alignment: .leading)
 
-                // Duration
-                Text(song.duration.formattedDuration)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .monospacedDigit()
-                    .foregroundStyle(PMColor.textMuted)
-                    .frame(width: 80, alignment: .trailing)
-
-                // Plays
-                Group {
-                    if plays > 0 {
-                        Text("\(plays)")
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .monospacedDigit()
-                            .foregroundStyle(PMColor.textMuted)
-                    } else {
-                        Text(verbatim: "—")
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundStyle(PMColor.textFaint)
-                    }
-                }
-                .frame(width: 80, alignment: .trailing)
-
-                // Source (color dot + short name)
                 HStack(spacing: 5) {
-                    if let source {
-                        Circle()
-                            .fill(macSourceDotColor(for: source))
-                            .frame(width: 6, height: 6)
-                        Text(verbatim: source.name.components(separatedBy: "·").first?
-                            .trimmingCharacters(in: .whitespaces) ?? source.name)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(PMColor.textFaint)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    } else {
-                        Text(verbatim: "—")
-                            .font(.system(size: 10.5))
+                    Text(song.title)
+                        .font(.system(size: 12, weight: isCurrent ? .semibold : .medium))
+                        .foregroundStyle(isCurrent ? PMColor.brand : PMColor.text)
+                        .lineLimit(1)
+                    if playlistContains(song) {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(PMColor.brand)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(song.artistName ?? "—")
+                    .font(.system(size: 12))
+                    .foregroundStyle(PMColor.textMuted)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 4) {
+                    PMFormatPill.forFormat(song.fileFormat.displayName)
+                    if let sr = song.sampleRate, sr > 0 {
+                        Text(verbatim: "\(sr / 1000)k")
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(PMColor.textFaint)
                     }
                 }
-                .frame(width: 60, alignment: .leading)
+                .frame(width: 80, alignment: .leading)
+
+                Text(song.duration.formattedDuration)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(PMColor.textMuted)
+                    .frame(width: 70, alignment: .trailing)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(isCurrent ? PMColor.brand.opacity(0.16) : .clear, in: .rect(cornerRadius: 4))
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(PMColor.divider).frame(height: 0.5)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu { macSongContextMenu(for: song) }
+    }
+
+    private var songGrid: some View {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 20), count: 6),
+            alignment: .leading,
+            spacing: 20
+        ) {
+            ForEach(Array(filteredSongs.enumerated()), id: \.element.id) { index, song in
+                songGridTile(song, highlighted: player.currentSong?.id == song.id || index == 7)
+            }
+        }
+        .padding(.top, 12)
+    }
+
+    private func songGridTile(_ song: Song, highlighted: Bool) -> some View {
+        Button { playSong(song) } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .bottomTrailing) {
+                    CachedArtworkView(
+                        coverRef: song.coverArtFileName,
+                        songID: song.id,
+                        cornerRadius: 8,
+                        sourceID: song.sourceID,
+                        filePath: song.filePath
+                    )
+                    .aspectRatio(1, contentMode: .fit)
+
+                    if highlighted {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .background(PMColor.brand, in: .circle)
+                            .shadow(color: .black.opacity(0.30), radius: 8, y: 2)
+                            .padding(8)
+                    }
+                }
+
+                Text(song.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(highlighted ? PMColor.brand : PMColor.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.top, 8)
+
+                Text(song.artistName ?? "—")
+                    .font(.system(size: 11))
+                    .foregroundStyle(PMColor.textMuted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.top, 2)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu { macSongContextMenu(for: song) }
+    }
+
+    private var selectedContextSong: Song? {
+        guard let contextSongID else { return nil }
+        return library.songs.first { $0.id == contextSongID }
+    }
+
+    @ViewBuilder
+    private func macSongContextMenu(for song: Song) -> some View {
+        Section {
+            Button {
+                playSong(song)
+            } label: {
+                Label(String(localized: "play"), systemImage: "play.fill")
+            }
+            .disabled(!song.isPlayable)
+
+            Button {
+                player.insertNextInQueue([song])
+            } label: {
+                Label("插入下一首", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            .disabled(!song.isPlayable)
+
+            Button {
+                player.appendToQueue([song])
+            } label: {
+                Label(String(localized: "add_to_queue"), systemImage: "text.badge.plus")
+            }
+            .disabled(!song.isPlayable)
+        }
+
+        Section {
+            Button {
+                showSongInfo(for: song)
+            } label: {
+                Label(String(localized: "song_info"), systemImage: "info.circle")
+            }
+
+            Button {
+                editTags(for: song)
+            } label: {
+                Label(String(localized: "tag_editor_menu"), systemImage: "tag")
+            }
+
+            Button {
+                openScrapeWindow(for: song)
+            } label: {
+                Label(String(localized: "scrape_song"), systemImage: "wand.and.stars")
+            }
+
+            Button {
+                addToPlaylist(song)
+            } label: {
+                Label(String(localized: "add_to_playlist"), systemImage: "text.badge.plus")
+            }
+        }
+
+        Section {
+            Button {
+                library.toggleLiked(songID: song.id)
+            } label: {
+                Label(library.isLiked(songID: song.id) ? String(localized: "a11y_unlike") : String(localized: "a11y_like"),
+                      systemImage: library.isLiked(songID: song.id) ? "heart.fill" : "heart")
+            }
+
+            ShareLink(item: "\(song.title) - \(song.artistName ?? "")") {
+                Label(String(localized: "share"), systemImage: "square.and.arrow.up")
+            }
+        }
+    }
+
+    private func latestSong(_ song: Song) -> Song {
+        library.songs.first { $0.id == song.id } ?? song
+    }
+
+    private func selectContextSong(_ song: Song) {
+        contextSongID = song.id
+    }
+
+    private func showSongInfo(for song: Song) {
+        selectContextSong(song)
+        showContextSongInfo = true
+    }
+
+    private func editTags(for song: Song) {
+        selectContextSong(song)
+        showContextTagEditor = true
+    }
+
+    private func addToPlaylist(_ song: Song) {
+        selectContextSong(song)
+        showContextAddToPlaylist = true
+    }
+
+    private func openScrapeWindow(for song: Song) {
+        let song = latestSong(song)
+        ScrapeWindowController.shared.show(song: song) { updated in
+            CachedArtworkView.invalidateCache(for: updated.id)
+            if let oldRef = song.coverArtFileName {
+                CachedArtworkView.invalidateCache(for: oldRef)
+            }
+            player.syncSongMetadata(updated)
+            player.forceRefreshNowPlayingArtwork()
+        }
+    }
+
+    private var listMoreMenu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            listMenuGroup {
+                listMenuRow(icon: "text.line.first.and.arrowtriangle.forward",
+                            title: "全部加入队列",
+                            trailing: visiblePlayableSongs.count.formatted()) {
+                    player.appendToQueue(visiblePlayableSongs)
+                }
+                listMenuRow(icon: "text.line.first.and.arrowtriangle.forward",
+                            title: "插入下一首") {
+                    player.insertNextInQueue(visiblePlayableSongs)
+                }
+                listMenuRow(icon: "text.badge.plus",
+                            title: "加入歌单…") {
+                    showAddVisibleToPlaylist = true
+                }
+            }
+            listMenuDivider()
+            listMenuGroup {
+                listMenuRow(icon: "checklist", title: "选择…", trailing: "多选") {}
+                listMenuRow(icon: "shuffle", title: "随机全部") {
+                    playLibrary(shuffled: true)
+                }
+            }
+            listMenuDivider()
+            listMenuGroup {
+                listMenuRow(icon: "tag", title: "批量刮削缺失元数据", trailing: "META-06") {
+                    scraperService.scrapeMissingMetadata(in: library)
+                }
+                listMenuRow(icon: "square.and.arrow.up", title: "导出 M3U8…", trailing: "PL-07") {
+                    exportVisibleSongs(format: .m3u8)
+                }
+                listMenuRow(icon: "curlybraces", title: "导出 JSON…") {
+                    exportVisibleSongs(format: .json)
+                }
+            }
+            listMenuDivider()
+            listMenuGroup {
+                listMenuRow(icon: "list.bullet.rectangle", title: "列显示设置…", trailing: "›") {
+                    showViewOptions = true
+                }
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(width: 260)
+    }
+
+    private func listMenuGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }
+    }
+
+    private func listMenuDivider() -> some View {
+        Rectangle()
+            .fill(PMColor.divider)
+            .frame(height: 0.5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+    }
+
+    private func listMenuRow(icon: String, title: String, trailing: String? = nil, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(PMColor.textMuted)
+                    .frame(width: 14)
+                Text(verbatim: title)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(PMColor.text)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let trailing {
+                    Text(verbatim: trailing)
+                        .font(.system(size: trailing.contains("-") ? 9.5 : 10.5, design: trailing.contains("-") ? .monospaced : .default))
+                        .foregroundStyle(PMColor.textFaint)
+                        .lineLimit(1)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .pmRowBackground(selected: isCurrent)
+            .pmRowBackground(cornerRadius: 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// 用源类型 hash 出稳定彩色点 (跟 sidebar 同算法)。
+    private var viewOptionsPopover: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(verbatim: "视图选项")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(PMColor.text)
+
+            viewOptionsSection("显示方式") {
+                segmentedIconPicker(MacSongsViewMode.allCases, selection: $macViewMode)
+            }
+
+            // 行高 / 显示列 只作用于「列表」视图 (紧凑、网格是固定密排布局, 不吃这些
+            // 设置)。在别的模式下隐藏, 免得勾了列却不生效、看着对不上。
+            if macViewMode == .list {
+                viewOptionsSection("行高") {
+                    segmentedIconPicker(MacSongsRowDensity.allCases, selection: $macRowDensity)
+                }
+
+                viewOptionsSection("显示列") {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(MacSongsColumn.allCases) { column in
+                            Button {
+                                if visibleColumns.contains(column) {
+                                    visibleColumns.remove(column)
+                                } else {
+                                    visibleColumns.insert(column)
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                            .fill(visibleColumns.contains(column) ? PMColor.brand : .clear)
+                                            .frame(width: 14, height: 14)
+                                            .overlay {
+                                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                                    .strokeBorder(visibleColumns.contains(column) ? .clear : PMColor.dividerStrong, lineWidth: 1.5)
+                                            }
+                                        if visibleColumns.contains(column) {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 8.5, weight: .bold))
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
+                                    Text(verbatim: column.title)
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(visibleColumns.contains(column) ? PMColor.text : PMColor.textMuted)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                // 整行 (含复选框本身) 都可点, 不必非点中文字。
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 280)
+        // 系统 popover 的半透材质叠在内容后面会让白色选中块显得过亮 / 发灰;
+        // 铺一层 flat 不透明底 (不画圆角边框, 系统 chrome 会裁圆角, 不会双框),
+        // 选中块就跟工具栏里的视图切换一样是"米色上一块白"的柔和效果。
+        .background(PMColor.bg)
+    }
+
+    private func viewOptionsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(verbatim: title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .tracking(0.6)
+                .textCase(.uppercase)
+                .foregroundStyle(PMColor.textFaint)
+            content()
+        }
+    }
+
+    private func segmentedIconPicker<T: CaseIterable & Hashable>(_ values: T.AllCases, selection: Binding<T>) -> some View where T.AllCases: RandomAccessCollection {
+        HStack(spacing: 2) {
+            ForEach(Array(values), id: \.self) { value in
+                let item = segmentInfo(for: value)
+                Button {
+                    selection.wrappedValue = value
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 13, weight: .medium))
+                        Text(verbatim: item.title)
+                            .font(.system(size: 9, weight: selection.wrappedValue == value ? .semibold : .medium))
+                    }
+                    .foregroundStyle(selection.wrappedValue == value ? PMColor.brand : PMColor.textMuted)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 30)
+                    .background(selection.wrappedValue == value ? PMColor.bgElev : .clear, in: .rect(cornerRadius: 6))
+                    .shadow(color: selection.wrappedValue == value ? .black.opacity(0.12) : .clear, radius: 2, y: 1)
+                    // 整段都可点选, 而不是只点中图标/文字才生效。
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(PMColor.glassBtn, in: .rect(cornerRadius: 8))
+    }
+
+    private func segmentInfo<T>(for value: T) -> (title: String, icon: String) {
+        if let mode = value as? MacSongsViewMode { return (mode.title, mode.icon) }
+        if let density = value as? MacSongsRowDensity { return (density.title, density.icon) }
+        return ("", "circle")
+    }
+
+    private var visiblePlayableSongs: [Song] {
+        filteredSongs.filteredPlayable()
+    }
+
+    private func exportVisibleSongs(format: PlaylistExporter.Format) {
+        do {
+            let playlist = Playlist(name: String(localized: "tab_songs"))
+            let url = try PlaylistExporter.export(
+                playlist: playlist,
+                songs: visiblePlayableSongs,
+                format: format,
+                sourcesStore: sourcesStore
+            )
+            try PlaylistExporter.presentSavePanel(for: url)
+        } catch {
+            exportError = error.localizedDescription
+        }
+    }
+
     private func macSourceDotColor(for source: MusicSource) -> Color {
         let palette: [Color] = [
             PMColor.flac, PMColor.dsd, PMColor.warn, PMColor.brand,
@@ -447,9 +1147,15 @@ struct SongListView: View {
     /// 当前用搜索过滤后的歌曲列表;空字符串时返回完整 cachedSortedSongs。
     /// 大小写无关,匹配标题/艺术家/专辑任一字段。
     private var filteredSongs: [Song] {
+        var base = cachedSortedSongs
+        #if os(macOS)
+        if let selectedSourceID {
+            base = base.filter { $0.sourceID == selectedSourceID }
+        }
+        #endif
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return cachedSortedSongs }
-        return cachedSortedSongs.filter {
+        guard !q.isEmpty else { return base }
+        return base.filter {
             $0.title.localizedCaseInsensitiveContains(q)
             || ($0.artistName?.localizedCaseInsensitiveContains(q) ?? false)
             || ($0.albumTitle?.localizedCaseInsensitiveContains(q) ?? false)
@@ -529,3 +1235,157 @@ struct SongListView: View {
         Task { await player.play(song: song) }
     }
 }
+
+#if os(macOS)
+private struct MacAddVisibleSongsToPlaylistSheet: View {
+    let songs: [Song]
+    let onClose: () -> Void
+
+    @Environment(MusicLibrary.self) private var library
+    @State private var selectedPlaylistID: String?
+    @State private var newPlaylistName = ""
+
+    private var normalPlaylists: [Playlist] {
+        library.playlists.filter {
+            !AppleMusicLibraryService.isAppleMusicMirrorPlaylist($0.id)
+            && $0.id != MusicLibrary.likedSongsPlaylistID
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "text.badge.plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(PMColor.brand)
+                    .frame(width: 34, height: 34)
+                    .background(PMColor.brand.opacity(0.14), in: .rect(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: "加入歌单")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(PMColor.text)
+                    Text(verbatim: "\(songs.count.formatted()) 首可播放歌曲")
+                        .font(PMFont.caption)
+                        .foregroundStyle(PMColor.textMuted)
+                }
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PMColor.textMuted)
+                        .frame(width: 26, height: 26)
+                        .background(PMColor.glassBtn, in: .circle)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(18)
+
+            Rectangle().fill(PMColor.divider).frame(height: 0.5)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if normalPlaylists.isEmpty {
+                        Text(verbatim: "还没有普通歌单, 可以直接在下方新建。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(PMColor.textMuted)
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(PMColor.bgElev, in: .rect(cornerRadius: 10))
+                    } else {
+                        ForEach(normalPlaylists) { playlist in
+                            Button {
+                                selectedPlaylistID = playlist.id
+                            } label: {
+                                HStack(spacing: 10) {
+                                    StoredCoverArtView(fileName: playlist.coverArtPath, size: 34, cornerRadius: 6)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(verbatim: playlist.name)
+                                            .font(.system(size: 12.5, weight: .semibold))
+                                            .foregroundStyle(PMColor.text)
+                                            .lineLimit(1)
+                                        Text("\(library.songs(forPlaylist: playlist.id).count) \(String(localized: "songs_count"))")
+                                            .font(.system(size: 10.5))
+                                            .foregroundStyle(PMColor.textFaint)
+                                    }
+                                    Spacer()
+                                    if selectedPlaylistID == playlist.id {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(PMColor.brand)
+                                    }
+                                }
+                                .padding(10)
+                                .background(selectedPlaylistID == playlist.id ? PMColor.brand.opacity(0.12) : PMColor.bgElev, in: .rect(cornerRadius: 9))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .strokeBorder(selectedPlaylistID == playlist.id ? PMColor.brand.opacity(0.6) : PMColor.cardBorder, lineWidth: 0.5)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(verbatim: "新建歌单")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(PMColor.textFaint)
+                        TextField("playlist_name", text: $newPlaylistName)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12.5))
+                            .padding(.horizontal, 10)
+                            .frame(height: 30)
+                            .background(PMColor.bgElev, in: .rect(cornerRadius: 7))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
+                            }
+                    }
+                }
+                .padding(18)
+            }
+
+            Rectangle().fill(PMColor.divider).frame(height: 0.5)
+            HStack {
+                Spacer()
+                Button("cancel", action: onClose)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(PMColor.text)
+                    .padding(.horizontal, 14)
+                    .frame(height: 28)
+                    .background(PMColor.glassBtn, in: .rect(cornerRadius: 6))
+                Button("加入") {
+                    addSongs()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .frame(height: 28)
+                .background(canCommit ? PMColor.brand : PMColor.textFaint, in: .rect(cornerRadius: 6))
+                .disabled(!canCommit)
+            }
+            .padding(18)
+        }
+        .background(PMColor.bg)
+    }
+
+    private var canCommit: Bool {
+        selectedPlaylistID != nil || !newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func addSongs() {
+        let targetID: String
+        if let selectedPlaylistID {
+            targetID = selectedPlaylistID
+        } else {
+            let name = newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return }
+            targetID = library.createPlaylist(name: name).id
+        }
+        for song in songs {
+            library.add(songID: song.id, toPlaylist: targetID)
+        }
+        onClose()
+    }
+}
+#endif

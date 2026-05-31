@@ -125,7 +125,7 @@ struct AlbumDetailView: View {
                     coverSong: songs.first(where: { $0.coverArtFileName?.isEmpty == false }) ?? songs.first,
                     onPlay: playAll,
                     onShuffle: shuffleAll,
-                    onMore: { sourceManager.downloadForOffline(songs: songs) }
+                    moreMenu: albumMoreMenu
                 )
 
                 VStack(alignment: .leading, spacing: PMSpace.l) {
@@ -151,6 +151,38 @@ struct AlbumDetailView: View {
         }
         .background(PMColor.bg.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// header 右上角"更多"按钮的菜单内容。播放 / 队列 / 离线 / 前往艺术家。
+    private var albumMoreMenu: AnyView {
+        let playable = songs.filteredPlayable()
+
+        var second: [MacHeaderMoreMenu.Item] = [
+            .init(icon: "arrow.down.circle", title: "离线下载", enabled: !playable.isEmpty) {
+                sourceManager.downloadForOffline(songs: songs)
+            },
+        ]
+        if let artist = albumArtist {
+            second.append(.init(icon: "music.mic", title: "前往艺术家") {
+                NotificationCenter.default.post(name: .primuseDetailOpenArtist, object: artist)
+            })
+        }
+
+        return AnyView(MacHeaderMoreMenu(sections: [
+            [
+                .init(icon: "play.fill", title: "播放全部", enabled: !playable.isEmpty, action: playAll),
+                .init(icon: "shuffle", title: "随机播放", enabled: !playable.isEmpty, action: shuffleAll),
+                .init(icon: "text.line.last.and.arrowtriangle.forward", title: "加入播放队列",
+                      enabled: !playable.isEmpty) { player.appendToQueue(playable) },
+                .init(icon: "text.line.first.and.arrowtriangle.forward", title: "下一首播放",
+                      enabled: !playable.isEmpty) { player.insertNextInQueue(playable) },
+            ],
+            second,
+        ]))
+    }
+
+    private var albumArtist: Artist? {
+        library.artists.first { $0.id == album.artistID || $0.name == album.artistName }
     }
 
     private var albumSubtitle: String {

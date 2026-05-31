@@ -59,7 +59,7 @@ struct CloudDriveConnectionView: View {
                 }
             }
             #if os(macOS)
-            .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 480)
+            .frame(minWidth: 560, idealWidth: 620, minHeight: 500, idealHeight: 560)
             #endif
             .onAppear { checkStatus() }
         }
@@ -239,18 +239,102 @@ struct CloudDriveConnectionView: View {
     // MARK: - Authorizing View
 
     private var authorizingView: some View {
-        VStack(spacing: 20) {
-            Spacer()
-            ProgressView().scaleEffect(1.3)
-            VStack(spacing: 6) {
-                Text("正在授权…")
-                    .font(.headline)
-                Text("请在弹出的浏览器中完成登录")
-                    .font(.subheadline)
+        VStack(spacing: 22) {
+            Spacer(minLength: 18)
+
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.14))
+                Image(systemName: cloudIcon)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(width: 72, height: 72)
+
+            VStack(spacing: 7) {
+                Text("\(source.type.displayName) · 授权")
+                    .font(.title3.weight(.semibold))
+                Text("等待系统浏览器返回授权码…")
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("授权步骤")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                oauthStep(number: 1, text: "已在系统浏览器打开 \(oauthProviderHost)")
+                oauthStep(number: 2, text: "登录账号并确认读取音乐文件权限")
+                oauthStep(number: 3, text: "浏览器重定向到 \(oauthCallbackDisplay)")
+                oauthStep(number: 4, text: "猿音接收回调并保存访问令牌")
+            }
+            .padding(18)
+            .frame(maxWidth: 430, alignment: .leading)
+            .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(.quaternary, lineWidth: 0.5)
+            }
+
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("正在监听 URL Scheme · \(oauthBridgeDisplay)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            .background(.quaternary.opacity(0.22), in: .capsule)
+
+            Text("授权完成后此窗口会自动进入目录浏览器。请不要关闭系统浏览器中的回调页。")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+
+            Spacer(minLength: 18)
         }
+        .padding(.horizontal, 34)
+    }
+
+    private func oauthStep(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "\(number).circle.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .padding(.top, 1)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var oauthProviderHost: String {
+        switch source.type {
+        case .baiduPan: return "pan.baidu.com"
+        case .aliyunDrive: return "open.aliyundrive.com"
+        case .googleDrive: return "accounts.google.com"
+        case .oneDrive: return "login.microsoftonline.com"
+        case .dropbox: return "dropbox.com"
+        default: return "授权服务"
+        }
+    }
+
+    private var oauthCallbackDisplay: String {
+        "\(CloudOAuthConfig.callbackScheme)://callback"
+    }
+
+    private var oauthBridgeDisplay: String {
+        #if os(macOS)
+        "MacOAuthBridge.shared"
+        #else
+        "OAuth URL Scheme"
+        #endif
     }
 
     // MARK: - Failed View

@@ -54,6 +54,7 @@ struct AudioOutputPickerView: View {
                 deviceRow(
                     title: String(localized: "audio_output_follow_system"),
                     symbol: "checkmark.circle",
+                    subtitle: systemDefaultSubtitle,
                     isSelected: followsSystem,
                     accent: nil
                 ) {
@@ -73,6 +74,7 @@ struct AudioOutputPickerView: View {
                     deviceRow(
                         title: device.name,
                         symbol: device.symbolName,
+                        subtitle: device.subtitle,
                         isSelected: !followsSystem && selectedID == device.id,
                         accent: device.isAirPlay ? .accentColor : nil
                     ) {
@@ -106,7 +108,15 @@ struct AudioOutputPickerView: View {
         }
     }
 
-    private func deviceRow(title: String, symbol: String, isSelected: Bool,
+    private var systemDefaultSubtitle: String {
+        if let id = manager.systemDefaultID,
+           let device = manager.devices.first(where: { $0.id == id }) {
+            return "\(device.name) · \(device.subtitle)"
+        }
+        return "System Default · Core Audio"
+    }
+
+    private func deviceRow(title: String, symbol: String, subtitle: String?, isSelected: Bool,
                            accent: Color?, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
@@ -114,10 +124,18 @@ struct AudioOutputPickerView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(accent ?? PMColor.textMuted)
                     .frame(width: 20)
-                Text(title)
-                    .font(.callout)
-                    .foregroundStyle(PMColor.text)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.callout)
+                        .foregroundStyle(PMColor.text)
+                        .lineLimit(1)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(verbatim: subtitle)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(PMColor.textMuted)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark")

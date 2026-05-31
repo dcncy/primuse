@@ -37,6 +37,17 @@ struct MacDetailContainer: View {
         .onReceive(NotificationCenter.default.publisher(for: .primuseDetailGoBack)) { _ in
             if !path.isEmpty { path.removeLast() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .primuseSelectPlaylists)) { _ in
+            // 删除当前歌单后跳「歌单」总览。若这张歌单是 push 进来的 (从总览点入),
+            // 选中路由没变, onChange 不触发, 详情栈里还压着它的空详情 — 这里主动
+            // 清栈, 保证回到干净的总览。
+            guard !path.isEmpty else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                path = NavigationPath()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .primuseDetailOpenAlbum)) { note in
             guard let album = note.object as? Album else { return }
             pushAlbum(album)
@@ -57,15 +68,6 @@ struct MacDetailContainer: View {
         case .sources:
             MacSourcesView()
                 .navigationTitle("sources_title")
-        case .playlistImport:
-            PlaylistImportView()
-                .navigationTitle("playlist_import_title")
-        case .duplicates:
-            DuplicateSongsView()
-                .navigationTitle("dup_title")
-        case .scrobble:
-            ScrobbleSettingsView()
-                .navigationTitle("scrobble_title")
         case .search:
             SearchView(searchText: $searchText)
                 .navigationTitle("search_title")
@@ -93,6 +95,9 @@ struct MacDetailContainer: View {
         case .playlist(let playlist):
             PlaylistDetailView(playlist: playlist)
                 .navigationTitle(Text(verbatim: playlist.name))
+        case .smartPlaylist(let smart):
+            SmartPlaylistDetailView(smartPlaylistID: smart.id)
+                .navigationTitle(Text(verbatim: smart.name))
         case .source(let id):
             // Sources don't yet have a per-source detail view — for now
             // route the click to the songs filtered by that source.

@@ -39,7 +39,6 @@ final class ScrapeWindowController: NSObject, NSWindowDelegate {
         win.titlebarAppearsTransparent = true
         win.toolbar = nil
         win.backgroundColor = .clear
-        win.isMovableByWindowBackground = true
         // 兜底最小尺寸, 防止 autosave 还原出一个过窄的窗口把三栏挤裂
         // (三栏硬最小宽 ≈ 906, 取 920 留点余量)。
         win.minSize = NSSize(width: 920, height: 560)
@@ -118,7 +117,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         win.titlebarAppearsTransparent = true
         win.toolbar = nil
         win.backgroundColor = .clear
-        win.isMovableByWindowBackground = true
         win.minSize = NSSize(width: 940, height: 680)
         [
             NSWindow.ButtonType.closeButton,

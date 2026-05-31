@@ -29,11 +29,17 @@ struct SearchView: View {
     @State private var searchGeneration: Int = 0
 
     var body: some View {
-        NavigationStack {
+        // macOS: 不再自带 NavigationStack —— SearchView 已经渲染在
+        // MacDetailContainer 的栈里, 点专辑/艺术家结果时直接 push 到主栈,
+        // 跟从专辑网格点进去走同一条导航 (返回按钮 / 路由复位都一致), 不会
+        // 被困在搜索页自己的嵌套栈里。iOS 仍需要自己的 NavigationStack。
+        Group {
             #if os(macOS)
             macBody
             #else
-            iosBody
+            NavigationStack {
+                iosBody
+            }
             #endif
         }
         .onAppear(perform: loadRecentSearches)
@@ -91,8 +97,8 @@ struct SearchView: View {
         }
         .background(PMColor.bg.ignoresSafeArea())
         .onSubmit(of: .search) { addRecentSearch(searchText) }
-        .navigationDestination(for: PrimuseKit.Album.self) { AlbumDetailView(album: $0) }
-        .navigationDestination(for: PrimuseKit.Artist.self) { ArtistDetailView(artist: $0) }
+        // 注意: Album/Artist 的 navigationDestination 由 MacDetailContainer 的
+        // NavigationStack 统一注册, 这里不再重复声明 (否则会重复 destination)。
     }
 
     /// 顶部 48pt 圆角搜索框 + 过滤芯片。搜索框其实绑在主窗口 PMTitleBar 上, 这里
@@ -116,6 +122,14 @@ struct SearchView: View {
                 }
 
                 Spacer()
+
+                Text(verbatim: "本地 · Apple Music")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(PMColor.textMuted)
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
+                    .background(PMColor.glassBtn, in: Capsule())
+                    .overlay { Capsule().strokeBorder(PMColor.cardBorder, lineWidth: 0.5) }
 
                 if !searchText.isEmpty {
                     Button { searchText = "" } label: {
@@ -186,24 +200,7 @@ struct SearchView: View {
                         HStack(alignment: .top) {
                             MacSearchFlowLayout(spacing: 8, rowSpacing: 8) {
                                 ForEach(recentSearches, id: \.self) { query in
-                                    Button {
-                                        addRecentSearch(query)
-                                        searchText = query
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Text(verbatim: query)
-                                            Image(systemName: "xmark")
-                                                .font(.system(size: 8, weight: .bold))
-                                                .opacity(0.55)
-                                        }
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(PMColor.textMuted)
-                                        .padding(.horizontal, 10)
-                                        .frame(height: 24)
-                                        .background(PMColor.glassBtn, in: Capsule())
-                                        .overlay { Capsule().strokeBorder(PMColor.cardBorder, lineWidth: 0.5) }
-                                    }
-                                    .buttonStyle(.plain)
+                                    macRecentSearchChip(query)
                                 }
                             }
                             Spacer(minLength: 16)
@@ -384,22 +381,42 @@ struct SearchView: View {
             macSectionLabel("recent_searches")
             MacSearchFlowLayout(spacing: 8, rowSpacing: 8) {
                 ForEach(recentSearches.prefix(8), id: \.self) { query in
-                    Button {
-                        addRecentSearch(query)
-                        searchText = query
-                    } label: {
-                        Text(verbatim: query)
-                            .font(.system(size: 11))
-                            .foregroundStyle(PMColor.textMuted)
-                            .padding(.horizontal, 10)
-                            .frame(height: 24)
-                            .background(PMColor.glassBtn, in: Capsule())
-                            .overlay { Capsule().strokeBorder(PMColor.cardBorder, lineWidth: 0.5) }
-                    }
-                    .buttonStyle(.plain)
+                    macRecentSearchChip(query)
                 }
             }
         }
+    }
+
+    private func macRecentSearchChip(_ query: String) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                addRecentSearch(query)
+                searchText = query
+            } label: {
+                Text(verbatim: query)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                removeRecentSearch(query)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(PMColor.textFaint)
+                    .frame(width: 12, height: 12)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help(Text("delete"))
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(PMColor.textMuted)
+        .padding(.leading, 10)
+        .padding(.trailing, 7)
+        .frame(height: 24)
+        .background(PMColor.glassBtn, in: Capsule())
+        .overlay { Capsule().strokeBorder(PMColor.cardBorder, lineWidth: 0.5) }
     }
 
     @ViewBuilder
@@ -521,6 +538,11 @@ struct SearchView: View {
                 Text("跳到歌词上下文")
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(PMColor.textFaint)
+                if let timestamp = result.lyricTimestamp {
+                    Text(verbatim: "命中 \(formatSearchTime(timestamp))")
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(PMColor.brand)
+                }
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -603,6 +625,9 @@ struct SearchView: View {
         case .denied, .restricted:
             return String(localized: "apple_music_notice_denied")
         case .authorized:
+            guard AppleMusicFeatureSettings.catalogSearchEnabled else {
+                return "Apple Music · Catalog 搜索已关闭"
+            }
             if appleMusic.isSearching {
                 return String(localized: "search_apple_music_loading")
             }
@@ -765,12 +790,19 @@ struct SearchView: View {
                         )
                         if result.matchKind == .lyrics, let snippet = result.lyricSnippet {
                             // 歌词命中: 把命中的句子(含上下文)展开, 让用户一眼看到为什么命中。
-                            Text(snippet)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.leading, 54)
+                            VStack(alignment: .leading, spacing: 3) {
+                                if let timestamp = result.lyricTimestamp {
+                                    Text(verbatim: "命中 \(formatSearchTime(timestamp))")
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.tint)
+                                }
+                                Text(snippet)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.leading, 54)
                         }
                     }
                     .contentShape(Rectangle())
@@ -919,6 +951,11 @@ struct SearchView: View {
 
     private func clearRecentSearches() {
         recentSearches.removeAll()
+        saveRecentSearches()
+    }
+
+    private func removeRecentSearch(_ query: String) {
+        recentSearches.removeAll { $0.caseInsensitiveCompare(query) == .orderedSame }
         saveRecentSearches()
     }
 

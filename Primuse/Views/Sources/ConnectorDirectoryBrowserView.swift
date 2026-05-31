@@ -24,6 +24,35 @@ struct ConnectorDirectoryBrowserView: View {
     @State private var sslTrustContinuation: CheckedContinuation<Bool, Never>?
 
     var body: some View {
+        #if os(macOS)
+        MacDirTreeBrowser(
+            title: "浏览 \(source.type.displayName) · \(source.name)",
+            subtitle: macConnectionString,
+            rootTitle: source.name,
+            selectedDirectories: $selectedDirectories,
+            load: { path in
+                try await connector.connect()
+                return try await connector.listFiles(at: path)
+            }
+        )
+        #else
+        iosBody
+        #endif
+    }
+
+    #if os(macOS)
+    /// 顶栏副标题用的连接串, 例如 `smb://10.0.0.4/Music`。
+    private var macConnectionString: String {
+        let scheme = source.type.displayName.lowercased()
+        let host = source.host ?? ""
+        let share = source.shareName ?? ""
+        if host.isEmpty { return scheme }
+        if share.isEmpty { return "\(scheme)://\(host)" }
+        return "\(scheme)://\(host)/\(share)"
+    }
+    #endif
+
+    private var iosBody: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 DirectoryBreadcrumb(
@@ -56,7 +85,7 @@ struct ConnectorDirectoryBrowserView: View {
                     .padding(.horizontal, 40)
                     Spacer()
                 } else {
-                    directoryList
+                    browserContent
                 }
 
                 BrowserBottomBar(selectedCount: selectedDirectories.count) {
@@ -145,6 +174,24 @@ struct ConnectorDirectoryBrowserView: View {
             }
         }
         .directoryBrowserListStyle()
+    }
+
+    @ViewBuilder
+    private var browserContent: some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            directoryList
+            Rectangle().fill(PMColor.divider).frame(width: 0.5)
+            DirectoryPreviewPane(
+                title: pathStack.last?.title ?? source.name,
+                path: currentPath,
+                items: items,
+                selectedCount: selectedDirectories.count
+            )
+        }
+        #else
+        directoryList
+        #endif
     }
 
     private var currentDirectorySubtitle: String? {

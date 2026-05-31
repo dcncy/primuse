@@ -526,7 +526,7 @@ struct PMWindowChromeConfigurator: NSViewRepresentable {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.styleMask.insert(.fullSizeContentView)
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.toolbar = nil
         window.backgroundColor = .clear
 
@@ -538,6 +538,114 @@ struct PMWindowChromeConfigurator: NSViewRepresentable {
         ].forEach { type in
             window.standardWindowButton(type)?.isHidden = true
         }
+    }
+}
+
+// MARK: - Window-safe controls
+
+struct PMWindowDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        PMWindowDragRegionView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private final class PMWindowDragRegionView: NSView {
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+}
+
+/// Native macOS slider that opts out of `isMovableByWindowBackground`.
+///
+/// SwiftUI's `Slider` can still be treated as draggable window background in
+/// borderless/hidden-titlebar windows, which makes volume drags move the whole
+/// window. Keeping this as an AppKit control lets the slider own mouse tracking.
+struct PMVolumeSlider: NSViewRepresentable {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = 0...1
+    var controlSize: NSControl.ControlSize = .mini
+    var accessibilityLabel: String = "Volume"
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value)
+    }
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = PMWindowSafeSlider(
+            value: clampedValue,
+            minValue: range.lowerBound,
+            maxValue: range.upperBound,
+            target: context.coordinator,
+            action: #selector(Coordinator.valueChanged(_:))
+        )
+        slider.isContinuous = true
+        slider.sliderType = .linear
+        slider.sendAction(on: [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
+        slider.controlSize = controlSize
+        slider.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        slider.setAccessibilityLabel(accessibilityLabel)
+        applyConfiguration(to: slider, context: context)
+        return slider
+    }
+
+    func updateNSView(_ nsView: NSSlider, context: Context) {
+        applyConfiguration(to: nsView, context: context)
+    }
+
+    private var clampedValue: Double {
+        min(range.upperBound, max(range.lowerBound, value))
+    }
+
+    private func applyConfiguration(to slider: NSSlider, context: Context) {
+        context.coordinator.value = $value
+        slider.minValue = range.lowerBound
+        slider.maxValue = range.upperBound
+        slider.controlSize = controlSize
+        slider.setAccessibilityLabel(accessibilityLabel)
+        if abs(slider.doubleValue - clampedValue) > 0.0005 {
+            slider.doubleValue = clampedValue
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var value: Binding<Double>
+
+        init(value: Binding<Double>) {
+            self.value = value
+        }
+
+        @objc func valueChanged(_ sender: NSSlider) {
+            value.wrappedValue = sender.doubleValue
+        }
+    }
+}
+
+private final class PMWindowSafeSlider: NSSlider {
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let wasMovableByBackground = window?.isMovableByWindowBackground
+        window?.isMovableByWindowBackground = false
+        defer {
+            if let wasMovableByBackground {
+                window?.isMovableByWindowBackground = wasMovableByBackground
+            }
+        }
+        super.mouseDown(with: event)
     }
 }
 
@@ -593,6 +701,10 @@ private struct PMNSScrollerHider: NSViewRepresentable {
 }
 
 extension View {
+    func pmWindowDragRegion() -> some View {
+        background(PMWindowDragRegion())
+    }
+
     /// 强制隐藏被这个 View 所在的 NSScrollView 上的所有滚动条 — 即便用户系统
     /// 设置是「总是显示滚动条」也无视。仅 macOS 有效。
     func pmForceHideScrollers() -> some View {
@@ -803,6 +915,51 @@ enum PMColorSchemeOverride: String, CaseIterable, Sendable {
     case system, light, dark
 }
 
+// MARK: - Brand monogram (应用内品牌字标)
+
+/// 应用内统一的品牌字标 —— 品牌色渐变 squircle 叠中文 "猿" 字。Dock / 访达里是
+/// 完整 app 图标 (蓝调黑胶写实风), 但那套冷色图标塞进暖橙的界面里会打架; 应用内
+/// (侧栏头部 / 关于页) 改用这个跟 `PMColor.brand` 同色系的简化字标, 视觉更统一。
+/// 要改字、圆角、渐变或阴影只动这一处, 两个调用点同步更新。
+struct BrandMonogram: View {
+    /// 出现位置 —— 决定尺寸 / 圆角 / 字号 / 阴影这组配套数值。
+    enum Slot {
+        case sidebar   // 侧栏头部 28pt, 品牌色自身收尾的实色渐变
+        case feature   // 关于页等 96pt, 向背景深色过渡
+    }
+
+    var slot: Slot
+
+    var body: some View {
+        let isSidebar = slot == .sidebar
+        let size: CGFloat   = isSidebar ? 28 : 96
+        let corner: CGFloat = isSidebar ? 7  : 22
+        let glyph: CGFloat  = isSidebar ? 15 : 50
+        let shadowOpacity: Double = isSidebar ? 0.35 : 0.32
+        let shadowRadius: CGFloat = isSidebar ? 4 : 24
+        let shadowY: CGFloat      = isSidebar ? 2 : 8
+        // 侧栏用品牌色自身做渐变收尾; 关于页向背景深色过渡, 跟大图卡片融合。
+        let gradientEnd = isSidebar ? PMColor.brand.opacity(0.7) : PMColor.bgDeep
+
+        return RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [PMColor.brand, gradientEnd],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: size, height: size)
+            .overlay {
+                // 设计稿用中文字符 monogram ("猿") 而非 SF Symbol, 更切合品牌名
+                // "猿音 Primuse"。
+                Text(verbatim: "猿")
+                    .font(.system(size: glyph, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .shadow(color: PMColor.brand.opacity(shadowOpacity), radius: shadowRadius, y: shadowY)
+    }
+}
+
 // MARK: - Alternate app icons (macOS dock 图标)
 
 /// 一套可切换的 App 图标。macOS 不支持 iOS 的 `setAlternateIconName`, 只能在
@@ -882,6 +1039,9 @@ final class MacUIPreferences {
     var ambientStrength: Double {
         didSet { UserDefaults.standard.set(ambientStrength, forKey: Self.keyAmbient) }
     }
+    var coverDrivenAmbient: Bool {
+        didSet { UserDefaults.standard.set(coverDrivenAmbient, forKey: Self.keyCoverDrivenAmbient) }
+    }
 
     /// 品牌色十六进制 (无 #)。驱动 `PMColor.brand`。
     var brandColorHex: String {
@@ -909,6 +1069,7 @@ final class MacUIPreferences {
     private static let keyLyricsScale  = "pm.mac.lyricsScale"
     private static let keySidebarWidth = "pm.mac.sidebarWidth"
     private static let keyAmbient      = "pm.mac.ambientStrength"
+    private static let keyCoverDrivenAmbient = "pm.mac.coverDrivenAmbient"
     private static let keyBrand        = "pm.mac.brandColor"
     private static let keyColorScheme  = "pm.mac.colorScheme"
     private static let keyAppIcon      = "pm.mac.appIcon"
@@ -923,6 +1084,7 @@ final class MacUIPreferences {
         let width = d.object(forKey: Self.keySidebarWidth) as? Double ?? Double(PMSize.sidebarDefault)
         sidebarWidth = CGFloat(max(Double(PMSize.sidebarMin), min(Double(PMSize.sidebarMax), width)))
         ambientStrength = d.object(forKey: Self.keyAmbient) as? Double ?? 0.7
+        coverDrivenAmbient = d.object(forKey: Self.keyCoverDrivenAmbient) as? Bool ?? true
         brandColorHex = d.string(forKey: Self.keyBrand) ?? Self.defaultBrandHex
         colorScheme = PMColorSchemeOverride(rawValue: d.string(forKey: Self.keyColorScheme) ?? "") ?? .system
         appIconID = d.string(forKey: Self.keyAppIcon) ?? ""

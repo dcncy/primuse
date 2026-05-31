@@ -10,7 +10,6 @@ import PrimuseKit
 final class MacMenuBarController: NSObject, NSPopoverDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
-    private var iconObserver: NSObjectProtocol?
 
     /// Toggle whether the status item shows the current song title next to
     /// the icon. Stored in UserDefaults so it survives launches; users who
@@ -46,19 +45,6 @@ final class MacMenuBarController: NSObject, NSPopoverDelegate {
 
         observePlayerState()
         refreshStatusItem()
-        observeAppIconChange()
-    }
-
-    /// App 图标切换后强制重画状态项图标 —— refreshStatusItem 平时只在 image == nil
-    /// 时设, 不会主动跟着换, 所以这里收到通知直接覆盖。
-    private func observeAppIconChange() {
-        iconObserver = NotificationCenter.default.addObserver(
-            forName: .primuseAppIconChanged, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.statusItem?.button?.image = self?.statusBarImage()
-            }
-        }
     }
 
     /// Re-arms whenever any of the tracked observable values changes.
@@ -70,6 +56,8 @@ final class MacMenuBarController: NSObject, NSPopoverDelegate {
             _ = player.currentSong?.id
             _ = player.currentSong?.title
             _ = player.currentSong?.artistName
+            _ = player.currentSong?.coverArtFileName
+            _ = player.coverRevision
             _ = player.isPlaying
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -79,30 +67,39 @@ final class MacMenuBarController: NSObject, NSPopoverDelegate {
         }
     }
 
-    /// 菜单栏图标:用 App 自己的图标(猿音品牌图),而不是通用音符符号。
-    /// 全彩、非模板(品牌图不做单色着色)。取不到时兜底回音符模板符号。
+    /// 没有封面时使用 template image, 交给系统按菜单栏状态自动着色。
     private func statusBarImage() -> NSImage {
-        let size = NSSize(width: 18, height: 18)
-        if let icon = NSApp.applicationIconImage, icon.isValid {
-            let img = NSImage(size: size)
-            img.lockFocus()
-            icon.draw(in: NSRect(origin: .zero, size: size),
-                      from: .zero, operation: .sourceOver, fraction: 1.0)
-            img.unlockFocus()
-            img.isTemplate = false
-            return img
+        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        let image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Primuse")?
+            .withSymbolConfiguration(configuration) ?? NSImage()
+        image.isTemplate = true
+        return image
+    }
+
+    private func statusBarArtworkImage(for song: Song?) -> NSImage? {
+        guard let song else { return nil }
+        let store = MetadataAssetStore.shared
+        let candidates = [
+            store.expectedCoverFileName(for: song.id),
+            song.coverArtFileName,
+        ].compactMap { $0 }
+
+        for name in candidates where !name.isEmpty && !name.contains("/") && !name.contains("://") {
+            guard let data = store.readCoverData(named: name),
+                  let image = NSImage(data: data) else { continue }
+            image.size = NSSize(width: 18, height: 18)
+            image.isTemplate = false
+            return image
         }
-        let fallback = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Primuse") ?? NSImage()
-        fallback.isTemplate = true
-        return fallback
+        return nil
     }
 
     private func refreshStatusItem() {
         guard let button = statusItem?.button else { return }
         let player = AppServices.shared.playerService
 
-        // 图标固定用 App 品牌图(播放状态在 popover 里体现,不再切音符/播放/暂停)。
-        if button.image == nil { button.image = statusBarImage() }
+        button.image = statusBarArtworkImage(for: player.currentSong) ?? statusBarImage()
+        button.imagePosition = .imageLeading
 
         if showTitle, let title = player.currentSong?.title, !title.isEmpty {
             // Title 旁边一个空格,避免和图标贴在一起。

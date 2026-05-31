@@ -209,6 +209,7 @@ struct ScrapeOptionsView: View {
         }
         .frame(height: 44)
         .padding(.horizontal, 14)
+        .pmWindowDragRegion()
         .overlay(alignment: .bottom) {
             Rectangle().fill(PMColor.divider).frame(height: 0.5)
         }
@@ -1393,8 +1394,12 @@ struct ScrapeOptionsView: View {
             // Persist assets to disk (atomic, fast)
             if needsCover, let data = coverData {
                 MetadataAssetStore.shared.storeCoverSync(data, for: songID)
-                // cacheKey 基于 songID, 用 hash 文件名 invalidate 不命中。
-                // 下面 onCompleteRef closure (line 264) 用 songID invalidate 才有效。
+                CachedArtworkView.invalidateCache(for: songID)
+                if let oldRef = song.coverArtFileName {
+                    CachedArtworkView.invalidateCache(for: oldRef)
+                }
+                // cacheKey 基于 songID, 这里主动发全局 artwork invalidation,
+                // 让全部歌曲列表、底栏播放器等已挂载封面位立即重新读取。
             }
             if needsLyrics, let lines = lyricsLines {
                 let wordLevel = lines.filter { $0.isWordLevel }.count

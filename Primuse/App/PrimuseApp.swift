@@ -390,6 +390,17 @@ struct PrimuseApp: App {
                     // a strictly newer version is found.
                     await updateChecker.checkForUpdate()
                 }
+                #if os(macOS)
+                // 把 macOS 桌面小组件需要的快照(歌词/统计/音乐源/年度报告)写进
+                // App Group。keyed 在当前歌曲上: 启动跑一次, 之后每次换歌刷新。
+                .task(id: playerService.currentSong?.id) {
+                    MacWidgetDataPublisher.publishAll(
+                        player: playerService,
+                        sources: sourcesStore,
+                        sourceManager: sourceManager
+                    )
+                }
+                #endif
                 .task {
                     PrimuseAppDelegate.sync = cloudSync
                     // Apple Watch 桥 ── 启动 WCSession, 1Hz 推 Now Playing
@@ -410,7 +421,8 @@ struct PrimuseApp: App {
                     // 用 user library 的 i.* id 查 catalog 必失败 → 卡 loading。
                     // 同时填上 cache 后 ArtworkImage 才能拉到 user library 歌的
                     // 封面 (musicKit:// scheme 必须走 framework 内部解码)。
-                    if appleMusic.authState == .authorized {
+                    if appleMusic.authState == .authorized,
+                       AppleMusicFeatureSettings.syncUserLibraryEnabled {
                         appleMusicLibrary.sync()
                     }
                     // Stage 4c migration: deduplicate legacy
@@ -464,8 +476,9 @@ struct PrimuseApp: App {
 
                         // 2. queue 接下来的歌: 已经摆好播放队列时,继续往后跑很可能
                         let queueSnapshot = await MainActor.run { playerService.queue }
+                        let prewarmCount = await MainActor.run { playerService.playbackSettings.prewarmQueueCount }
                         let resumeID = resumeSong?.id
-                        let queueOrder = queueSnapshot.filter { $0.id != resumeID }.prefix(5)
+                        let queueOrder = queueSnapshot.filter { $0.id != resumeID }.prefix(prewarmCount)
                         for song in queueOrder {
                             if Task.isCancelled { return }
                             let done = await MainActor.run { sourceManager.isPrewarmed(song: song) }

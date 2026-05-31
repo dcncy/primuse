@@ -172,14 +172,14 @@ final class SourcesStore {
             // 更新 songCount 就会 bump modifiedAt),它的更新永远比
             // Mac 上的删除时刻新,导致每次 fetch 都把删的源拉回来。
             //
-            // 标准做法 (Apple Notes / Reminders): 软删除的 30 天恢复
+            // 标准做法 (Apple Notes / Reminders): 软删除的 7 天恢复
             // 窗口内,墓碑无条件胜出。用户真的想再加同一个源,会通过
             // AddSource 流程产生一条新 record(新 id),不靠"复用旧 id"。
             if existing.isDeleted && !remote.isDeleted {
                 return
             }
             // 远端也是墓碑 → 用更新的那个时间戳合并 deletedAt,确保
-            // 30 天窗口在所有设备上一致。
+            // 7 天窗口在所有设备上一致。
             if existing.isDeleted && remote.isDeleted {
                 if remote.modifiedAt > existing.modifiedAt,
                    let index = allSources.firstIndex(where: { $0.id == remote.id }) {

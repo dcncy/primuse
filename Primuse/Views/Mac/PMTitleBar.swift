@@ -56,6 +56,7 @@ struct PMTitleBar: View {
         .padding(.horizontal, 14)
         .frame(height: PMSize.titlebar)
         .background(titlebarBackground.ignoresSafeArea(edges: .top))
+        .pmWindowDragRegion()
         .overlay(alignment: .bottom) {
             Rectangle().fill(PMColor.divider).frame(height: 0.5)
         }

@@ -15,6 +15,9 @@ struct MacLibraryHeader: View {
     var onPlay: () -> Void = {}
     var onShuffle: () -> Void = {}
     var onMore: () -> Void = {}
+    var moreMenu: AnyView? = nil
+
+    @State private var showMoreMenu = false
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -76,7 +79,13 @@ struct MacLibraryHeader: View {
                         }
                         .buttonStyle(.plain)
 
-                        Button(action: onMore) {
+                        Button {
+                            if moreMenu != nil {
+                                showMoreMenu.toggle()
+                            } else {
+                                onMore()
+                            }
+                        } label: {
                             Image(systemName: "ellipsis")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.white)
@@ -85,6 +94,11 @@ struct MacLibraryHeader: View {
                                 .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.22), lineWidth: 0.5) }
                         }
                         .buttonStyle(.plain)
+                        .popover(isPresented: $showMoreMenu, arrowEdge: .bottom) {
+                            if let moreMenu {
+                                moreMenu
+                            }
+                        }
                     }
                     .padding(.top, 8)
                 }
@@ -103,10 +117,10 @@ struct MacLibraryHeader: View {
         if let song = coverSong {
             CachedArtworkView(
                 coverRef: song.coverArtFileName, songID: song.id,
+                size: 160,
                 cornerRadius: PMRadius.l,
                 sourceID: song.sourceID, filePath: song.filePath
             )
-            .aspectRatio(1, contentMode: .fit)
             .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
         } else {
             RoundedRectangle(cornerRadius: PMRadius.l, style: .continuous)
@@ -118,6 +132,79 @@ struct MacLibraryHeader: View {
                 }
                 .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
         }
+    }
+}
+
+/// 设计稿 LibraryHeader 右上角 "更多" 按钮弹出的 PM 风格菜单 —— 歌单 / 专辑
+/// 详情页把各自的动作按分组传进来, 点任一项后自动收起 popover。
+/// (MacLibraryHeader 的 `moreMenu` 槽接受任意 AnyView, 这里给出统一样式。)
+struct MacHeaderMoreMenu: View {
+    struct Item: Identifiable {
+        let id = UUID()
+        var icon: String
+        var title: String
+        var enabled: Bool
+        var isDestructive: Bool
+        var action: () -> Void
+
+        init(icon: String, title: String, enabled: Bool = true,
+             isDestructive: Bool = false, action: @escaping () -> Void) {
+            self.icon = icon
+            self.title = title
+            self.enabled = enabled
+            self.isDestructive = isDestructive
+            self.action = action
+        }
+    }
+
+    /// 每个内层数组是一个分组, 组与组之间画一条细分割线。空组自动跳过。
+    let sections: [[Item]]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let groups = sections.filter { !$0.isEmpty }
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(groups.enumerated()), id: \.offset) { index, items in
+                if index > 0 {
+                    Rectangle()
+                        .fill(PMColor.divider)
+                        .frame(height: 0.5)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                }
+                ForEach(items) { item in
+                    row(item)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(width: 240)
+    }
+
+    private func row(_ item: Item) -> some View {
+        Button {
+            dismiss()
+            item.action()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(item.isDestructive ? PMColor.bad : PMColor.textMuted)
+                    .frame(width: 15)
+                Text(verbatim: item.title)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(item.isDestructive ? PMColor.bad : PMColor.text)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .pmRowBackground(cornerRadius: 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!item.enabled)
+        .opacity(item.enabled ? 1 : 0.4)
     }
 }
 #endif

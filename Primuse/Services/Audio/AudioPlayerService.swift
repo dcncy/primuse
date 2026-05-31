@@ -1200,11 +1200,10 @@ final class AudioPlayerService {
 
     private func prefetchNextSong() {
         prefetchTask?.cancel()
-        // Prefetch 接下来 3 首,而不是只 1 首 —— 用户连续 next 切歌时
+        // Prefetch 接下来几首,而不是只 1 首 —— 用户连续 next 切歌时
         // (4-5s/次), 单首 prefetch chain 来不及, 第 2、3 首切到时 partial
-        // 还是空, SFB 现拉 1MB chunk 卡 2-3s。3 首并发 prewarm 流量是
-        // 3 * 1.25MB = 3.75MB, NAS 内网完全 cover 得了。
-        let nextSongs = nextSongsInQueue(count: 3)
+        // 还是空, SFB 现拉 1MB chunk 卡 2-3s。数量由 ST-01 设置页控制。
+        let nextSongs = nextSongsInQueue(count: playbackSettings.prewarmQueueCount)
         guard !nextSongs.isEmpty else { return }
 
         prefetchTask = Task {
@@ -2017,6 +2016,33 @@ final class AudioPlayerService {
         // Drop any pre-built next round — the queue itself changed, so
         // prior shuffle plans (and their indices into the old queue)
         // are stale and would index out-of-bounds on wrap.
+        pendingNextShuffleIndices = nil
+        if shuffleEnabled { rebuildShuffleOrder() }
+    }
+
+    /// Append songs to the end of the current queue without interrupting the
+    /// current track. Used by macOS list-level "add all to queue" actions.
+    func appendToQueue(_ songs: [Song]) {
+        let playable = songs.filteredPlayable()
+        guard !playable.isEmpty else { return }
+        queueGeneration += 1
+        queueEntries.append(contentsOf: playable.map { QueueEntry(song: $0) })
+        pendingNextShuffleIndices = nil
+        if shuffleEnabled { rebuildShuffleOrder() }
+    }
+
+    /// Insert songs immediately after the current queue position. If there is
+    /// no queue yet, this behaves like `setQueue`.
+    func insertNextInQueue(_ songs: [Song]) {
+        let playable = songs.filteredPlayable()
+        guard !playable.isEmpty else { return }
+        guard !queueEntries.isEmpty else {
+            setQueue(playable, startAt: 0)
+            return
+        }
+        let insertionIndex = min(currentIndex + 1, queueEntries.count)
+        queueGeneration += 1
+        queueEntries.insert(contentsOf: playable.map { QueueEntry(song: $0) }, at: insertionIndex)
         pendingNextShuffleIndices = nil
         if shuffleEnabled { rebuildShuffleOrder() }
     }
@@ -3025,8 +3051,16 @@ final class AudioPlayerService {
     }
 
     private func updatePlaybackState() {
+        guard WidgetSettings.syncEnabled(),
+              WidgetSettings.widgetEnabled(PrimuseConstants.widgetNowPlayingEnabledKey) else {
+            PlaybackState.clear()
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
+
         var coverName: String?
         var recentAlbumsChanged = false
+        let recentAlbumsEnabled = WidgetSettings.widgetEnabled(PrimuseConstants.widgetRecentAlbumsEnabledKey)
 
         if let song = currentSong {
             let sharedCoverName = "widget_cover.png"
@@ -3043,7 +3077,7 @@ final class AudioPlayerService {
                     lastWidgetCoverSongID = nil
                 }
 
-                if let albumEntry = makeRecentAlbumEntry(for: song) {
+                if recentAlbumsEnabled, let albumEntry = makeRecentAlbumEntry(for: song) {
                     if let albumCoverName = albumEntry.coverImageName,
                        !sharedWidgetCoverExists(named: albumCoverName) {
                         _ = writeWidgetCover(song: song, fileName: albumCoverName, size: 200)
@@ -3054,6 +3088,10 @@ final class AudioPlayerService {
             } else {
                 coverName = sharedCoverName
             }
+            if !recentAlbumsEnabled {
+                RecentAlbumsStore.clear()
+                recentAlbumsChanged = true
+            }
         } else {
             lastWidgetCoverSongID = nil
         }
@@ -3063,6 +3101,7 @@ final class AudioPlayerService {
             songTitle: currentSong?.title,
             artistName: currentSong?.artistName,
             albumTitle: currentSong?.albumTitle,
+            fileFormat: currentSong.map { $0.fileFormat.displayName },
             coverImageName: coverName,
             isPlaying: isPlaying,
             currentTime: currentTime,

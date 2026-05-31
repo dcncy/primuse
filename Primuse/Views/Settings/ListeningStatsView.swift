@@ -310,7 +310,7 @@ struct ListeningStatsView: View {
         HStack(spacing: 6) {
             Spacer()
             Text(verbatim: "少").font(.system(size: 10.5)).foregroundStyle(PMColor.textFaint)
-            ForEach([0, 2, 4, 8, 14], id: \.self) { v in
+            ForEach([0, 2, 6, 10, 14], id: \.self) { v in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(heatColor(count: v))
                     .frame(width: 10, height: 10)
@@ -319,14 +319,14 @@ struct ListeningStatsView: View {
         }
     }
 
-    /// 设计稿色阶: 0 灰底; <3 / <6 / <10 / ≥10 四档品牌色透明度。
+    /// 设计稿色阶: 0 灰底; 1...2 / 3...6 / 7...10 / ≥11 四档品牌色透明度。
     private func heatColor(count: Int) -> Color {
         let a = PMColor.brand
         switch count {
         case 0: return PMColor.divider
         case 1..<3: return a.opacity(0.28)
-        case 3..<6: return a.opacity(0.52)
-        case 6..<10: return a.opacity(0.78)
+        case 3..<7: return a.opacity(0.52)
+        case 7..<11: return a.opacity(0.78)
         default: return a
         }
     }

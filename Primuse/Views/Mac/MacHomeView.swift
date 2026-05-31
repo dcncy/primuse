@@ -1,5 +1,6 @@
 #if os(macOS)
 import SwiftUI
+import AppKit
 import PrimuseKit
 
 /// 1.6 重设计后的 macOS 首页 — Hero (AmbientBackdrop + 封面马赛克 + 欢迎语) →
@@ -10,6 +11,7 @@ struct MacHomeView: View {
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(ScanService.self) private var scanService
     @Environment(MetadataBackfillService.self) private var backfill
+    @Environment(MusicScraperService.self) private var scraperService
     @Environment(ThemeService.self) private var theme
     @Environment(AppUpdateChecker.self) private var updateChecker
 
@@ -67,29 +69,38 @@ struct MacHomeView: View {
 
             Spacer(minLength: 8)
 
-            Button {
-                updateChecker.openAppStore()
-            } label: {
+            ZStack {
                 Text("update_banner_action")
                     .font(.system(size: 12, weight: .semibold))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
                     .background(PMColor.brand, in: Capsule())
                     .foregroundStyle(.white)
+                    .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .overlay {
+                MacWindowSafeClickArea {
+                    updateChecker.openAppStore()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel(Text("update_banner_action"))
+            }
             .shadow(color: PMColor.brand.opacity(0.35), radius: 6, y: 2)
 
-            Button {
-                updateChecker.snooze()
-            } label: {
+            ZStack {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(PMColor.textFaint)
                     .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .overlay {
+                MacWindowSafeClickArea {
+                    updateChecker.snooze()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel(Text("later"))
+            }
             .help(Text("later"))
         }
         .padding(.horizontal, 14)
@@ -347,7 +358,7 @@ struct MacHomeView: View {
             VStack(alignment: .leading, spacing: PMSpace.m) {
                 HStack(spacing: PMSpace.m) {
                     metric(value: enabledSourcesCount, label: "home_enabled_sources")
-                    metric(value: activeScans.count, label: "home_active_scans")
+                    metric(value: activeTaskCount, label: "home_active_scans")
                     metric(value: backfill.remainingCount(forSource: nil), label: "home_pending_details")
                 }
                 Rectangle().fill(PMColor.divider).frame(height: 0.5).padding(.vertical, 2)
@@ -355,6 +366,15 @@ struct MacHomeView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         scanProgressBar(scan)
                         Text(scan.currentFile.isEmpty ? String(localized: "scan_in_progress") : scan.currentFile)
+                            .font(.system(size: 11))
+                            .foregroundStyle(PMColor.textFaint)
+                            .lineLimit(1)
+                    }
+                } else if scraperService.isScraping {
+                    // 元数据刮削 (扫描标签) 也是一种进行中的源任务, 之前完全没在这里反映。
+                    VStack(alignment: .leading, spacing: 6) {
+                        taskProgressBar(scraperService.progress)
+                        Text(scrapingStatusText)
                             .font(.system(size: 11))
                             .foregroundStyle(PMColor.textFaint)
                             .lineLimit(1)
@@ -434,10 +454,14 @@ struct MacHomeView: View {
 
     private func scanProgressBar(_ scan: ScanService.ScanState) -> some View {
         let pct = scan.totalCount > 0 ? min(scan.progress, 1) : 0
-        return GeometryReader { geo in
+        return taskProgressBar(pct)
+    }
+
+    private func taskProgressBar(_ pct: Double) -> some View {
+        GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(PMColor.divider)
-                Capsule().fill(PMColor.brand).frame(width: geo.size.width * pct)
+                Capsule().fill(PMColor.brand).frame(width: geo.size.width * min(max(pct, 0), 1))
             }
         }
         .frame(height: 5)
@@ -456,10 +480,12 @@ struct MacHomeView: View {
                          isActive: !activeScans.isEmpty || hasContent)
             pipelineConnector(isActive: hasContent)
             pipelineNode("tag.fill", "Metadata",
-                         statusText: backfill.remainingCount(forSource: nil) == 0
-                             ? Lz("Done")
-                             : "\(backfill.remainingCount(forSource: nil)) \(Lz("pending backfill"))",
-                         isActive: hasContent)
+                         statusText: scraperService.isScraping
+                             ? "\(scraperService.processedCount)/\(scraperService.totalCount) \(Lz("in progress"))"
+                             : (backfill.remainingCount(forSource: nil) == 0
+                                 ? Lz("Done")
+                                 : "\(backfill.remainingCount(forSource: nil)) \(Lz("pending backfill"))"),
+                         isActive: hasContent || scraperService.isScraping)
             pipelineConnector(isActive: player.currentSong != nil)
             pipelineNode("play.fill", "Listen",
                          statusText: player.currentSong?.title ?? Lz("Not Playing"),
@@ -507,7 +533,7 @@ struct MacHomeView: View {
         VStack(alignment: .leading, spacing: PMSpace.m) {
             sectionHeader(title: "recently_added",
                           subtitle: "home_recently_added_subtitle",
-                          showAll: false)
+                          destination: .recentlyAdded)
 
             LazyVGrid(
                 columns: Array(repeating: GridItem(.adaptive(minimum: 130, maximum: 160),
@@ -558,7 +584,7 @@ struct MacHomeView: View {
         VStack(alignment: .leading, spacing: PMSpace.m) {
             sectionHeader(title: "recently_played",
                           subtitle: "home_recently_played_subtitle",
-                          showAll: false)
+                          destination: .recentlyPlayed)
 
             LazyVGrid(
                 columns: Array(repeating: GridItem(.adaptive(minimum: 260, maximum: 320),
@@ -606,9 +632,13 @@ struct MacHomeView: View {
     }
 
     private var recentSongs: [Song] {
-        let recent = library.recentlyPlayedSongs(limit: 18)
+        recentSongs(limit: 18)
+    }
+
+    private func recentSongs(limit: Int) -> [Song] {
+        let recent = library.recentlyPlayedSongs(limit: limit)
         if !recent.isEmpty { return recent }
-        return Array(library.visibleSongs.sorted { $0.dateAdded > $1.dateAdded }.prefix(18))
+        return Array(library.visibleSongs.sorted { $0.dateAdded > $1.dateAdded }.prefix(limit))
     }
 
     // MARK: - Artists (horizontal scroll)
@@ -617,7 +647,7 @@ struct MacHomeView: View {
         VStack(alignment: .leading, spacing: PMSpace.m) {
             sectionHeader(title: "tab_artists",
                           subtitle: "home_artists_subtitle",
-                          showAll: false)
+                          destination: .artists)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: PMSpace.l) {
@@ -661,7 +691,13 @@ struct MacHomeView: View {
 
     // MARK: - Section header
 
-    private func sectionHeader(title: LocalizedStringKey, subtitle: LocalizedStringKey?, showAll: Bool = false) -> some View {
+    private enum HomeSectionDestination {
+        case recentlyAdded
+        case recentlyPlayed
+        case artists
+    }
+
+    private func sectionHeader(title: LocalizedStringKey, subtitle: LocalizedStringKey?, destination: HomeSectionDestination? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(title)
                 .font(.system(size: 17, weight: .semibold))
@@ -673,12 +709,121 @@ struct MacHomeView: View {
                     .foregroundStyle(PMColor.textFaint)
             }
             Spacer()
-            if showAll {
-                Text("home_section_view_all")
+            if let destination {
+                NavigationLink {
+                    sectionDestination(destination)
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("home_section_view_all")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9.5, weight: .semibold))
+                    }
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(PMColor.brand)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(Text("home_section_view_all"))
             }
         }
+    }
+
+    @ViewBuilder
+    private func sectionDestination(_ destination: HomeSectionDestination) -> some View {
+        switch destination {
+        case .recentlyAdded:
+            recentlyAddedAllView
+                .navigationTitle("recently_added")
+        case .recentlyPlayed:
+            recentlyPlayedAllView
+                .navigationTitle("recently_played")
+        case .artists:
+            ArtistListView(artists: library.visibleArtists)
+                .navigationTitle("tab_artists")
+        }
+    }
+
+    private var recentlyAddedAllView: some View {
+        let albums = library.recentlyAddedAlbums(limit: max(library.visibleAlbums.count, 1))
+
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                homeCollectionHeader(
+                    eyebrow: "library_title",
+                    title: "recently_added",
+                    detail: "\(albums.count) \(String(localized: "albums_count"))"
+                )
+
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 24, alignment: .top), count: 5),
+                    alignment: .leading,
+                    spacing: 24
+                ) {
+                    ForEach(albums) { album in
+                        NavigationLink(value: album) {
+                            albumCard(album)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, PMSpace.xxxl)
+            }
+            .padding(.top, 24)
+            .padding(.bottom, 112)
+        }
+        .background(PMColor.bg.ignoresSafeArea())
+    }
+
+    private var recentlyPlayedAllView: some View {
+        let songs = recentSongs(limit: max(library.visibleSongs.count, 1))
+
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                homeCollectionHeader(
+                    eyebrow: "library_title",
+                    title: "recently_played",
+                    detail: "\(songs.count) \(String(localized: "songs_count"))"
+                )
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.adaptive(minimum: 260, maximum: 360), spacing: PMSpace.m, alignment: .top)
+                    ],
+                    alignment: .leading,
+                    spacing: PMSpace.m
+                ) {
+                    ForEach(songs) { song in
+                        Button { playSong(song) } label: {
+                            recentSongRow(song)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, PMSpace.xxxl)
+            }
+            .padding(.top, 24)
+            .padding(.bottom, 112)
+        }
+        .background(PMColor.bg.ignoresSafeArea())
+    }
+
+    private func homeCollectionHeader(eyebrow: LocalizedStringKey, title: LocalizedStringKey, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(eyebrow)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.8)
+                .textCase(.uppercase)
+                .foregroundStyle(PMColor.textMuted)
+            HStack(alignment: .lastTextBaseline, spacing: 12) {
+                Text(title)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(PMColor.text)
+                Text(verbatim: detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(PMColor.textFaint)
+            }
+        }
+        .padding(.horizontal, PMSpace.xxxl)
     }
 
     // MARK: - Empty
@@ -708,6 +853,18 @@ struct MacHomeView: View {
 
     private var activeScans: [ScanService.ScanState] {
         scanService.scanStates.values.filter { $0.isScanning || $0.canResume }
+    }
+
+    /// "扫描中" = 文件扫描任务 + 正在进行的元数据刮削 (扫描标签)。
+    private var activeTaskCount: Int {
+        activeScans.count + (scraperService.isScraping ? 1 : 0)
+    }
+
+    /// 刮削进行中的状态文案: "已处理/总数 · 当前歌曲" (当前曲名拿得到才拼)。
+    private var scrapingStatusText: String {
+        let counts = "\(scraperService.processedCount)/\(scraperService.totalCount)"
+        let title = scraperService.currentSongTitle
+        return title.isEmpty ? counts : "\(counts) · \(title)"
     }
 
     private var enabledSourcesCount: Int { sourcesStore.sources.filter(\.isEnabled).count }
@@ -759,6 +916,55 @@ struct MacHomeView: View {
         player.shuffleEnabled = false
         player.setQueue(queue, startAt: 0)
         Task { await player.play(song: first) }
+    }
+}
+
+private struct MacWindowSafeClickArea: NSViewRepresentable {
+    var action: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = WindowSafeNSButton()
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.performClick)
+        button.title = ""
+        button.isBordered = false
+        button.setButtonType(.momentaryChange)
+        button.bezelStyle = .regularSquare
+        button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor.clear.cgColor
+        return button
+    }
+
+    func updateNSView(_ nsView: NSButton, context: Context) {
+        context.coordinator.action = action
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 1, height: proposal.height ?? 1)
+    }
+
+    final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        @objc func performClick() {
+            action()
+        }
+    }
+}
+
+private final class WindowSafeNSButton: NSButton {
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }
 #endif

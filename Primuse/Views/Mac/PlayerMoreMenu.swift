@@ -37,11 +37,6 @@ struct PlayerMoreMenu<MenuLabel: View>: View {
     @State private var menuShown = false
     @State private var fontPickerShown = false
 
-    private var isInAnyPlaylist: Bool {
-        guard let songID = player.currentSong?.id else { return false }
-        return library.playlists.contains { library.contains(songID: songID, inPlaylist: $0.id) }
-    }
-
     var body: some View {
         #if os(macOS)
         baseBody
@@ -148,7 +143,7 @@ struct PlayerMoreMenu<MenuLabel: View>: View {
             }
             divider()
             menuRow(title: "add_to_playlist",
-                    symbol: isInAnyPlaylist ? "heart.fill" : "text.badge.plus",
+                    symbol: "text.badge.plus",
                     disabled: player.currentSong == nil) {
                 showAddToPlaylist = true
             }
@@ -269,17 +264,10 @@ struct PlayerMoreMenu<MenuLabel: View>: View {
         }
         .padding(.vertical, 6)
         .frame(width: 260)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(PMColor.bg.opacity(0.68))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
+        // 迷你播放器是深色面板, 系统 popover 的半透材质叠在它上面会把菜单染得发灰/
+        // 发白、文字对比度很低。铺一层 flat 不透明 bg (不画圆角描边 —— 系统 chrome
+        // 已经裁圆角带边框, 自己再画会变双框)。
+        .background(PMColor.bg)
     }
 
     private func menuHeader(_ song: Song) -> some View {
@@ -376,16 +364,6 @@ struct PlayerMoreMenu<MenuLabel: View>: View {
         }
         .padding(.vertical, 6)
         .frame(width: 160)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.ultraThinMaterial)
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(PMColor.bg.opacity(0.70))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
-        }
     }
 
     private func fontPickerRow(_ title: LocalizedStringKey, value: Double) -> some View {
@@ -571,17 +549,6 @@ private struct MacSleepTimerPopover: View {
             footer
         }
         .frame(width: 280)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(PMColor.bg.opacity(0.72))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.24), radius: 22, y: 10)
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { value in
             now = value
         }
@@ -737,17 +704,8 @@ struct MacSimilarSongsPopover: View {
             footer
         }
         .frame(width: 320)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(PMColor.bg.opacity(0.72))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(PMColor.cardBorder, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.24), radius: 22, y: 10)
+        // 跟主菜单一致: 铺 flat 不透明底, 避免半透材质叠深色背景发灰 (不画圆角边框)。
+        .background(PMColor.bg)
         .task(id: seed.id) { await loadLastFm() }
     }
 
@@ -810,6 +768,9 @@ struct MacSimilarSongsPopover: View {
                 .padding(.vertical, 6)
             }
             .frame(maxHeight: 360)
+            .scrollIndicators(.hidden)
+            // 系统「总是显示滚动条」时直接在底层 NSScrollView 上隐藏。
+            .pmForceHideScrollers()
         }
     }
 

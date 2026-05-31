@@ -74,7 +74,7 @@ private struct MediaServerLibraryBrowserView: View {
                     .padding(.horizontal, 40)
                     Spacer()
                 } else {
-                    libraryList
+                    browserContent
                 }
 
                 BrowserBottomBar(
@@ -151,6 +151,24 @@ private struct MediaServerLibraryBrowserView: View {
             }
         }
         .directoryBrowserListStyle()
+    }
+
+    @ViewBuilder
+    private var browserContent: some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            libraryList
+            Rectangle().fill(PMColor.divider).frame(width: 0.5)
+            DirectoryPreviewPane(
+                title: source.name,
+                path: "/",
+                items: libraries,
+                selectedCount: selectedDirectories.count
+            )
+        }
+        #else
+        libraryList
+        #endif
     }
 
     private func loadLibraries() {

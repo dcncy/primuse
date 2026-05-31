@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import SwiftUI
 import PrimuseKit
 
@@ -13,22 +14,25 @@ import PrimuseKit
 /// light/dark appearance.
 ///
 /// Layout: artwork on the left, scrolling lyrics on the right with the
-/// active line highlighted and pinned near the vertical center. Transport
-/// stays in the mini bar — duplicating it here would just fight the user.
+/// active line highlighted and pinned near the vertical center. In full
+/// screen the left column also gets the SYS-05 cover transport rail.
 struct MacNowPlayingView: View {
     var onClose: () -> Void
     @Environment(AudioPlayerService.self) private var player
+    @Environment(AudioEngine.self) private var engine
     @Environment(MusicLibrary.self) private var library
     @Environment(MusicScraperService.self) private var scraperService
     @Environment(SourceManager.self) private var sourceManager
+    @Environment(SourcesStore.self) private var sourcesStore
     @Environment(ThemeService.self) private var theme
 
     @State private var lyrics: [LyricLine] = []
     @State private var currentIndex: Int = 0
     @State private var isScrapingCurrentSong = false
     @State private var scrapeAlertMessage: String?
-    /// 当前主窗口是否处于 macOS 全屏。全屏时切到 Apple Music 风格的极
-    /// 简布局——只显示巨幅封面和歌曲信息,不再排歌词列表/浮动按钮。
+    @State private var hostWindow: NSWindow?
+    /// 当前主窗口是否处于 macOS 全屏。全屏时使用设计稿 SYS-05 的
+    /// NP-FullScreen 双栏布局: 隐藏侧栏后放大封面、歌词和浮动控制。
     @State private var isWindowFullScreen = false
 
     /// 与 iOS 共用同一个键 `lyricsFontScale` (0.7..1.8),通过 CloudKVS 双向同步。
@@ -49,7 +53,7 @@ struct MacNowPlayingView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             backdrop
 
             if player.currentSong == nil {
@@ -57,24 +61,38 @@ struct MacNowPlayingView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 48)
             } else {
-                // 全屏与普通展开复用同一套「左封面 + 右滚动歌词」布局,
-                // 只是字号 / 间距更大、退出全屏按钮替换关闭按钮。这样
-                // 全屏下也能看到完整滚动歌词,而不是像桌面歌词那样只
-                // 显示当前一两句。
-                HStack(alignment: .top, spacing: isWindowFullScreen ? 56 : 36) {
+                HStack(alignment: .center, spacing: isWindowFullScreen ? 80 : 40) {
                     artworkPane
-                        .frame(width: isWindowFullScreen ? 480 : 380)
+                        .frame(width: isWindowFullScreen ? 520 : 380)
                         .frame(maxHeight: .infinity)
                     lyricsPane
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.horizontal, isWindowFullScreen ? 64 : 40)
-                .padding(.top, isWindowFullScreen ? 56 : 32)
-                .padding(.bottom, isWindowFullScreen ? 48 : 24)
+                .padding(.horizontal, isWindowFullScreen ? 100 : 56)
+                .padding(.top, isWindowFullScreen ? 70 : 50)
+                .padding(.bottom, isWindowFullScreen ? 80 : 60)
             }
 
-            floatingControls
-                .padding(18)
+            VStack(alignment: .trailing, spacing: 10) {
+                floatingControls
+                if isWindowFullScreen {
+                    fullscreenVolumeControl
+                }
+            }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(isWindowFullScreen ? 24 : 16)
+        }
+        .overlay(alignment: .topLeading) {
+            if isWindowFullScreen {
+                exitFullScreenPill
+                    .padding(.top, 18)
+                    .padding(.leading, 22)
+            }
+        }
+        .background {
+            NowPlayingWindowResolver { window in
+                hostWindow = window
+            }
         }
         .task(id: player.currentSong?.id) { await reloadLyrics() }
         .onChange(of: player.currentTime) { _, t in updateIndex(time: t) }
@@ -149,23 +167,39 @@ struct MacNowPlayingView: View {
     }
 
     private var artworkPane: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        let coverSize: CGFloat = isWindowFullScreen ? 520 : 380
+        let coverRadius: CGFloat = isWindowFullScreen ? 18 : 14
+        let horizontalAlignment: HorizontalAlignment = isWindowFullScreen ? .center : .leading
+        let frameAlignment: Alignment = isWindowFullScreen ? .center : .leading
+        let textAlignment: TextAlignment = isWindowFullScreen ? .center : .leading
+
+        return VStack(alignment: horizontalAlignment, spacing: isWindowFullScreen ? 32 : 18) {
             Spacer(minLength: 0)
-            Group {
+            ZStack {
+                RadialGradient(
+                    colors: [theme.accentColor.opacity(0.36), .clear],
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: coverSize * 0.62
+                )
+                .frame(width: coverSize + 40, height: coverSize + 40)
+                .blur(radius: 30)
+
                 if let song = player.currentSong {
                     CachedArtworkView(
                         coverRef: song.coverArtFileName,
                         songID: song.id,
                         size: nil,
-                        cornerRadius: 14,
+                        cornerRadius: coverRadius,
                         sourceID: song.sourceID,
                         filePath: song.filePath
                     )
                     .aspectRatio(1, contentMode: .fit)
+                    .frame(width: coverSize, height: coverSize)
                 } else {
-                    RoundedRectangle(cornerRadius: 14)
+                    RoundedRectangle(cornerRadius: coverRadius)
                         .fill(.quaternary)
-                        .aspectRatio(1, contentMode: .fit)
+                        .frame(width: coverSize, height: coverSize)
                         .overlay {
                             Image(systemName: "music.note")
                                 .font(.system(size: 80))
@@ -173,33 +207,38 @@ struct MacNowPlayingView: View {
                         }
                 }
             }
-            .frame(maxWidth: 460)
+            .frame(width: coverSize, height: coverSize)
             .shadow(color: .black.opacity(0.18), radius: 20, y: 8)
 
-            VStack(alignment: .leading, spacing: 6) {
-                if let format = player.currentSong?.fileFormat.displayName, !format.isEmpty {
-                    Text(format.uppercased())
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(1.2)
-                        .foregroundStyle(.white.opacity(0.62))
-                }
+            VStack(alignment: horizontalAlignment, spacing: 0) {
+                Text(nowPlayingInfoLine)
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(.white.opacity(0.62))
+                    .textCase(.uppercase)
                 Text(player.currentSong?.title ?? "")
-                    .font(.system(size: isWindowFullScreen ? 44 : 32, weight: .bold))
+                    .font(.system(size: isWindowFullScreen ? 56 : 36, weight: .bold))
                     .tracking(-0.6)
                     .foregroundStyle(.white)
                     .lineLimit(2)
-                Text(player.currentSong?.artistName ?? "")
-                    .font(.system(size: 16))
+                    .multilineTextAlignment(textAlignment)
+                    .padding(.top, 10)
+                Text(artistAlbumLine)
+                    .font(.system(size: isWindowFullScreen ? 20 : 16))
                     .foregroundStyle(.white.opacity(0.78))
                     .lineLimit(1)
-                if let album = player.currentSong?.albumTitle, !album.isEmpty {
-                    Text(album)
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(.white.opacity(0.62))
+                    .padding(.top, 6)
+                if let sourceLabel, !sourceLabel.isEmpty {
+                    Text(sourceLabel)
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
                         .lineLimit(1)
+                        .padding(.top, 6)
                 }
             }
-            .frame(maxWidth: 460, alignment: .leading)
+            .frame(width: coverSize, alignment: frameAlignment)
+
+            artworkScrubberRow(width: coverSize)
 
             Spacer(minLength: 0)
         }
@@ -208,8 +247,9 @@ struct MacNowPlayingView: View {
     private var lyricsPane: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    Spacer(minLength: 80).frame(height: 80)
+                LazyVStack(alignment: .leading, spacing: isWindowFullScreen ? 26 : 18) {
+                    Spacer(minLength: isWindowFullScreen ? 120 : 80)
+                        .frame(height: isWindowFullScreen ? 120 : 80)
                     if lyrics.isEmpty {
                         if player.currentSong == nil {
                             Color.clear.frame(height: 1)
@@ -246,11 +286,15 @@ struct MacNowPlayingView: View {
                                 .animation(.easeInOut(duration: 0.25), value: currentIndex)
                         }
                     }
-                    Spacer(minLength: 200).frame(height: 200)
+                    Spacer(minLength: isWindowFullScreen ? 240 : 200)
+                        .frame(height: isWindowFullScreen ? 240 : 200)
                 }
-                .padding(.horizontal, PMSpace.l24)
+                .padding(.horizontal, isWindowFullScreen ? 0 : PMSpace.l24)
             }
-            .pmVerticalFadeMask(startStop: 0.12, endStop: 0.88)
+            .pmVerticalFadeMask(
+                startStop: isWindowFullScreen ? 0.18 : 0.12,
+                endStop: isWindowFullScreen ? 0.82 : 0.88
+            )
             .onChange(of: currentIndex) { _, new in
                 guard !lyrics.isEmpty, new < lyrics.count else { return }
                 withAnimation(.easeInOut(duration: 0.3)) {
@@ -270,24 +314,38 @@ struct MacNowPlayingView: View {
     @ViewBuilder
     private func macLyricLine(line: LyricLine, index: Int, isActive: Bool, fontSize: CGFloat) -> some View {
         let scaledSize = fontSize * CGFloat(lyricsFontScale)
-        let weight: Font.Weight = isActive ? .semibold : .regular
+        let weight: Font.Weight = isActive ? .bold : .semibold
         let tint = theme.accentColor
+        let distance = abs(index - currentIndex)
+        let opacity = lyricOpacity(isActive: isActive, distance: distance)
         if shouldRenderWordTimeline(line: line, index: index, isActive: isActive) {
             KaraokeLineView(
                 line: line,
                 fontSize: scaledSize,
                 weight: weight,
-                activeColor: isActive ? tint : .white.opacity(0.6),
-                inactiveColor: .white.opacity(isActive ? 0.55 : 0.32),
+                activeColor: .white,
+                inactiveColor: .white.opacity(isActive ? 0.42 : 0.58),
                 timeAt: { date in player.interpolatedTime(at: date) }
             )
             .shadow(color: isActive ? tint.opacity(0.45) : .clear, radius: 14)
+            .opacity(opacity)
+            .frame(minHeight: scaledSize * 1.3, alignment: .leading)
         } else {
             Text(line.text)
                 .font(.system(size: scaledSize, weight: weight))
-                .foregroundStyle(isActive ? .white : .white.opacity(0.5))
-                .opacity(isActive ? 1 : 0.7)
+                .foregroundStyle(.white.opacity(isActive ? 1 : 0.92))
+                .opacity(opacity)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: scaledSize * 1.3, alignment: .leading)
         }
+    }
+
+    private func lyricOpacity(isActive: Bool, distance: Int) -> Double {
+        if isActive { return 1 }
+        let visibleDistance = isWindowFullScreen ? 6 : 5
+        guard distance <= visibleDistance else { return 0 }
+        return max(0.18, 0.62 - Double(distance) * 0.12)
     }
 
     private func shouldRenderWordTimeline(line: LyricLine, index: Int, isActive: Bool) -> Bool {
@@ -295,7 +353,93 @@ struct MacNowPlayingView: View {
         return isActive || abs(index - currentIndex) == 1
     }
 
+    // MARK: - Fullscreen cover transport
+
+    private var nowPlayingInfoLine: String {
+        guard let song = player.currentSong else { return "" }
+        var parts = ["正在播放", song.fileFormat.displayName]
+        if let bitRate = song.bitRate, bitRate > 0 {
+            let kbps = bitRate > 10_000 ? bitRate / 1_000 : bitRate
+            parts.append("\(kbps)kbps")
+        }
+        if let sampleRate = song.sampleRate, sampleRate > 0 {
+            parts.append(formattedSampleRate(sampleRate))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var sourceLabel: String? {
+        guard let song = player.currentSong else { return nil }
+        if let source = sourcesStore.source(id: song.sourceID) {
+            return source.name
+        }
+        let fallback = URL(fileURLWithPath: song.filePath).lastPathComponent
+        return fallback.isEmpty ? nil : fallback
+    }
+
+    private var artistAlbumLine: String {
+        guard let song = player.currentSong else { return "" }
+        return [song.artistName, song.albumTitle]
+            .compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: " · ")
+    }
+
+    private var playbackProgress: Double {
+        guard player.duration > 0 else { return 0 }
+        return min(1, max(0, player.currentTime / player.duration))
+    }
+
+    private func artworkScrubberRow(width: CGFloat) -> some View {
+        HStack(spacing: 8) {
+            Text(player.currentTime.formattedDuration)
+                .frame(width: 38, alignment: .trailing)
+            MacNowPlayingScrubber(progress: playbackProgress, accent: theme.accentColor)
+            Text(player.duration.formattedDuration)
+                .frame(width: 38, alignment: .leading)
+        }
+        .font(.system(size: 11, weight: .medium, design: .monospaced))
+        .foregroundStyle(.white.opacity(0.6))
+        .frame(width: width)
+    }
+
+    private func formattedSampleRate(_ sampleRate: Int) -> String {
+        let khz = Double(sampleRate) / 1_000
+        if khz.rounded() == khz {
+            return "\(Int(khz))kHz"
+        }
+        return String(format: "%.1fkHz", khz)
+    }
+
     // MARK: - Floating controls (top-right of the window)
+
+    private var exitFullScreenPill: some View {
+        Button {
+            exitFullScreen()
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("退出全屏")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.88))
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+            .background(Color.white.opacity(0.12), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.cancelAction)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .help(Text("退出全屏"))
+    }
 
     private var floatingControls: some View {
         HStack(spacing: 8) {
@@ -370,23 +514,55 @@ struct MacNowPlayingView: View {
             .glassEffect(.regular.interactive(), in: .circle)
             .help(Text("more"))
 
-            // Close —— 全屏时改成"退出全屏",非全屏时是"收起歌词"。
-            Button {
-                if isWindowFullScreen {
-                    NSApp.keyWindow?.toggleFullScreen(nil)
-                } else {
+            if !isWindowFullScreen {
+                Button {
                     onClose()
+                } label: {
+                    circleIcon("chevron.down")
                 }
-            } label: {
-                circleIcon(isWindowFullScreen
-                           ? "arrow.down.right.and.arrow.up.left"
-                           : "chevron.down")
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .help(Text("close"))
+                .keyboardShortcut(.cancelAction)
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: .circle)
-            .help(Text("close"))
-            .keyboardShortcut(.cancelAction)
         }
+    }
+
+    private var fullscreenVolumeControl: some View {
+        HStack(spacing: 8) {
+            Image(systemName: volumeSymbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .frame(width: 18)
+
+            PMVolumeSlider(value: Binding(
+                get: { Double(engine.volume) },
+                set: { engine.volume = Float($0) }
+            ), accessibilityLabel: String(localized: "volume"))
+            .frame(width: 118)
+
+            Text(verbatim: "\(Int((engine.volume * 100).rounded()))")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.62))
+                .frame(width: 28, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(Color.white.opacity(0.12), in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
+        }
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .help(Text("volume"))
+    }
+
+    private var volumeSymbol: String {
+        let v = engine.volume
+        if v <= 0.001 { return "speaker.slash.fill" }
+        if v < 0.4 { return "speaker.wave.1.fill" }
+        if v < 0.75 { return "speaker.wave.2.fill" }
+        return "speaker.wave.3.fill"
     }
 
     /// 关键: 把 36×36 frame + contentShape 放在 Button 的 label 内部
@@ -411,6 +587,22 @@ struct MacNowPlayingView: View {
     private func toggleLikedCurrent() {
         guard let songID = player.currentSong?.id else { return }
         library.toggleLiked(songID: songID)
+    }
+
+    private func exitFullScreen() {
+        let window = fullScreenWindow()
+        guard isWindowFullScreen || window?.styleMask.contains(.fullScreen) == true else { return }
+        window?.toggleFullScreen(nil)
+    }
+
+    private func fullScreenWindow() -> NSWindow? {
+        if let hostWindow, hostWindow.styleMask.contains(.fullScreen) {
+            return hostWindow
+        }
+        if let fullScreen = NSApp.windows.first(where: { $0.styleMask.contains(.fullScreen) }) {
+            return fullScreen
+        }
+        return hostWindow ?? NSApp.mainWindow ?? NSApp.keyWindow
     }
 
     // MARK: - Lyrics loading
@@ -460,5 +652,47 @@ struct MacNowPlayingView: View {
     }
 
     // 删除歌曲流程已移到 PlayerMoreMenu,这里不再保留 deleteCurrentSong。
+}
+
+private struct MacNowPlayingScrubber: View {
+    let progress: Double
+    let accent: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            let clamped = min(1, max(0, progress))
+            let width = max(0, proxy.size.width)
+            let fillWidth = width * clamped
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.18))
+                    .frame(height: 3)
+                Capsule()
+                    .fill(accent)
+                    .frame(width: max(3, fillWidth), height: 3)
+                Circle()
+                    .fill(.white)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: accent.opacity(0.35), radius: 8)
+                    .offset(x: min(max(0, fillWidth - 4), max(0, width - 8)))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
+        .frame(height: 8)
+    }
+}
+
+private struct NowPlayingWindowResolver: NSViewRepresentable {
+    var onResolve: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { onResolve(view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { onResolve(nsView.window) }
+    }
 }
 #endif

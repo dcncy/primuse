@@ -189,7 +189,8 @@ struct PlaylistDetailView: View {
                     onShuffle: {
                         player.shuffleEnabled = true
                         playAll()
-                    }
+                    },
+                    moreMenu: playlistMoreMenu
                 )
 
                 VStack(alignment: .leading, spacing: PMSpace.l) {
@@ -217,9 +218,6 @@ struct PlaylistDetailView: View {
             .padding(.bottom, 112)
         }
         .background(PMColor.bg.ignoresSafeArea())
-        .sheet(item: $exportShareItem) { item in
-            ShareSheet(items: [item.url])
-        }
         .sheet(isPresented: $showReorderSheet) {
             PlaylistReorderSheet(playlist: playlist, songs: songs) { newOrder in
                 library.replacePlaylistSongs(
@@ -270,50 +268,62 @@ struct PlaylistDetailView: View {
         }
     }
 
+    /// 设计稿 PlaylistDetail: header(含"更多"菜单) 之下直接是一行 "歌曲" 小标题 +
+    /// 曲目表, 不再单独放重排/导出工具条 —— 那些动作都收进了 header 的更多菜单。
     private var macPlaylistToolbar: some View {
         HStack(spacing: 8) {
-            Text("songs_count")
-                .font(.system(size: 11))
+            Text(verbatim: "歌曲")
+                .font(.system(size: 11, weight: .semibold))
                 .tracking(0.6)
                 .textCase(.uppercase)
                 .foregroundStyle(PMColor.textFaint)
             Spacer()
-            PMRoundBtn(icon: "arrow.down.circle", size: 26, iconSize: 12, style: .glass,
-                       help: "offline_download") {
-                sourceManager.downloadForOffline(songs: songs)
-            }
-            .disabled(songs.filteredPlayable().isEmpty)
-            Menu {
-                if !AppleMusicLibraryService.isAppleMusicMirrorPlaylist(playlist.id) {
-                    Button {
-                        showReorderSheet = true
-                    } label: {
-                        Label("playlist_reorder", systemImage: "arrow.up.arrow.down")
-                    }
-                    .disabled(songs.count < 2)
-                }
-                Button {
-                    export(format: .m3u8)
-                } label: {
-                    Label("playlist_export_m3u8", systemImage: "doc.text")
-                }
-                Button {
-                    export(format: .json)
-                } label: {
-                    Label("playlist_export_json", systemImage: "doc.badge.gearshape")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(PMColor.text)
-                    .frame(width: 26, height: 26)
-                    .background(PMColor.glassBtn, in: .circle)
-                    .overlay { Circle().strokeBorder(PMColor.cardBorder, lineWidth: 0.5) }
-            }
-            .menuStyle(.borderlessButton)
-            .disabled(songs.isEmpty)
         }
         .padding(.top, -2)
+    }
+
+    /// header 右上角"更多"按钮的菜单内容。播放 / 队列 / 重排 / 离线 / 导出 / 删除。
+    private var playlistMoreMenu: AnyView {
+        let playable = songs.filteredPlayable()
+        let isMirror = AppleMusicLibraryService.isAppleMusicMirrorPlaylist(playlist.id)
+        let canDelete = canDeletePlaylist(playlist.id)
+
+        var middle: [MacHeaderMoreMenu.Item] = []
+        if !isMirror {
+            middle.append(.init(icon: "arrow.up.arrow.down", title: String(localized: "playlist_reorder"),
+                                enabled: songs.count >= 2) { showReorderSheet = true })
+        }
+        middle.append(.init(icon: "arrow.down.circle", title: String(localized: "offline_download"),
+                            enabled: !playable.isEmpty) {
+            sourceManager.downloadForOffline(songs: songs)
+        })
+
+        return AnyView(MacHeaderMoreMenu(sections: [
+            [
+                .init(icon: "play.fill", title: String(localized: "play_all"),
+                      enabled: !playable.isEmpty, action: playAll),
+                .init(icon: "shuffle", title: String(localized: "shuffle"),
+                      enabled: !playable.isEmpty) {
+                    player.shuffleEnabled = true
+                    playAll()
+                },
+                .init(icon: "text.line.last.and.arrowtriangle.forward", title: String(localized: "add_to_queue"),
+                      enabled: !playable.isEmpty) { player.appendToQueue(playable) },
+                .init(icon: "text.line.first.and.arrowtriangle.forward", title: String(localized: "up_next"),
+                      enabled: !playable.isEmpty) { player.insertNextInQueue(playable) },
+            ],
+            middle,
+            [
+                .init(icon: "doc.text", title: String(localized: "playlist_export_m3u8"),
+                      enabled: !songs.isEmpty) { export(format: .m3u8) },
+                .init(icon: "curlybraces", title: String(localized: "playlist_export_json"),
+                      enabled: !songs.isEmpty) { export(format: .json) },
+            ],
+            canDelete ? [
+                .init(icon: "trash", title: String(localized: "delete_playlist"),
+                      isDestructive: true) { deleteCurrentPlaylist() },
+            ] : [],
+        ]))
     }
 
     private var macSongTable: some View {
@@ -488,6 +498,19 @@ struct PlaylistDetailView: View {
              && song.sourceID == AppleMusicLibraryService.systemSourceID
      }
 
+    private func canDeletePlaylist(_ playlistID: String) -> Bool {
+        !AppleMusicLibraryService.isAppleMusicMirrorPlaylist(playlistID)
+            && playlistID != MusicLibrary.likedSongsPlaylistID
+    }
+
+    private func deleteCurrentPlaylist() {
+        guard canDeletePlaylist(playlist.id) else { return }
+        library.deletePlaylist(id: playlist.id)
+        #if os(macOS)
+        NotificationCenter.default.post(name: .primuseSelectPlaylists, object: nil)
+        #endif
+    }
+
      private func export(format: PlaylistExporter.Format) {
         do {
             let target = currentPlaylist ?? playlist
@@ -497,7 +520,11 @@ struct PlaylistDetailView: View {
                 format: format,
                 sourcesStore: sourcesStore
             )
+            #if os(macOS)
+            try PlaylistExporter.presentSavePanel(for: url)
+            #else
             exportShareItem = ExportShareItem(url: url)
+            #endif
         } catch {
             exportError = error.localizedDescription
         }

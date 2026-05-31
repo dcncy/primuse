@@ -196,10 +196,6 @@ struct MacSettingsView: View {
                     .lineLimit(1)
 
                 Spacer(minLength: 4)
-
-                Text(verbatim: item.spec)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(selected ? Color.white.opacity(0.62) : PMColor.textFaint)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -210,7 +206,7 @@ struct MacSettingsView: View {
     }
 
     private var contentPane: some View {
-        MacSettingsScroll(title: tab.title, spec: tab.spec) {
+        MacSettingsScroll(title: tab.title) {
             settingsContent
         }
     }
@@ -250,12 +246,10 @@ struct MacSettingsView: View {
 
 private struct MacSettingsScroll<Content: View>: View {
     let title: String
-    let spec: String
     private let content: Content
 
-    init(title: String, spec: String, @ViewBuilder content: () -> Content) {
+    init(title: String, @ViewBuilder content: () -> Content) {
         self.title = title
-        self.spec = spec
         self.content = content()
     }
 
@@ -269,9 +263,6 @@ private struct MacSettingsScroll<Content: View>: View {
                         .font(.system(size: 22, weight: .bold))
                         .tracking(-0.3)
                         .foregroundStyle(PMColor.text)
-                    Text(verbatim: spec)
-                        .font(.system(size: 11.5, design: .monospaced))
-                        .foregroundStyle(PMColor.textFaint)
                 }
                 .padding(.bottom, 18)
 
@@ -301,25 +292,31 @@ private struct MacSTSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let title {
-                Text(verbatim: title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(PMColor.textFaint)
-                    .textCase(.uppercase)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 4)
-                    .padding(.bottom, -2)
+                let visibleTitle = PMTextWithoutDesignCodes(title)
+                if !visibleTitle.isEmpty {
+                    Text(verbatim: visibleTitle)
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(PMColor.textFaint)
+                        .textCase(.uppercase)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 4)
+                        .padding(.bottom, -2)
+                }
             }
 
             content
 
             if let hint {
-                Text(verbatim: hint)
-                    .font(.system(size: 10.5))
-                    .lineSpacing(3)
-                    .foregroundStyle(PMColor.textFaint)
-                    .padding(.horizontal, 14)
-                    .padding(.top, -4)
+                let visibleHint = PMTextWithoutDesignCodes(hint)
+                if !visibleHint.isEmpty {
+                    Text(verbatim: visibleHint)
+                        .font(.system(size: 10.5))
+                        .lineSpacing(3)
+                        .foregroundStyle(PMColor.textFaint)
+                        .padding(.horizontal, 14)
+                        .padding(.top, -4)
+                }
             }
         }
         .padding(.bottom, 22)
@@ -394,15 +391,21 @@ private struct MacSTRow<Content: View>: View {
 
     private var rowLabel: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(verbatim: label)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(PMColor.text)
-                .lineLimit(1)
+            let visibleLabel = PMTextWithoutDesignCodes(label)
+            if !visibleLabel.isEmpty {
+                Text(verbatim: visibleLabel)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(PMColor.text)
+                    .lineLimit(1)
+            }
             if let hint {
-                Text(verbatim: hint)
-                    .font(.system(size: 11))
-                    .foregroundStyle(PMColor.textFaint)
-                    .lineLimit(2)
+                let visibleHint = PMTextWithoutDesignCodes(hint)
+                if !visibleHint.isEmpty {
+                    Text(verbatim: visibleHint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(PMColor.textFaint)
+                        .lineLimit(2)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -582,7 +585,7 @@ private struct MacSTInfoText: View {
     var color: Color = PMColor.textMuted
 
     var body: some View {
-        Text(verbatim: text)
+        Text(verbatim: PMTextWithoutDesignCodes(text))
             .font(.system(size: 11.5, weight: .medium))
             .foregroundStyle(color)
             .lineLimit(1)
@@ -645,10 +648,10 @@ private struct MacSTPlaybackView: View {
                         )
                     }
                 }
-                MacSTRow("跳过开头静音", hint: "Silence trim · Intro") {
+                MacSTRow(Lz("Skip leading silence"), hint: "Silence trim · Intro") {
                     MacSTToggle(isOn: $s.skipLeadingSilenceEnabled)
                 }
-                MacSTRow("跳过结尾静音", hint: "Silence trim · Outro") {
+                MacSTRow(Lz("Skip trailing silence"), hint: "Silence trim · Outro") {
                     MacSTToggle(isOn: $s.skipTrailingSilenceEnabled)
                 }
                 MacSTRow(Lz("Match Hardware Sample Rate"), hint: Lz("Works on physical iOS devices; ignored by some hardware")) {
@@ -677,7 +680,7 @@ private struct MacSTPlaybackView: View {
                             AudioCacheManager.shared.clearAll()
                         }
                     }
-                    MacSTRow("预热队列前几首", hint: "P-24 · SourceManager.prewarm") {
+                    MacSTRow(Lz("Prewarm queue head"), hint: "P-24 · SourceManager.prewarm") {
                         MacSTSlider(
                             value: Binding(
                                 get: { Double(s.prewarmQueueCount) },
@@ -867,9 +870,9 @@ private struct MacSTEffectsView: View {
     var body: some View {
         @Bindable var fx = fx
 
-        MacSTSection("Effects Chain") {
+        MacSTSection(Lz("Effects Chain")) {
             MacSTGroup {
-                MacSTRow("启用效果链", hint: "ST-03 · Master bypass", divider: false) {
+                MacSTRow(Lz("Enable Effects Chain"), hint: Lz("Master bypass"), divider: false) {
                     MacSTToggle(isOn: $fx.effectChainEnabled)
                 }
             }
@@ -1065,15 +1068,15 @@ private struct MacSTScrapingView: View {
             }
         }
 
-        MacSTSection("Sidecar 回写", hint: "ST-04 · 写入到源目录旁路文件") {
+        MacSTSection(Lz("Sidecar Write-Back"), hint: Lz("Write sidecar files next to source tracks")) {
             MacSTGroup {
-                MacSTRow("封面写回", hint: "<歌曲名>-cover.jpg", divider: false) {
+                MacSTRow(Lz("Cover Write-Back"), hint: Lz("<Song Name>-cover.jpg"), divider: false) {
                     MacSTToggle(isOn: $sidecarCoverWriteEnabled)
                 }
-                MacSTRow("歌词写回", hint: "<歌曲名>.lrc") {
+                MacSTRow(Lz("Lyrics Write-Back"), hint: Lz("<Song Name>.lrc")) {
                     MacSTToggle(isOn: $sidecarLyricsWriteEnabled)
                 }
-                MacSTRow("写入超时", hint: "Network sidecar write timeout") {
+                MacSTRow(Lz("Write Timeout"), hint: Lz("Network sidecar write timeout")) {
                     MacSTSlider(
                         value: $sidecarWriteTimeout,
                         in: 5...120,
@@ -1238,10 +1241,10 @@ private struct MacScraperImportSheet: View {
                     .frame(width: 34, height: 34)
                     .background(PMColor.brand.opacity(0.14), in: .rect(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: "添加自定义刮削源")
+                    Text(verbatim: Lz("Add Custom Scraper Source"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(PMColor.text)
-                    Text(verbatim: "META-03 · ConfigurableScraper")
+                    Text(verbatim: "ConfigurableScraper")
                         .font(PMFont.caption)
                         .foregroundStyle(PMColor.textMuted)
                 }
@@ -1272,8 +1275,8 @@ private struct MacScraperImportSheet: View {
 
     private var modeSegment: some View {
         HStack(spacing: 2) {
-            modeButton(.url, title: "从 URL 导入", icon: "icloud.and.arrow.down")
-            modeButton(.paste, title: "粘贴 JSON", icon: "curlybraces")
+            modeButton(.url, title: Lz("Import from URL"), icon: "icloud.and.arrow.down")
+            modeButton(.paste, title: Lz("Paste JSON"), icon: "curlybraces")
         }
         .padding(3)
         .background(PMColor.glassBtn, in: .rect(cornerRadius: 9))
@@ -1327,14 +1330,14 @@ private struct MacScraperImportSheet: View {
     private var jsonImportPane: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(verbatim: "JSON 配置")
+                Text(verbatim: Lz("JSON Configuration"))
                     .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(PMColor.textMuted)
                 Spacer()
                 HStack(spacing: 5) {
                     Image(systemName: isJSONValid ? "checkmark" : "exclamationmark.triangle")
                         .font(.system(size: 10.5, weight: .semibold))
-                    Text(verbatim: isJSONValid ? "格式有效" : "等待有效 JSON")
+                    Text(verbatim: isJSONValid ? Lz("Valid format") : Lz("Waiting for valid JSON"))
                         .font(.system(size: 11, weight: .semibold))
                 }
                 .foregroundStyle(isJSONValid ? PMColor.ok : PMColor.warn)
@@ -1353,7 +1356,7 @@ private struct MacScraperImportSheet: View {
 
     private var urlImportPane: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(verbatim: "清单 URL")
+            Text(verbatim: Lz("Manifest URL"))
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(PMColor.textMuted)
             TextField("https://scrapers.primuse.app/netease.json", text: $text)
@@ -1367,7 +1370,7 @@ private struct MacScraperImportSheet: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(PMColor.brand, lineWidth: 1.5)
                 }
-            Text(verbatim: "指向 scraper.json 清单 · 会拉取清单 + 引用的 JS 脚本")
+            Text(verbatim: Lz("Points to scraper.json manifest · downloads manifest and referenced JS scripts"))
                 .font(.system(size: 10.5))
                 .foregroundStyle(PMColor.textFaint)
                 .padding(.bottom, 10)
@@ -1377,7 +1380,7 @@ private struct MacScraperImportSheet: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(PMColor.ok)
-                    Text(verbatim: "清单已获取 · 4.2 KB")
+                    Text(verbatim: Lz("Manifest fetched · 4.2 KB"))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(PMColor.text)
                 }
@@ -1408,7 +1411,7 @@ private struct MacScraperImportSheet: View {
     private var rightPane: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(verbatim: "解析结果")
+                Text(verbatim: Lz("Parse Result"))
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.6)
                     .textCase(.uppercase)
@@ -1438,7 +1441,7 @@ private struct MacScraperImportSheet: View {
                 }
                 .padding(.bottom, 14)
 
-                previewField("能力声明 (META-09)") {
+                previewField(Lz("Capabilities")) {
                     HStack(spacing: 5) {
                         ForEach(preview.capabilityLabels, id: \.self) { cap in
                             MacSTBadge(text: cap)
@@ -1450,7 +1453,7 @@ private struct MacScraperImportSheet: View {
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(PMColor.text)
                 }
-                previewField("自定义 Headers") {
+                previewField(Lz("Custom Headers")) {
                     VStack(alignment: .leading, spacing: 3) {
                         ForEach(preview.headerRows, id: \.self) { row in
                             Text(verbatim: row)
@@ -1459,7 +1462,7 @@ private struct MacScraperImportSheet: View {
                         }
                     }
                 }
-                previewField("SSL 信任域名") {
+                previewField(Lz("SSL Trusted Domains")) {
                     VStack(alignment: .leading, spacing: 3) {
                         ForEach(preview.sslDomains, id: \.self) { domain in
                             HStack(spacing: 6) {
@@ -1473,7 +1476,7 @@ private struct MacScraperImportSheet: View {
                         }
                     }
                 }
-                previewField("端点脚本") {
+                previewField(Lz("Endpoint Scripts")) {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(preview.endpointScripts, id: \.self) { script in
                             HStack(spacing: 6) {
@@ -1491,7 +1494,7 @@ private struct MacScraperImportSheet: View {
                 HStack(alignment: .top, spacing: 7) {
                     Image(systemName: "info.circle")
                         .font(.system(size: 11))
-                    Text(verbatim: "JS 在 JavaScriptCore 沙箱执行,仅能访问声明的域名")
+                    Text(verbatim: Lz("JS runs in a JavaScriptCore sandbox and can only access declared domains."))
                         .font(.system(size: 10.5))
                         .lineSpacing(3)
                 }
@@ -1521,7 +1524,7 @@ private struct MacScraperImportSheet: View {
         HStack {
             Spacer()
             MacSTButton(title: Lz("Cancel"), action: onCancel)
-            MacSTButton(title: "添加并启用", prominent: true, action: onImport)
+            MacSTButton(title: Lz("Add and Enable"), prominent: true, action: onImport)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(.horizontal, 18)
@@ -1599,9 +1602,13 @@ private struct MacScraperImportPreview {
     }
 
     var capabilityLabels: [String] {
-        let mapping: [(String, String)] = [("metadata", "元数据"), ("cover", "封面"), ("lyrics", "歌词")]
+        let mapping: [(String, String)] = [
+            ("metadata", Lz("Metadata")),
+            ("cover", Lz("Cover")),
+            ("lyrics", Lz("Lyrics"))
+        ]
         let labels = mapping.compactMap { key, label in capabilities.contains(key) ? label : nil }
-        return labels.isEmpty ? ["元数据", "封面", "歌词"] : labels
+        return labels.isEmpty ? [Lz("Metadata"), Lz("Cover"), Lz("Lyrics")] : labels
     }
 
     var rateLimitText: String {
@@ -2151,18 +2158,18 @@ private struct MacSTWidgetView: View {
                         width: 180
                     )
                 }
-                MacSTRow("共享数据范围", hint: "Widget payload") {
+                MacSTRow(Lz("Shared Data Scope"), hint: Lz("Widget payload")) {
                     MacSTPicker(
                         selection: $sharedDataScope,
                         options: [
-                            ("titleArtistCoverProgressLyrics", "标题 + 艺术家 + 封面 + 进度 + 歌词"),
-                            ("titleArtistCoverProgress", "标题 + 艺术家 + 封面 + 进度"),
-                            ("minimal", "标题 + 艺术家")
+                            ("titleArtistCoverProgressLyrics", Lz("Title + Artist + Cover + Progress + Lyrics")),
+                            ("titleArtistCoverProgress", Lz("Title + Artist + Cover + Progress")),
+                            ("minimal", Lz("Title + Artist"))
                         ],
                         width: 280
                     )
                 }
-                MacSTRow("可点击交互", hint: "WidgetURL / AppIntent") {
+                MacSTRow(Lz("Clickable Interaction"), hint: "WidgetURL / AppIntent") {
                     MacSTToggle(isOn: $clickableInteraction)
                 }
                 MacSTRow(Lz("Refresh Now")) {
@@ -2173,7 +2180,7 @@ private struct MacSTWidgetView: View {
             }
         }
 
-        MacSTSection("可用 Widget", hint: "ST-07 · 系统小组件库仍由 WidgetKit 管理; 勾选项控制猿音推送的数据范围") {
+        MacSTSection(Lz("Available Widgets"), hint: Lz("WidgetKit still manages the system widget gallery; checked items control which data Primuse pushes.")) {
             MacSTGroup {
                 MacSTWidgetChecklistRow(
                     title: "Now Playing",
@@ -3666,7 +3673,7 @@ private struct MacSTSSLView: View {
                     Text(verbatim: Lz("Add Trusted Domain"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(PMColor.text)
-                    Text(verbatim: Lz("ST-10 · Trust self-signed certificates for this domain only"))
+                    Text(verbatim: PMTextWithoutDesignCodes(Lz("ST-10 · Trust self-signed certificates for this domain only")))
                         .font(PMFont.caption)
                         .foregroundStyle(PMColor.textMuted)
                 }
@@ -3810,7 +3817,7 @@ private final class MacUpdateCheckWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        win.title = "软件更新"
+        win.title = Lz("Software Update")
         win.isReleasedWhenClosed = false
         win.contentViewController = NSHostingController(
             rootView: MacUpdateCheckView { [weak self] in self?.close() }
@@ -3865,7 +3872,7 @@ private final class MacDiagnosticsWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        win.title = "诊断日志"
+        win.title = Lz("Diagnostic Logs")
         win.minSize = NSSize(width: 640, height: 480)
         win.center()
         win.isReleasedWhenClosed = false
@@ -3910,23 +3917,23 @@ private struct MacUpdateCheckView: View {
     }
 
     private var statusTitle: String {
-        if hasUpdate { return "有新版本可用" }
-        if checker.isChecking { return "正在检查更新" }
-        if checker.lastErrorMessage != nil { return "检查更新失败" }
-        return "已是最新版本"
+        if hasUpdate { return Lz("Update Available") }
+        if checker.isChecking { return Lz("Checking for Updates") }
+        if checker.lastErrorMessage != nil { return Lz("Couldn't Check for Updates") }
+        return Lz("You're up to date")
     }
 
     private var statusSubtitle: String {
         if hasUpdate {
-            return "\(checker.platformName) · 当前 \(currentVersion) · App Store \(latestVersion)"
+            return String(format: Lz("%@ · Current %@ · App Store %@"), checker.platformName, currentVersion, latestVersion)
         }
-        return "\(checker.platformName) · 当前版本 \(currentVersion)"
+        return String(format: Lz("%@ · Current version %@"), checker.platformName, currentVersion)
     }
 
     private var lastCheckText: String {
-        guard let date = checker.lastCheckedAt else { return "尚未检查" }
+        guard let date = checker.lastCheckedAt else { return Lz("Not checked yet") }
         if Date().timeIntervalSince(date) < 60 {
-            return "刚刚"
+            return Lz("Just now")
         }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
@@ -3970,7 +3977,7 @@ private struct MacUpdateCheckView: View {
                         checker.openAppStore()
                         if hasUpdate { onClose() }
                     } label: {
-                        Label(hasUpdate ? "前往 App Store" : "打开 App Store",
+                        Label(hasUpdate ? Lz("Go to App Store") : Lz("Open App Store"),
                               systemImage: hasUpdate ? "arrow.down.circle.fill" : "bag")
                             .font(.system(size: 12.5, weight: .semibold))
                             .foregroundStyle(.white)
@@ -3994,26 +4001,26 @@ private struct MacUpdateCheckView: View {
                     Image(systemName: checker.lastErrorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(checker.lastErrorMessage == nil ? PMColor.ok : PMColor.bad)
-                    Text(verbatim: checker.lastErrorMessage ?? "上次检查：\(lastCheckText)")
+                    Text(verbatim: checker.lastErrorMessage ?? String(format: Lz("Last checked: %@"), lastCheckText))
                         .font(.system(size: 12.5))
                         .foregroundStyle(checker.lastErrorMessage == nil ? PMColor.textMuted : PMColor.bad)
                         .lineLimit(2)
                 }
 
-                Text(verbatim: hasUpdate ? "更新将通过 App Store 完成。" : "没有发现可用更新。")
+                Text(verbatim: hasUpdate ? Lz("The update will be installed from the App Store.") : Lz("No updates available."))
                     .font(.system(size: 12))
                     .foregroundStyle(PMColor.textFaint)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
-                    versionBadge(title: "当前", value: currentVersion)
+                    versionBadge(title: Lz("Current"), value: currentVersion)
                     versionBadge(title: "App Store", value: latestVersion)
                     if let minimumOS = updateInfo?.minimumOSVersion {
-                        versionBadge(title: "最低系统", value: minimumOS)
+                        versionBadge(title: Lz("Minimum OS"), value: minimumOS)
                     }
                     if let releaseDateText {
-                        versionBadge(title: "发布日期", value: releaseDateText)
+                        versionBadge(title: Lz("Release Date"), value: releaseDateText)
                     }
                 }
 
@@ -4022,7 +4029,7 @@ private struct MacUpdateCheckView: View {
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(PMColor.text)
                     ScrollView(.vertical, showsIndicators: true) {
-                        Text(verbatim: updateInfo?.releaseNotes ?? "App Store 暂未提供 release notes。")
+                        Text(verbatim: updateInfo?.releaseNotes ?? Lz("App Store does not provide release notes yet."))
                             .font(.system(size: 12))
                             .foregroundStyle(PMColor.textMuted)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -4042,14 +4049,14 @@ private struct MacUpdateCheckView: View {
 
             HStack(spacing: 10) {
                 MacSTToggle(isOn: $autoCheck)
-                Text(verbatim: "自动检查更新（每天一次）")
+                Text(verbatim: Lz("Auto-check for updates (daily)"))
                     .font(.system(size: 11.5))
                     .foregroundStyle(PMColor.textFaint)
                 Spacer()
                 Button {
                     Task { await checker.checkForUpdate(force: true) }
                 } label: {
-                    Text(verbatim: checker.isChecking ? "检查中..." : "重新检查")
+                    Text(verbatim: checker.isChecking ? Lz("Checking...") : Lz("Check Again"))
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(PMColor.brand)
                 }
@@ -4101,10 +4108,10 @@ private struct MacLicensesPanel: View {
                     .buttonStyle(.plain)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: selected?.name ?? "开源许可证")
+                    Text(verbatim: selected?.name ?? Lz("Open-Source Licenses"))
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(PMColor.text)
-                    Text(verbatim: selected == nil ? "ST-11 · Primuse 使用的开源组件" : "\(selected?.license ?? "") · 许可证全文")
+                    Text(verbatim: selected == nil ? Lz("Open-source components used by Primuse") : String(format: Lz("%@ · Full license text"), selected?.license ?? ""))
                         .font(.system(size: 11))
                         .foregroundStyle(PMColor.textMuted)
                 }
@@ -4178,7 +4185,7 @@ private struct MacLicensesPanel: View {
             }
 
             Rectangle().fill(PMColor.divider).frame(height: 0.5)
-            Text(verbatim: selected == nil ? "点按任一项查看完整许可证全文" : "许可证文本随组件版本更新,分发时以仓库中 LICENSE 为准")
+            Text(verbatim: selected == nil ? Lz("Select an item to view the full license text") : Lz("License text follows component versions; distribution uses the LICENSE file in the repository."))
                 .font(.system(size: 10.5))
                 .foregroundStyle(PMColor.textFaint)
                 .frame(maxWidth: .infinity)
@@ -4205,16 +4212,16 @@ private struct MacLicenseComponent: Identifiable, Hashable {
     let use: String
 
     static let items: [MacLicenseComponent] = [
-        .init(name: "SFBAudioEngine", license: "MIT", use: "音频解码引擎"),
-        .init(name: "FFmpeg", license: "LGPL 2.1", use: "附加格式解码"),
-        .init(name: "AMSMB2", license: "BSD-3", use: "SMB / CIFS 连接"),
-        .init(name: "Citadel", license: "MIT", use: "SFTP 客户端"),
-        .init(name: "NFSKit", license: "MIT", use: "NFS 浏览"),
+        .init(name: "SFBAudioEngine", license: "MIT", use: Lz("Audio decoding engine")),
+        .init(name: "FFmpeg", license: "LGPL 2.1", use: Lz("Additional format decoding")),
+        .init(name: "AMSMB2", license: "BSD-3", use: Lz("SMB / CIFS connection")),
+        .init(name: "Citadel", license: "MIT", use: Lz("SFTP client")),
+        .init(name: "NFSKit", license: "MIT", use: Lz("NFS browsing")),
         .init(name: "GRDB.swift", license: "MIT", use: "SQLite + FTS5"),
-        .init(name: "Nuke", license: "MIT", use: "封面图片加载缓存"),
-        .init(name: "Swift Collections", license: "Apache 2.0", use: "数据结构"),
-        .init(name: "KeychainAccess", license: "MIT", use: "凭据存储"),
-        .init(name: "swift-log", license: "Apache 2.0", use: "日志"),
+        .init(name: "Nuke", license: "MIT", use: Lz("Cover image loading and cache")),
+        .init(name: "Swift Collections", license: "Apache 2.0", use: Lz("Data structures")),
+        .init(name: "KeychainAccess", license: "MIT", use: Lz("Credential storage")),
+        .init(name: "swift-log", license: "Apache 2.0", use: Lz("Logging")),
     ]
 
     var fullText: String {
@@ -4240,15 +4247,15 @@ private struct MacDiagnosticsWindowView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: "诊断")
+                    Text(verbatim: Lz("Diagnostics"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(PMColor.text)
-                    Text(verbatim: "ST-20 · MetricKit + 崩溃日志")
+                    Text(verbatim: Lz("MetricKit + crash logs"))
                         .font(.system(size: 11))
                         .foregroundStyle(PMColor.textMuted)
                 }
                 Spacer()
-                MacSTButton(title: "导出日志", systemImage: "square.and.arrow.up") {
+                MacSTButton(title: Lz("Export Logs"), systemImage: "square.and.arrow.up") {
                     NSWorkspace.shared.activateFileViewerSelecting([FileLogger.shared.logFileURL])
                 }
             }
@@ -4258,16 +4265,16 @@ private struct MacDiagnosticsWindowView: View {
             Rectangle().fill(PMColor.divider).frame(height: 0.5)
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
-                healthMetric("内存", value: "412 MB", color: PMColor.ok)
-                healthMetric("CPU (播放)", value: "4.2%", color: PMColor.ok)
-                healthMetric("缓存", value: "318 / 500 MB", color: PMColor.text)
-                healthMetric("崩溃 (30 天)", value: "\(AppServices.shared.crashDiagnostics.reports().count)", color: PMColor.ok)
+                healthMetric(Lz("Memory"), value: "412 MB", color: PMColor.ok)
+                healthMetric(Lz("CPU (playback)"), value: "4.2%", color: PMColor.ok)
+                healthMetric(Lz("Cache"), value: "318 / 500 MB", color: PMColor.text)
+                healthMetric(Lz("Crashes (30 days)"), value: "\(AppServices.shared.crashDiagnostics.reports().count)", color: PMColor.ok)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
 
             HStack(spacing: 8) {
-                Text(verbatim: "实时日志")
+                Text(verbatim: Lz("Live Logs"))
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.6)
                     .textCase(.uppercase)
@@ -4298,7 +4305,7 @@ private struct MacDiagnosticsWindowView: View {
                                 .foregroundStyle(Color(red: 0.85, green: 0.83, blue: 0.78))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             if copiedRowID == row.id {
-                                Text(verbatim: "已复制")
+                                Text(verbatim: Lz("Copied"))
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(PMColor.brand)
                             }
@@ -4311,7 +4318,7 @@ private struct MacDiagnosticsWindowView: View {
                                     in: .rect(cornerRadius: 5))
                         .contentShape(Rectangle())
                         .onTapGesture { copy(row) }
-                        .help("点击复制该行日志")
+                        .help(Lz("Click to copy this log line"))
                     }
                 }
                 .padding(12)
@@ -4386,7 +4393,7 @@ private enum MacLogFilter: CaseIterable, Equatable {
 
     var title: String {
         switch self {
-        case .all: return "全部"
+        case .all: return Lz("All")
         case .warn: return "WARN"
         case .error: return "ERROR"
         }
@@ -4442,13 +4449,13 @@ private struct MacLogRow {
     }
 
     static let samples: [MacLogRow] = [
-        .init(time: "21:14:08", level: "INFO", module: "ScanService", message: "群晖 WebDAV · Phase B 完成 · 1208 首"),
-        .init(time: "21:13:52", level: "INFO", module: "Metadata", message: "backfill 剩余 2384 · 速率 18/s"),
-        .init(time: "21:12:30", level: "WARN", module: "CloudKit", message: "推送 throttled · 将在 60s 后重试"),
-        .init(time: "21:10:04", level: "INFO", module: "AudioEngine", message: "DSD256 → PCM384 实时转换 · iFi Zen DAC"),
-        .init(time: "21:08:41", level: "ERROR", module: "SFTP", message: "archive.home · 密钥过期 · auth failed"),
-        .init(time: "21:05:19", level: "INFO", module: "Scrobble", message: "Last.fm · 已上报 十年 (50%)"),
-        .init(time: "21:02:00", level: "INFO", module: "App", message: "启动一次性任务完成 · 247ms"),
+        .init(time: "21:14:08", level: "INFO", module: "ScanService", message: "Synology WebDAV · Phase B complete · 1208 songs"),
+        .init(time: "21:13:52", level: "INFO", module: "Metadata", message: "Backfill remaining 2384 · 18/s"),
+        .init(time: "21:12:30", level: "WARN", module: "CloudKit", message: "Push throttled · retrying in 60s"),
+        .init(time: "21:10:04", level: "INFO", module: "AudioEngine", message: "DSD256 → PCM384 realtime conversion · iFi Zen DAC"),
+        .init(time: "21:08:41", level: "ERROR", module: "SFTP", message: "archive.home · key expired · auth failed"),
+        .init(time: "21:05:19", level: "INFO", module: "Scrobble", message: "Last.fm · submitted track (50%)"),
+        .init(time: "21:02:00", level: "INFO", module: "App", message: "One-shot launch tasks completed · 247ms"),
     ]
 }
 
@@ -4467,7 +4474,7 @@ private struct MacSTAboutView: View {
         VStack(spacing: 0) {
             BrandMonogram(slot: .feature)
 
-            Text(verbatim: "猿音 Primuse")
+            Text(verbatim: PMAppDisplayName())
                 .font(.system(size: 24, weight: .bold))
                 .tracking(-0.4)
                 .foregroundStyle(PMColor.text)

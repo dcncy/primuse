@@ -2089,6 +2089,10 @@ final class AudioPlayerService {
     func syncSongMetadata(_ updatedSong: Song) {
         if currentSong?.id == updatedSong.id {
             currentSong = updatedSong
+            let updatedDuration = updatedSong.duration.sanitizedDuration
+            if updatedDuration > 0 {
+                duration = updatedDuration
+            }
             updateNowPlayingInfo()
             updatePlaybackState()
         }
@@ -2113,22 +2117,10 @@ final class AudioPlayerService {
         transition: GaplessTransitionState,
         playID id: UUID
     ) async {
-        // Sanity check: 当前歌还远没听完就 fire boundary, 说明上游有问题
-        // (CloudPlaybackSource 短读 / decoder 误判 EOF / MP3 帧元数据偏差),
-        // 直接切歌会让用户体感是"歌没播完就跳了"。重置 decoder pipeline
-        // 走 autoAdvanceAfterFailure, 上层会判断是 retry 还是真切下一首。
-        if duration > 30, currentTime < duration - 5, !isLoading {
-            plog("⚠️ premature gapless boundary suppressed: currentTime=\(String(format: "%.1f", currentTime))s duration=\(String(format: "%.1f", duration))s playID=\(id.uuidString.prefix(8))")
-            transition.shouldCancelPreparation = true
-            cancelGaplessTasks()
-            await autoAdvanceAfterFailure()
-            return
-        }
-
         transition.didBoundaryFire = true
 
         // 防御性兜底: 10 秒内 boundary 触发 ≥4 次 = 队列里有 partial/坏掉
-        // 的歌反复切歌, 强制 pause 并 cancel 后续 gapless 准备, 避免占满
+        // 的歌反复切歌, 强制 pause 并 cancel 后续准备, 避免占满
         // CPU + 不停下载 + UI 像是 loading 卡死的体感。
         let now = Date()
         recentBoundaryTimes.append(now)
@@ -2139,6 +2131,21 @@ final class AudioPlayerService {
             transition.shouldCancelPreparation = true
             cancelGaplessTasks()
             pause()
+            return
+        }
+
+        // Sanity check: 当前歌还远没听完就 fire boundary, 说明上游有问题
+        // (CloudPlaybackSource 短读 / decoder 误判 EOF / MP3 帧元数据偏差),
+        // 直接切歌会让用户体感是"歌没播完就跳了"。这里重建当前歌曲的
+        // decoder pipeline, 从当前进度前一点继续拉数据; 如果仍失败,
+        // seek 路径会停在当前曲而不是静默跳到下一首。
+        if duration > 30, currentTime < duration - 5, !isLoading {
+            plog("⚠️ premature gapless boundary suppressed: currentTime=\(String(format: "%.1f", currentTime))s duration=\(String(format: "%.1f", duration))s playID=\(id.uuidString.prefix(8))")
+            transition.shouldCancelPreparation = true
+            cancelGaplessTasks()
+            showPlaybackError(String(localized: "playback_error_connection"))
+            let recoveryTime = max(0, currentTime - 2)
+            seek(to: recoveryTime, startPlaying: true, isRecovery: true)
             return
         }
 

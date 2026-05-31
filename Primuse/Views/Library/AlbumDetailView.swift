@@ -7,6 +7,7 @@ struct AlbumDetailView: View {
     @Environment(SourceManager.self) private var sourceManager
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
+    @Environment(MusicScraperService.self) private var scraperService
     let album: Album
 
     private var songs: [Song] {
@@ -160,6 +161,11 @@ struct AlbumDetailView: View {
         var second: [MacHeaderMoreMenu.Item] = [
             .init(icon: "arrow.down.circle", title: "离线下载", enabled: !playable.isEmpty) {
                 sourceManager.downloadForOffline(songs: songs)
+            },
+            .init(icon: "wand.and.stars", title: String(localized: "scrape_missing_metadata"),
+                  trailing: songs.count.formatted(),
+                  enabled: !songs.isEmpty && !scraperService.isScraping) {
+                scraperService.scrapeMissingMetadata(songs: songs, in: library)
             },
         ]
         if let artist = albumArtist {

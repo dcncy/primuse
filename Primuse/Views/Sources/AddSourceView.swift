@@ -165,7 +165,7 @@ struct AddSourceView: View {
                 Text(isEditing ? String(localized: "edit_source") : sourceType.displayName)
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(PMColor.text)
-                Text(isEditing ? "SRC-28 · 编辑连接信息" : "SRC-01 · \(sourceType.displayName)")
+                Text(isEditing ? "编辑连接信息" : sourceType.displayName)
                     .font(.system(size: 11))
                     .foregroundStyle(PMColor.textFaint)
             }

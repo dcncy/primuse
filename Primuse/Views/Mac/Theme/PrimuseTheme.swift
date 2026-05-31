@@ -673,18 +673,29 @@ private struct PMWindowResolver: NSViewRepresentable {
 /// ScrollView 的 NSScrollView, 然后强制隐藏它的两个 NSScroller (无视系统
 /// 偏好), 用在那种空间紧凑、滚动条会很碍眼的 popover 场景。
 private struct PMNSScrollerHider: NSViewRepresentable {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        weak var configured: NSScrollView?
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        DispatchQueue.main.async { hide(from: view) }
+        DispatchQueue.main.async { hide(from: view, coordinator: context.coordinator) }
         return view
     }
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { hide(from: nsView) }
+        // 已经找到并配置过就不再搜 —— 否则每次 updateNSView (滚动时可能很频繁) 都
+        // 递归遍历一遍视图树找 NSScrollView, 自己反而成了卡顿源。
+        guard context.coordinator.configured == nil else { return }
+        DispatchQueue.main.async { hide(from: nsView, coordinator: context.coordinator) }
     }
-    private func hide(from view: NSView) {
+    private func hide(from view: NSView, coordinator: Coordinator) {
+        if coordinator.configured != nil { return }
         // 1. 这个 0×0 view 若正好在 scroll 内容里, enclosingScrollView 直接命中。
         if let sv = view.enclosingScrollView {
             configure(sv)
+            coordinator.configured = sv
             return
         }
         // 2. 但我们是用 `.background(...)` 挂上去的 —— SwiftUI 把它放成 NSScrollView
@@ -695,6 +706,7 @@ private struct PMNSScrollerHider: NSViewRepresentable {
         while let a = ancestor, hops < 8 {
             if let sv = Self.firstScrollView(in: a) {
                 configure(sv)
+                coordinator.configured = sv
                 return
             }
             ancestor = a.superview
@@ -932,6 +944,43 @@ extension View {
 @inline(__always)
 func Lz(_ english: String.LocalizationValue) -> String {
     String(localized: english)
+}
+
+func PMUsesChineseBranding() -> Bool {
+    Locale.preferredLanguages.first?.hasPrefix("zh") == true
+}
+
+func PMAppDisplayName() -> String {
+    PMUsesChineseBranding() ? "猿音 Primuse" : "Primuse"
+}
+
+func PMAppPrimaryDisplayName() -> String {
+    PMUsesChineseBranding() ? "猿音" : "Primuse"
+}
+
+func PMAppSecondaryDisplayName() -> String? {
+    PMUsesChineseBranding() ? "Primuse" : nil
+}
+
+func PMTextWithoutDesignCodes(_ text: String) -> String {
+    let codePattern = #"\b(?:STATS|THEME|SCROB|CAST|META|SRC|LIB|SYS|PL|FX|ST|P|S|C|L)-(?:\d{1,3}(?:/\d{1,3})?|\*)\b"#
+    var cleaned = text.replacingOccurrences(of: codePattern,
+                                             with: "",
+                                             options: .regularExpression)
+    let cleanupPatterns = [
+        #"\s*[（(]\s*[)）]\s*"#,
+        #"\s*[·•|/—–-]+\s*(?:Matches design\s+sizes|与设计稿\s*尺寸一致)\s*$"#,
+        #"\s*->\s*"#,
+        #"^\s*[·•|/—–-]+\s*"#,
+        #"\s*[·•|/—–-]+\s*$"#,
+        #"\s{2,}"#
+    ]
+    for pattern in cleanupPatterns {
+        cleaned = cleaned.replacingOccurrences(of: pattern,
+                                               with: pattern == #"\s{2,}"# ? " " : "",
+                                               options: .regularExpression)
+    }
+    return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 // MARK: - Color scheme override (light / dark / system)

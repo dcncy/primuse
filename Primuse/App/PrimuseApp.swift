@@ -144,6 +144,77 @@ extension Notification.Name {
     static let primuseRequestExpandNowPlaying = Notification.Name("primuse.expandNowPlaying")
 }
 
+private enum MacScreenshotWindowPreset {
+    private static let argumentPrefix = "--primuse-screenshot-window="
+
+    private static var requestedSize: NSSize? {
+        ProcessInfo.processInfo.arguments.compactMap { argument -> NSSize? in
+            guard argument.hasPrefix(argumentPrefix) else { return nil }
+            let rawValue = argument.dropFirst(argumentPrefix.count)
+            let parts = rawValue.split(separator: "x")
+            guard parts.count == 2,
+                  let width = Double(String(parts[0])),
+                  let height = Double(String(parts[1])),
+                  width > 0,
+                  height > 0 else {
+                return nil
+            }
+            return NSSize(width: width, height: height)
+        }.first
+    }
+
+    @MainActor
+    static func applyIfRequested() {
+        guard let size = requestedSize else { return }
+        Task { @MainActor in
+            for _ in 0..<80 {
+                if let window = mainWindowCandidate() {
+                    apply(size: size, to: window)
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+    }
+
+    @MainActor
+    private static func mainWindowCandidate() -> NSWindow? {
+        if let main = NSApp.mainWindow, isMainAppWindow(main) {
+            return main
+        }
+        if let key = NSApp.keyWindow, isMainAppWindow(key) {
+            return key
+        }
+        return NSApp.windows
+            .filter(isMainAppWindow)
+            .max { lhs, rhs in
+                (lhs.frame.width * lhs.frame.height) < (rhs.frame.width * rhs.frame.height)
+            }
+    }
+
+    @MainActor
+    private static func isMainAppWindow(_ window: NSWindow) -> Bool {
+        !(window is NSPanel) &&
+        window.canBecomeMain &&
+        !window.styleMask.contains(.utilityWindow) &&
+        window.frameAutosaveName != "PrimuseMiniPlayer" &&
+        window.frameAutosaveName != "PrimuseDesktopLyrics"
+    }
+
+    @MainActor
+    private static func apply(size: NSSize, to window: NSWindow) {
+        let visibleFrame = window.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? NSRect(origin: .zero, size: size)
+        let origin = NSPoint(
+            x: visibleFrame.midX - size.width / 2,
+            y: visibleFrame.midY - size.height / 2
+        )
+        window.setFrame(NSRect(origin: origin, size: size), display: true)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
 /// SwiftUI 的 `openWindow` action 只能在 View 层级里通过 `@Environment`
 /// 拿到,但菜单栏 popover 上的 "Open Main Window" 按钮要从 AppKit 的
 /// `MacMenuBarController` 调用——用户把主窗口红灯关掉后,`NSApp.windows`
@@ -196,6 +267,7 @@ final class PrimuseAppDelegate: NSObject, NSApplicationDelegate {
 
             self.miniPlayer = MiniPlayerWindowController()
             plog("🪟 AppDelegate didFinishLaunching: menuBar=ok lyrics=ok miniPlayer=\(self.miniPlayer == nil ? "nil" : "ok") delegateType=\(type(of: NSApp.delegate as Any))")
+            MacScreenshotWindowPreset.applyIfRequested()
 
             // 年度报告: 启动时把 PlayHistoryStore 按年份归档, 防止 5000 条
             // FIFO 上限把跨年的早期月份裁掉。详见 Docs/YearlyReport.md §二。

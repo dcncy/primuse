@@ -4,6 +4,7 @@ import PrimuseKit
 struct PlaylistListView: View {
     @Environment(MusicLibrary.self) private var library
     @Environment(AudioPlayerService.self) private var player
+    @Environment(MusicScraperService.self) private var scraperService
     @State private var showNewPlaylist = false
     @State private var newPlaylistName = ""
     @State private var newPlaylistDescription = ""
@@ -431,7 +432,8 @@ struct PlaylistListView: View {
 
     @ViewBuilder
     private func playlistContextMenu(for playlist: Playlist) -> some View {
-        let playable = library.songs(forPlaylist: playlist.id).filteredPlayable()
+        let playlistSongs = library.songs(forPlaylist: playlist.id)
+        let playable = playlistSongs.filteredPlayable()
 
         Button {
             playPlaylist(playlist)
@@ -461,6 +463,13 @@ struct PlaylistListView: View {
             Label("up_next", systemImage: "text.line.first.and.arrowtriangle.forward")
         }
         .disabled(playable.isEmpty)
+
+        Button {
+            scraperService.scrapeMissingMetadata(songs: playlistSongs, in: library)
+        } label: {
+            Label("scrape_missing_metadata", systemImage: "wand.and.stars")
+        }
+        .disabled(playlistSongs.isEmpty || scraperService.isScraping)
 
         if !isSystemPlaylist(playlist.id) {
             Divider()
@@ -521,9 +530,6 @@ struct MacNewPlaylistSheet: View {
                     Text(verbatim: "新建歌单")
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(PMColor.text)
-                    Text(verbatim: "PL-01")
-                        .font(.system(size: 11))
-                        .foregroundStyle(PMColor.textMuted)
                 }
                 Spacer()
                 Button(action: onCancel) {

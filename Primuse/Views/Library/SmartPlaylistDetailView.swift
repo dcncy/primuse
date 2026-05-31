@@ -12,6 +12,7 @@ struct SmartPlaylistDetailView: View {
     @Environment(SourceManager.self) private var sourceManager
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
+    @Environment(MusicScraperService.self) private var scraperService
 
     @State private var showEditor = false
 
@@ -228,12 +229,25 @@ struct SmartPlaylistDetailView: View {
                     player.shuffleEnabled = true
                     playAll()
                 },
+                .init(icon: "text.line.last.and.arrowtriangle.forward", title: String(localized: "add_to_queue"),
+                      enabled: !playable.isEmpty) {
+                    player.appendToQueue(playable)
+                },
+                .init(icon: "text.line.first.and.arrowtriangle.forward", title: String(localized: "up_next"),
+                      enabled: !playable.isEmpty) {
+                    player.insertNextInQueue(playable)
+                },
             ],
             [
                 .init(icon: "slider.horizontal.3", title: "编辑规则") { showEditor = true },
                 .init(icon: "arrow.down.circle", title: String(localized: "offline_download"),
                       enabled: !playable.isEmpty) {
                     sourceManager.downloadForOffline(songs: matched)
+                },
+                .init(icon: "wand.and.stars", title: String(localized: "scrape_missing_metadata"),
+                      trailing: matched.count.formatted(),
+                      enabled: !matched.isEmpty && !scraperService.isScraping) {
+                    scraperService.scrapeMissingMetadata(songs: matched, in: library)
                 },
             ],
             [

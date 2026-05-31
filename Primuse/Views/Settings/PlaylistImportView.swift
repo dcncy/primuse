@@ -131,10 +131,10 @@ struct PlaylistImportView: View {
             .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("导入歌单")
+                Text("playlist_import_title")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(PMColor.text)
-                Text(preview == nil ? "M3U8 / JSON · 选择文件后自动匹配本地资料库" : importedFromName)
+                Text(verbatim: preview == nil ? String(localized: "playlist_import_mac_subtitle") : importedFromName)
                     .font(.system(size: 12.5))
                     .foregroundStyle(PMColor.textMuted)
                     .lineLimit(1)
@@ -142,9 +142,11 @@ struct PlaylistImportView: View {
 
             Spacer()
 
-            Text(preview == nil ? "PL-06" : "READY")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(PMColor.textFaint)
+            if preview != nil {
+                Text("READY")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(PMColor.textFaint)
+            }
 
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
@@ -167,10 +169,10 @@ struct PlaylistImportView: View {
             Image(systemName: "doc.badge.plus")
                 .font(.system(size: 46, weight: .regular))
                 .foregroundStyle(PMColor.brand)
-            Text("选择一个歌单文件开始")
+            Text("playlist_import_mac_intro_title")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(PMColor.text)
-            Text("支持 .m3u / .m3u8 / .json，导入前会先展示匹配与缺失条目。")
+            Text("playlist_import_mac_intro_desc")
                 .font(.system(size: 12.5))
                 .foregroundStyle(PMColor.textMuted)
                 .multilineTextAlignment(.center)
@@ -185,7 +187,7 @@ struct PlaylistImportView: View {
             Button {
                 showFileImporter = true
             } label: {
-                Label("选择文件", systemImage: "folder")
+                Label("playlist_import_pick_file", systemImage: "folder")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
@@ -204,10 +206,10 @@ struct PlaylistImportView: View {
     private func macPreview(_ p: PlaylistImporter.ImportPreview) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 10) {
-                MacImportStatusPill(text: "\(p.matchedCount) 已匹配", color: PMColor.ok)
-                MacImportStatusPill(text: "\(p.missingCount) 待处理", color: p.missingCount > 0 ? PMColor.warn : PMColor.textFaint)
+                MacImportStatusPill(text: String(format: String(localized: "playlist_import_matched_count_format"), p.matchedCount), color: PMColor.ok)
+                MacImportStatusPill(text: String(format: String(localized: "playlist_import_pending_count_format"), p.missingCount), color: p.missingCount > 0 ? PMColor.warn : PMColor.textFaint)
                 Spacer()
-                Text(verbatim: "\(p.entries.count) 个条目")
+                Text(verbatim: String(format: String(localized: "playlist_import_entries_count_format"), p.entries.count))
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(PMColor.textFaint)
             }
@@ -215,7 +217,7 @@ struct PlaylistImportView: View {
             macSegmentedProgress(p)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("歌单名称")
+                Text("playlist_import_name_header")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(PMColor.textMuted)
                 TextField("playlist_name", text: $playlistName)
@@ -264,12 +266,12 @@ struct PlaylistImportView: View {
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("匹配结果")
+                Text("playlist_import_match_results")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(PMColor.textMuted)
                 Spacer()
                 if p.missingCount > 0 {
-                    Text("未匹配条目不会写入新歌单")
+                    Text("playlist_import_unmatched_skip_hint")
                         .font(.system(size: 11))
                         .foregroundStyle(PMColor.textFaint)
                 }
@@ -277,7 +279,7 @@ struct PlaylistImportView: View {
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 12) {
-                    macEntryGroup(title: "已匹配", count: matched.count, color: PMColor.ok) {
+                    macEntryGroup(title: String(localized: "playlist_import_matched_group"), count: matched.count, color: PMColor.ok) {
                         ForEach(matched) { entry in
                             macEntryRow(entry, manualMatch: false)
                             if entry.id != matched.last?.id {
@@ -286,9 +288,9 @@ struct PlaylistImportView: View {
                         }
                     }
 
-                    macEntryGroup(title: "未匹配", count: unmatched.count, color: unmatched.isEmpty ? PMColor.textFaint : PMColor.warn) {
+                    macEntryGroup(title: String(localized: "playlist_import_unmatched_group"), count: unmatched.count, color: unmatched.isEmpty ? PMColor.textFaint : PMColor.warn) {
                         if unmatched.isEmpty {
-                            Text("没有需要手动处理的条目")
+                            Text("playlist_import_no_manual_items")
                                 .font(.system(size: 12))
                                 .foregroundStyle(PMColor.textFaint)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -348,7 +350,7 @@ struct PlaylistImportView: View {
                 Button {
                     exportUnmatchedCSV(preview)
                 } label: {
-                    Label("导出未匹配 → CSV", systemImage: "square.and.arrow.up")
+                    Label("playlist_import_export_unmatched_csv", systemImage: "square.and.arrow.up")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .buttonStyle(.plain)
@@ -360,7 +362,7 @@ struct PlaylistImportView: View {
                 Button {
                     showFileImporter = true
                 } label: {
-                    Label("更换文件", systemImage: "folder")
+                    Label("playlist_import_change_file", systemImage: "folder")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .buttonStyle(.plain)
@@ -372,7 +374,7 @@ struct PlaylistImportView: View {
 
             Spacer()
 
-            Button("取消") { dismiss() }
+            Button("cancel") { dismiss() }
                 .font(.system(size: 12, weight: .medium))
                 .buttonStyle(.plain)
                 .foregroundStyle(PMColor.text)
@@ -386,7 +388,7 @@ struct PlaylistImportView: View {
                 Button {
                     confirm()
                 } label: {
-                    Text(verbatim: "仅创建已匹配 (\(preview.matchedCount))")
+                    Text(verbatim: String(format: String(localized: "playlist_import_create_matched_only_format"), preview.matchedCount))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(height: 28)
@@ -470,7 +472,7 @@ struct PlaylistImportView: View {
                         .joined(separator: " ")
                     manualMatchEntry = entry
                 } label: {
-                    Text("手动匹配…")
+                    Text("playlist_import_manual_match")
                         .font(.system(size: 11.5, weight: .semibold))
                 }
                 .buttonStyle(.plain)
@@ -663,7 +665,7 @@ struct PlaylistImportView: View {
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(PMColor.brand)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("手动匹配")
+                    Text("playlist_import_manual_match_title")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(PMColor.text)
                     Text(entry.displayTitle)
@@ -677,7 +679,7 @@ struct PlaylistImportView: View {
 
             Divider().overlay(PMColor.divider)
 
-            TextField("搜索资料库歌曲", text: $manualMatchQuery)
+            TextField("playlist_import_search_library", text: $manualMatchQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .padding(.horizontal, 12)
@@ -717,9 +719,9 @@ struct PlaylistImportView: View {
 
             HStack {
                 Spacer()
-                Button("取消") { manualMatchEntry = nil }
+                Button("cancel") { manualMatchEntry = nil }
                     .keyboardShortcut(.cancelAction)
-                Button("使用第一项") {
+                Button("playlist_import_use_first_result") {
                     if let song = manualMatchResults.first {
                         applyManualMatch(entry: entry, song: song)
                     }

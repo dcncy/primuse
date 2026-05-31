@@ -143,14 +143,16 @@ struct MacHeaderMoreMenu: View {
         let id = UUID()
         var icon: String
         var title: String
+        var trailing: String?
         var enabled: Bool
         var isDestructive: Bool
         var action: () -> Void
 
-        init(icon: String, title: String, enabled: Bool = true,
+        init(icon: String, title: String, trailing: String? = nil, enabled: Bool = true,
              isDestructive: Bool = false, action: @escaping () -> Void) {
             self.icon = icon
             self.title = title
+            self.trailing = trailing
             self.enabled = enabled
             self.isDestructive = isDestructive
             self.action = action
@@ -196,6 +198,12 @@ struct MacHeaderMoreMenu: View {
                     .foregroundStyle(item.isDestructive ? PMColor.bad : PMColor.text)
                     .lineLimit(1)
                 Spacer(minLength: 8)
+                if let trailing = item.trailing {
+                    Text(verbatim: trailing)
+                        .font(.system(size: trailing.contains("-") ? 9.5 : 10.5, design: trailing.contains("-") ? .monospaced : .default))
+                        .foregroundStyle(PMColor.textFaint)
+                        .lineLimit(1)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)

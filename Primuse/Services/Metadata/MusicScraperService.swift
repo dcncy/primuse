@@ -37,6 +37,10 @@ final class MusicScraperService {
         startScraping(in: library, forceRescrape: false)
     }
 
+    func scrapeMissingMetadata(songs: [Song], in library: MusicLibrary) {
+        startScraping(songs: songs, in: library, forceRescrape: false)
+    }
+
     func rescrapeLibrary(in library: MusicLibrary) {
         startScraping(in: library, forceRescrape: true)
     }
@@ -190,9 +194,17 @@ final class MusicScraperService {
     }
 
     private func startScraping(in library: MusicLibrary, forceRescrape: Bool) {
+        startScraping(songs: library.visibleSongs, in: library, forceRescrape: forceRescrape)
+    }
+
+    private func startScraping(songs requestedSongs: [Song], in library: MusicLibrary, forceRescrape: Bool) {
         guard !isScraping else { return }
 
-        let songs = library.visibleSongs
+        let latestByID = Dictionary(library.visibleSongs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let songs = requestedSongs.reduce(into: (ordered: [Song](), seen: Set<String>())) { result, song in
+            guard result.seen.insert(song.id).inserted else { return }
+            result.ordered.append(latestByID[song.id] ?? song)
+        }.ordered
         totalCount = songs.count
         processedCount = 0
         updatedCount = 0
@@ -334,11 +346,22 @@ final class MusicScraperService {
             guard !Task.isCancelled else { return }
 
             let assetStore = MetadataAssetStore.shared
+            let isWholeVisibleLibrary = Set(songs.map(\.id)) == Set(library.visibleSongs.map(\.id))
+            let targetAlbumIDs = Set(songs.compactMap(\.albumID))
+            let targetArtistIDs = Set(songs.compactMap(\.artistID))
+            let targetArtistNames = Set(
+                songs.compactMap(\.artistName)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .filter { !$0.isEmpty }
+            )
             let albumsNeedingCover = library.albums.filter { album in
-                !assetStore.hasAlbumCover(forAlbumID: album.id)
+                (isWholeVisibleLibrary || targetAlbumIDs.contains(album.id))
+                    && !assetStore.hasAlbumCover(forAlbumID: album.id)
             }
             let artistsNeedingImage = library.artists.filter { artist in
-                !assetStore.hasArtistImage(forArtistID: artist.id)
+                let name = artist.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return (isWholeVisibleLibrary || targetArtistIDs.contains(artist.id) || targetArtistNames.contains(name))
+                    && !assetStore.hasArtistImage(forArtistID: artist.id)
             }
             totalCount += albumsNeedingCover.count + artistsNeedingImage.count
 

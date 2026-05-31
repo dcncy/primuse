@@ -1282,7 +1282,7 @@ struct SongInfoSheet: View {
                 .shadow(color: .black.opacity(0.20), radius: 12, y: 6)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(verbatim: "P-29 · 歌曲信息")
+                    Text(verbatim: "歌曲信息")
                         .font(.system(size: 11, weight: .semibold))
                         .textCase(.uppercase)
                         .foregroundStyle(PMColor.textFaint)
@@ -1487,7 +1487,7 @@ struct AddToPlaylistSheet: View {
                     Text("add_to_playlist")
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(PMColor.text)
-                    Text(verbatim: "\(song.title) · \(song.artistName ?? String(localized: "unknown_artist")) — P-27")
+                    Text(verbatim: "\(song.title) · \(song.artistName ?? String(localized: "unknown_artist"))")
                         .font(.system(size: 11.5))
                         .foregroundStyle(PMColor.textMuted)
                         .lineLimit(1)
@@ -2403,8 +2403,8 @@ struct CastDevicePickerSheet: View {
                     Text("DLNA 投屏")
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(PMColor.text)
-                    Text("CAST-01 · 局域网 Renderer · \(remoteRenderers.count) 个设备")
-                        .font(.system(size: 11, design: .monospaced))
+                    Text("局域网 Renderer · \(remoteRenderers.count) 个设备")
+                        .font(.system(size: 11))
                         .foregroundStyle(PMColor.textMuted)
                 }
                 Spacer()
@@ -2448,7 +2448,7 @@ struct CastDevicePickerSheet: View {
             Rectangle().fill(PMColor.divider).frame(height: 0.5)
 
             HStack(spacing: 10) {
-                Text("本机也可被投送 -> ST-17")
+                Text("本机也可被投送")
                     .font(.system(size: 11))
                     .foregroundStyle(PMColor.textFaint)
                 Spacer()

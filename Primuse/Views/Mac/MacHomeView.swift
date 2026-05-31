@@ -354,7 +354,7 @@ struct MacHomeView: View {
     }
 
     private var sourceStatusCard: some View {
-        homeCard(title: "音乐源状态", spec: "SRC-* · LIB-14/15") {
+        homeCard(title: "Source Status", spec: "SRC-* · LIB-14/15") {
             VStack(alignment: .leading, spacing: PMSpace.m) {
                 HStack(spacing: PMSpace.m) {
                     metric(value: enabledSourcesCount, label: "home_enabled_sources")
@@ -366,7 +366,7 @@ struct MacHomeView: View {
                     // 文件扫描 (发现新歌)。
                     sourceTaskBox(
                         title: entry.source.name,
-                        phase: entry.state.isScanning ? "读取文件" : "待续扫",
+                        phase: entry.state.isScanning ? Lz("Reading files") : Lz("Resume pending"),
                         detail: entry.state.currentFile,
                         progress: entry.state.totalCount > 0 ? min(entry.state.progress, 1) : 0,
                         indeterminate: entry.state.totalCount == 0
@@ -378,8 +378,8 @@ struct MacHomeView: View {
                     let processed = backfill.processedCount
                     let total = processed + backfill.remainingCount
                     sourceTaskBox(
-                        title: "元数据回填",
-                        phase: "读取标签",
+                        title: Lz("Metadata backfill"),
+                        phase: Lz("Reading tags"),
                         detail: String(format: String(localized: "backfill_remaining"), backfill.remainingCount),
                         progress: total > 0 ? Double(processed) / Double(total) : 0,
                         indeterminate: total == 0
@@ -387,8 +387,8 @@ struct MacHomeView: View {
                 } else if scraperService.isScraping {
                     // 在线刮削封面 / 歌词。
                     sourceTaskBox(
-                        title: "元数据刮削",
-                        phase: "封面 / 歌词",
+                        title: Lz("Metadata scraping"),
+                        phase: Lz("Covers / Lyrics"),
                         detail: scraperService.currentSongTitle,
                         progress: scraperService.progress,
                         indeterminate: scraperService.totalCount == 0
@@ -469,9 +469,12 @@ struct MacHomeView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .tracking(-0.3)
                 Spacer()
-                Text(spec)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(PMColor.textFaint)
+                let visibleSpec = PMTextWithoutDesignCodes(spec)
+                if !visibleSpec.isEmpty {
+                    Text(verbatim: visibleSpec)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(PMColor.textFaint)
+                }
             }
             content()
             // 用一个透明 Spacer 把内容顶到顶部, 让 .frame(maxHeight: .infinity) 真

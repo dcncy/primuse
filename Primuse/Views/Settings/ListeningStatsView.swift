@@ -244,7 +244,7 @@ struct ListeningStatsView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(PMColor.text)
                 Spacer()
-                Text(verbatim: "STATS-02 · 7×\(weeks.count) = \(counts.count) 天")
+                Text(verbatim: "7×\(weeks.count) = \(counts.count) 天")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(PMColor.textFaint)
             }

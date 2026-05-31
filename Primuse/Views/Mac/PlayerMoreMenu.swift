@@ -559,9 +559,6 @@ private struct MacSleepTimerPopover: View {
             Text(Lz("Sleep Timer"))
                 .font(.system(size: 13.5, weight: .semibold))
                 .foregroundStyle(PMColor.text)
-            Text("P-14 · SleepTimerService")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(PMColor.textFaint)
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
@@ -667,18 +664,21 @@ struct MacSimilarSongsPopover: View {
         var score: Int { min(99, max(1, Int((affinity * 100).rounded()))) }
     }
 
-    private var localResults: [MusicDiscoveryResult] {
-        MusicDiscoveryEngine.similarSongs(to: seed, in: library, limit: 30)
-    }
-
-    private var rows: [Row] {
-        var byID: [String: Row] = [:]
+    /// 全库相似度计算 (较重) —— 只在 seed 变化时算一次, 结果缓存到 `localRows`。
+    private func computeLocalRows() -> [Row] {
         // 本地特征分用 120 作软上限:同专辑 (~46+) 叠到接近满,同艺术家+流派+年代
         // (~84) 折到 0.7 左右,跟 Last.fm 的 0~1 同量级,合并排序才不串味。
-        for result in localResults {
-            let affinity = min(1.0, max(0.0, result.score / 120.0))
-            if affinity >= (byID[result.song.id]?.affinity ?? -1) {
-                byID[result.song.id] = Row(song: result.song, affinity: affinity)
+        MusicDiscoveryEngine.similarSongs(to: seed, in: library, limit: 30).map { result in
+            Row(song: result.song, affinity: min(1.0, max(0.0, result.score / 120.0)))
+        }
+    }
+
+    /// 合并本地 + Last.fm 候选 (去重 + 排序), 较轻 —— lastFm 加载完后再算一次即可。
+    private func mergedRows() -> [Row] {
+        var byID: [String: Row] = [:]
+        for row in localRows {
+            if row.affinity >= (byID[row.song.id]?.affinity ?? -1) {
+                byID[row.song.id] = row
             }
         }
         for candidate in lastFmCandidates {
@@ -711,7 +711,14 @@ struct MacSimilarSongsPopover: View {
         .frame(width: 320)
         // 跟主菜单一致: 铺 flat 不透明底, 避免半透材质叠深色背景发灰 (不画圆角边框)。
         .background(PMColor.bg)
-        .task(id: seed.id) { await loadLastFm() }
+        .task(id: seed.id) {
+            localRows = computeLocalRows()
+            displayRows = mergedRows()
+            await loadLastFm()
+            // Last.fm 候选加载完后再合并一次 (SimilarTracksCandidate 非 Equatable,
+            // 不走 onChange, 直接在这里重算)。
+            displayRows = mergedRows()
+        }
     }
 
     private var divider: some View {
@@ -742,7 +749,6 @@ struct MacSimilarSongsPopover: View {
 
     @ViewBuilder
     private var content: some View {
-        let displayRows = rows
         if displayRows.isEmpty {
             VStack(spacing: 8) {
                 if isLoadingLastFm {
@@ -856,8 +862,8 @@ struct MacSimilarSongsPopover: View {
             .background(PMColor.brand, in: .rect(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .disabled(rows.isEmpty)
-        .opacity(rows.isEmpty ? 0.5 : 1)
+        .disabled(displayRows.isEmpty)
+        .opacity(displayRows.isEmpty ? 0.5 : 1)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
@@ -868,7 +874,7 @@ struct MacSimilarSongsPopover: View {
     }
 
     private func play(_ song: Song) {
-        let tail = rows.map(\.song).filter { $0.id != song.id }
+        let tail = displayRows.map(\.song).filter { $0.id != song.id }
         let queue = ([song] + tail).filteredPlayable()
         guard let first = queue.first else { return }
         player.shuffleEnabled = false

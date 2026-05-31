@@ -94,7 +94,7 @@ struct SourceTypeSelectionView: View {
                 Text("添加音乐源")
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(PMColor.text)
-                Text("SRC-01 · 选择协议或服务")
+                Text("选择协议或服务")
                     .font(.system(size: 11))
                     .foregroundStyle(PMColor.textFaint)
             }

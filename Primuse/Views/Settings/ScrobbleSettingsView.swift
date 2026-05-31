@@ -166,7 +166,7 @@ struct ScrobbleSettingsView: View {
 
             Spacer()
 
-            Button("完成") { dismiss() }
+            Button("done") { dismiss() }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white)
@@ -184,8 +184,8 @@ struct ScrobbleSettingsView: View {
 
     private var macFooterStatus: String {
         let n = service.recentReports.count
-        if n == 0 { return "Token 仅保存在本机钥匙串 · 暂无最近上报" }
-        return "最近上报 · \(n) 条成功"
+        if n == 0 { return String(localized: "scrobble_mac_footer_empty") }
+        return String(format: String(localized: "scrobble_mac_footer_success_format"), n)
     }
 
     private var macHeader: some View {
@@ -200,19 +200,15 @@ struct ScrobbleSettingsView: View {
             .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Scrobble · 播放上报")
+                Text("scrobble_mac_title")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(PMColor.text)
-                Text("Last.fm / ListenBrainz · 50% 或 4 分钟后提交")
+                Text("scrobble_mac_subtitle")
                     .font(.system(size: 12.5))
                     .foregroundStyle(PMColor.textMuted)
             }
 
             Spacer()
-
-            Text("SCROB · ST-16")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(PMColor.textFaint)
 
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
@@ -230,12 +226,12 @@ struct ScrobbleSettingsView: View {
 
     private var macMasterCard: some View {
         VStack(spacing: 0) {
-            macRow(icon: "dot.radiowaves.left.and.right", title: "启用播放上报", subtitle: "提交本地播放历史, Token 只保存在本机钥匙串") {
+            macRow(icon: "dot.radiowaves.left.and.right", title: String(localized: "scrobble_enabled"), subtitle: String(localized: "scrobble_mac_enabled_subtitle")) {
                 macSwitch(isOn: $settings.isEnabled)
             }
             if settings.isEnabled {
                 Divider().overlay(PMColor.divider).padding(.leading, 44)
-                macRow(icon: "waveform.badge.magnifyingglass", title: "发送 Now Playing", subtitle: "播放开始时同步当前曲目, 不计入历史") {
+                macRow(icon: "waveform.badge.magnifyingglass", title: String(localized: "scrobble_send_now_playing"), subtitle: String(localized: "scrobble_mac_now_playing_subtitle")) {
                     macSwitch(isOn: $settings.sendNowPlaying)
                 }
             }
@@ -252,7 +248,7 @@ struct ScrobbleSettingsView: View {
             macProviderHeader(
                 icon: "music.note.list",
                 title: "ListenBrainz",
-                subtitle: listenBrainzValid == true ? "Token 已保存" : "User token 登录",
+                subtitle: listenBrainzValid == true ? String(localized: "scrobble_mac_token_saved") : String(localized: "scrobble_mac_user_token_login"),
                 tint: PMColor.brand,
                 isOn: providerToggleBinding(.listenBrainz)
             )
@@ -272,16 +268,16 @@ struct ScrobbleSettingsView: View {
                         .onSubmit { saveListenBrainzToken() }
 
                     HStack(spacing: 8) {
-                        macTinyButton("保存", icon: "key.fill") {
+                        macTinyButton(String(localized: "save"), icon: "key.fill") {
                             saveListenBrainzToken()
                         }
-                        macTinyButton(isValidatingLB ? "验证中" : "验证 Token", icon: "checkmark.shield") {
+                        macTinyButton(isValidatingLB ? String(localized: "scrobble_mac_validating") : String(localized: "scrobble_validate"), icon: "checkmark.shield") {
                             Task { await validateListenBrainz() }
                         }
                         .disabled(listenBrainzToken.isEmpty || isValidatingLB)
 
                         if let valid = listenBrainzValid {
-                            Label(valid ? "有效" : "无效", systemImage: valid ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            Label(valid ? String(localized: "scrobble_token_valid") : String(localized: "scrobble_token_invalid"), systemImage: valid ? "checkmark.circle.fill" : "xmark.circle.fill")
                                 .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(valid ? PMColor.ok : PMColor.bad)
                         }
@@ -318,39 +314,39 @@ struct ScrobbleSettingsView: View {
             if settings.enabledProviders.contains(.lastFm) {
                 if lastFmConnected {
                     HStack(spacing: 8) {
-                        Label(lastFmUsername.isEmpty ? "已连接" : "已连接为 \(lastFmUsername)",
+                        Label(lastFmUsername.isEmpty ? String(localized: "scrobble_lastfm_connected") : String(format: String(localized: "scrobble_lastfm_connected_as_format"), lastFmUsername),
                               systemImage: "checkmark.circle.fill")
                             .font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(PMColor.ok)
                         Spacer()
-                        macTinyButton("退出", icon: "rectangle.portrait.and.arrow.right", tint: PMColor.bad) {
+                        macTinyButton(String(localized: "scrobble_lastfm_signout"), icon: "rectangle.portrait.and.arrow.right", tint: PMColor.bad) {
                             showLastFmSignOutConfirm = true
                         }
                     }
                 } else if let token = lastFmPendingToken {
                     HStack(spacing: 8) {
-                        Text("等待浏览器授权完成")
+                        Text("scrobble_mac_waiting_browser_auth")
                             .font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(PMColor.text)
                         Spacer()
-                        macTinyButton("重开授权页", icon: "safari") {
+                        macTinyButton(String(localized: "scrobble_lastfm_reopen_authorization"), icon: "safari") {
                             reopenLastFmAuthorization(token: token)
                         }
-                        macTinyButton(isLoggingInLastFm ? "确认中" : "我已授权", icon: "checkmark.shield") {
+                        macTinyButton(isLoggingInLastFm ? String(localized: "scrobble_mac_confirming") : String(localized: "scrobble_mac_i_authorized"), icon: "checkmark.shield") {
                             Task { await confirmLastFmAuthorization(showError: true) }
                         }
                         .disabled(isLoggingInLastFm)
                     }
                 } else {
                     HStack(spacing: 8) {
-                        macTinyButton(isLoggingInLastFm ? "连接中" : "连接 Last.fm", icon: "person.badge.shield.checkmark", tint: PMColor.bad) {
+                        macTinyButton(isLoggingInLastFm ? String(localized: "scrobble_mac_connecting") : String(localized: "scrobble_lastfm_connect"), icon: "person.badge.shield.checkmark", tint: PMColor.bad) {
                             // 没有可用的 API Key/Secret 时, 不要把按钮静默禁用
                             // (plain 按钮禁用后外观不变, 用户只会觉得"点不动")。
                             // 改成点了就展开「高级密钥」引导填写, 并给一句说明。
                             if LastFmCredentialsStore.effectiveAPIKey().isEmpty
                                 || LastFmCredentialsStore.effectiveAPISecret().isEmpty {
                                 withAnimation { showLastFmAdvanced = true }
-                                lastFmError = "请先在下方「高级密钥」里填写 Last.fm API Key 与 Secret，再连接。"
+                                lastFmError = String(localized: "scrobble_lastfm_err_missing_creds")
                             } else {
                                 Task { await beginLastFmAuthorization() }
                             }
@@ -360,7 +356,7 @@ struct ScrobbleSettingsView: View {
                         Spacer()
 
                         Link(destination: URL(string: "https://www.last.fm/api/account/create")!) {
-                            Text("创建 API 应用")
+                            Text("scrobble_mac_create_api_app")
                                 .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(PMColor.textMuted)
                         }
@@ -368,7 +364,7 @@ struct ScrobbleSettingsView: View {
 
                     DisclosureGroup(isExpanded: $showLastFmAdvanced) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("使用自己的 Last.fm application 时填写; 默认内置应用会自动可用。")
+                            Text("scrobble_lastfm_advanced_hint")
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(PMColor.textFaint)
                             macSecretField("API Key", text: $lastFmAPIKey)
@@ -382,7 +378,7 @@ struct ScrobbleSettingsView: View {
                         }
                         .padding(.top, 8)
                     } label: {
-                        Label("高级密钥", systemImage: "key")
+                        Label("scrobble_lastfm_advanced_title", systemImage: "key")
                             .font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(PMColor.textMuted)
                     }
@@ -399,7 +395,7 @@ struct ScrobbleSettingsView: View {
 
     private var macRulesCard: some View {
         VStack(spacing: 0) {
-            macRow(icon: "timer", title: "提交规则", subtitle: "播放超过 50% 或 4 分钟后提交, 短音频自动按比例处理") {
+            macRow(icon: "timer", title: String(localized: "scrobble_mac_rules_title"), subtitle: String(localized: "scrobble_mac_rules_subtitle")) {
                 Text("50% · 4m")
                     .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(PMColor.textMuted)
@@ -417,16 +413,16 @@ struct ScrobbleSettingsView: View {
 
     private var macQueueCard: some View {
         VStack(spacing: 0) {
-            macRow(icon: "tray.full", title: "待重试队列", subtitle: "网络失败的 scrobble 会保留到下次提交") {
+            macRow(icon: "tray.full", title: String(localized: "scrobble_queue_section"), subtitle: String(localized: "scrobble_mac_queue_subtitle")) {
                 HStack(spacing: 8) {
                     Text("\(service.pendingCount)")
                         .font(.system(size: 14, weight: .semibold, design: .monospaced))
                         .foregroundStyle(PMColor.textMuted)
                     if service.pendingCount > 0 {
-                        macTinyButton("重试", icon: "arrow.clockwise") {
+                        macTinyButton(String(localized: "scrobble_retry_now"), icon: "arrow.clockwise") {
                             service.retryPendingNow()
                         }
-                        macTinyButton("清空", icon: "trash", tint: PMColor.bad) {
+                        macTinyButton(String(localized: "scrobble_clear_queue"), icon: "trash", tint: PMColor.bad) {
                             showClearQueueConfirm = true
                         }
                     }
@@ -442,7 +438,7 @@ struct ScrobbleSettingsView: View {
 
     private var macRecentReportsCard: some View {
         VStack(spacing: 0) {
-            macRow(icon: "clock.arrow.circlepath", title: "最近上报", subtitle: "最近成功提交到 Last.fm / ListenBrainz 的记录") {
+            macRow(icon: "clock.arrow.circlepath", title: String(localized: "scrobble_mac_recent_reports_title"), subtitle: String(localized: "scrobble_mac_recent_reports_subtitle")) {
                 Text("\(service.recentReports.count)")
                     .font(.system(size: 14, weight: .semibold, design: .monospaced))
                     .foregroundStyle(PMColor.textMuted)
@@ -450,7 +446,7 @@ struct ScrobbleSettingsView: View {
 
             if service.recentReports.isEmpty {
                 Divider().overlay(PMColor.divider).padding(.leading, 44)
-                Text("暂无最近上报")
+                Text("scrobble_mac_no_recent_reports")
                     .font(.system(size: 12))
                     .foregroundStyle(PMColor.textFaint)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -495,10 +491,10 @@ struct ScrobbleSettingsView: View {
             Image(systemName: "pause.circle")
                 .font(.system(size: 32, weight: .regular))
                 .foregroundStyle(PMColor.textFaint)
-            Text("上报已关闭")
+            Text("scrobble_mac_disabled_title")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(PMColor.text)
-            Text("开启后再选择 Last.fm 或 ListenBrainz。")
+            Text("scrobble_mac_disabled_desc")
                 .font(.system(size: 12))
                 .foregroundStyle(PMColor.textMuted)
         }
@@ -509,10 +505,10 @@ struct ScrobbleSettingsView: View {
 
     private var lastFmSubtitle: String {
         if lastFmConnected {
-            return lastFmUsername.isEmpty ? "Session 已保存" : "@\(lastFmUsername)"
+            return lastFmUsername.isEmpty ? String(localized: "scrobble_mac_session_saved") : "@\(lastFmUsername)"
         }
-        if lastFmPendingToken != nil { return "等待授权确认" }
-        return "浏览器 OAuth 登录"
+        if lastFmPendingToken != nil { return String(localized: "scrobble_mac_waiting_authorization") }
+        return String(localized: "scrobble_mac_browser_oauth")
     }
 
     private func macProviderHeader(icon: String,
@@ -883,7 +879,7 @@ struct ScrobbleSettingsView: View {
     }
 
     private func relativeReportTime(_ date: Date) -> String {
-        if Date().timeIntervalSince(date) < 60 { return "刚刚" }
+        if Date().timeIntervalSince(date) < 60 { return String(localized: "Just now") }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: Date())

@@ -13,6 +13,7 @@ struct MacSidebar: View {
     @Environment(AudioPlayerService.self) private var player
     @Environment(MusicLibrary.self) private var library
     @Environment(SourcesStore.self) private var sourcesStore
+    @Environment(MusicScraperService.self) private var scraperService
     @Environment(\.pmAppearance) private var mode
 
     var body: some View {
@@ -43,16 +44,17 @@ struct MacSidebar: View {
         HStack(spacing: 10) {
             BrandMonogram(slot: .sidebar)
 
-            // 中文 "猿音" 是主名, Latin "Primuse" 副名小一号。两段 tracking 略收紧。
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(verbatim: "猿音")
+                Text(verbatim: PMAppPrimaryDisplayName())
                     .font(.system(size: 16, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(PMColor.text)
-                Text(verbatim: "Primuse")
-                    .font(.system(size: 13, weight: .medium))
-                    .tracking(-0.1)
-                    .foregroundStyle(PMColor.textMuted)
+                if let secondary = PMAppSecondaryDisplayName() {
+                    Text(verbatim: secondary)
+                        .font(.system(size: 13, weight: .medium))
+                        .tracking(-0.1)
+                        .foregroundStyle(PMColor.textMuted)
+                }
             }
             Spacer()
         }
@@ -312,7 +314,8 @@ struct MacSidebar: View {
 
     @ViewBuilder
     private func playlistContextMenu(for playlist: Playlist) -> some View {
-        let playable = library.songs(forPlaylist: playlist.id).filteredPlayable()
+        let playlistSongs = library.songs(forPlaylist: playlist.id)
+        let playable = playlistSongs.filteredPlayable()
 
         Button {
             select(.playlist(playlist))
@@ -349,6 +352,13 @@ struct MacSidebar: View {
         }
         .disabled(playable.isEmpty)
 
+        Button {
+            scraperService.scrapeMissingMetadata(songs: playlistSongs, in: library)
+        } label: {
+            Label("scrape_missing_metadata", systemImage: "wand.and.stars")
+        }
+        .disabled(playlistSongs.isEmpty || scraperService.isScraping)
+
         if canDeletePlaylist(playlist.id) {
             Divider()
             Button(role: .destructive) {
@@ -361,6 +371,9 @@ struct MacSidebar: View {
 
     @ViewBuilder
     private func smartPlaylistContextMenu(for smart: SmartPlaylist) -> some View {
+        let matched = SmartPlaylistEngine.match(smart, in: library, history: PlayHistoryStore.shared)
+        let playable = matched.filteredPlayable()
+
         Button {
             select(.smartPlaylist(smart))
         } label: {
@@ -372,6 +385,7 @@ struct MacSidebar: View {
         } label: {
             Label("play_all", systemImage: "play.fill")
         }
+        .disabled(playable.isEmpty)
 
         Button {
             player.shuffleEnabled = true
@@ -379,6 +393,28 @@ struct MacSidebar: View {
         } label: {
             Label("shuffle", systemImage: "shuffle")
         }
+        .disabled(playable.isEmpty)
+
+        Button {
+            player.appendToQueue(playable)
+        } label: {
+            Label("add_to_queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+        }
+        .disabled(playable.isEmpty)
+
+        Button {
+            player.insertNextInQueue(playable)
+        } label: {
+            Label("up_next", systemImage: "text.line.first.and.arrowtriangle.forward")
+        }
+        .disabled(playable.isEmpty)
+
+        Button {
+            scraperService.scrapeMissingMetadata(songs: matched, in: library)
+        } label: {
+            Label("scrape_missing_metadata", systemImage: "wand.and.stars")
+        }
+        .disabled(matched.isEmpty || scraperService.isScraping)
 
         Divider()
         Button(role: .destructive) {

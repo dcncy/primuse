@@ -36,9 +36,9 @@ struct DuplicateSongsView: View {
 
         var title: String {
             switch self {
-            case .highestBitrate: return "保留最高码率"
-            case .largestFile: return "保留最大文件"
-            case .newest: return "保留最新加入"
+            case .highestBitrate: return String(localized: "dup_keep_highest_bitrate")
+            case .largestFile: return String(localized: "dup_keep_largest_file")
+            case .newest: return String(localized: "dup_keep_newest")
             }
         }
     }
@@ -215,13 +215,9 @@ struct DuplicateSongsView: View {
 
     private var duplicateMacHeader: some View {
         HStack(spacing: 12) {
-            Text(verbatim: "重复歌曲清理")
+            Text(verbatim: String(localized: "Duplicate Song Cleanup"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(PMColor.text)
-
-            Text(verbatim: "LIB-10 · DuplicateCleanupService")
-                .font(.system(size: 11))
-                .foregroundStyle(PMColor.textFaint)
 
             Spacer(minLength: 0)
 
@@ -302,18 +298,12 @@ struct DuplicateSongsView: View {
                 .frame(width: 26, height: 26)
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 0) {
-                    Text(verbatim: "扫描完成 · 发现 ")
-                    Text(verbatim: "\(groups.count)")
-                        .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(PMColor.brand)
-                    Text(verbatim: " 组重复 · 共 \(totalDuplicateFileCount) 个文件")
-                }
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(PMColor.text)
-                .lineLimit(1)
+                Text(verbatim: String(format: String(localized: "dup_mac_summary_format"), groups.count, totalDuplicateFileCount))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(PMColor.text)
+                    .lineLimit(1)
 
-                Text(verbatim: "按指纹 (acoustid) + 标题/艺术家匹配 · 可回收 \(recoverableSizeText)")
+                Text(verbatim: String(format: String(localized: "dup_mac_match_hint_format"), recoverableSizeText))
                     .font(.system(size: 11))
                     .foregroundStyle(PMColor.textMuted)
                     .lineLimit(1)
@@ -328,7 +318,7 @@ struct DuplicateSongsView: View {
             }
             .labelsHidden()
             .controlSize(.small)
-            .frame(width: 130)
+            .frame(width: 170)
         }
         .padding(14)
         .background(PMColor.bgElev, in: .rect(cornerRadius: 10))
@@ -361,19 +351,14 @@ struct DuplicateSongsView: View {
     private var idleFooter: some View {
         HStack(spacing: 12) {
             HStack(spacing: 0) {
-                Text(verbatim: "将删除 ")
-                    .foregroundStyle(PMColor.textMuted)
-                Text(verbatim: "\(totalRedundantCount)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(PMColor.bad)
-                Text(verbatim: " 个文件 · 回收 \(recoverableSizeText)")
+                Text(verbatim: String(format: String(localized: "dup_mac_delete_footer_format"), totalRedundantCount, recoverableSizeText))
                     .foregroundStyle(PMColor.textMuted)
             }
             .font(.system(size: 12))
 
             Spacer()
 
-            Button("取消") { dismiss() }
+            Button("cancel") { dismiss() }
                 .font(.system(size: 12, weight: .medium))
                 .buttonStyle(.plain)
                 .foregroundStyle(PMColor.text)
@@ -384,7 +369,7 @@ struct DuplicateSongsView: View {
             Button(role: .destructive) {
                 showCleanAllConfirm = true
             } label: {
-                Text(verbatim: "清理重复 (放入最近删除)")
+                Text(verbatim: String(localized: "dup_mac_cleanup_action"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
@@ -400,19 +385,14 @@ struct DuplicateSongsView: View {
         HStack(spacing: 12) {
             ProgressView().controlSize(.small)
             HStack(spacing: 0) {
-                Text(verbatim: "正在后台清理 ")
-                    .foregroundStyle(PMColor.textMuted)
-                Text(verbatim: "\(progress.done) / \(progress.total)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(PMColor.text)
-                Text(verbatim: " · 关闭窗口也会继续")
+                Text(verbatim: String(format: String(localized: "dup_mac_cleaning_footer_format"), progress.done, progress.total))
                     .foregroundStyle(PMColor.textMuted)
             }
             .font(.system(size: 12))
 
             Spacer()
 
-            Button("在后台继续") { dismiss() }
+            Button("dup_mac_continue_background") { dismiss() }
                 .font(.system(size: 12, weight: .semibold))
                 .buttonStyle(.plain)
                 .foregroundStyle(.white)
@@ -502,7 +482,7 @@ struct DuplicateSongsView: View {
                     .foregroundStyle(PMColor.textMuted)
                     .lineLimit(1)
 
-                Text(verbatim: "\(group.count) 个副本")
+                Text(verbatim: String(format: String(localized: "dup_mac_copies_format"), group.count))
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(PMColor.brand)
                     .padding(.horizontal, 7)
@@ -548,7 +528,7 @@ struct DuplicateSongsView: View {
             .frame(width: 16, height: 16)
             .frame(width: 22, alignment: .leading)
 
-            Text(verbatim: "\(isBest ? "保留" : "删除") · \(duplicateSourceName(song))")
+            Text(verbatim: "\(isBest ? String(localized: "dup_mac_keep") : String(localized: "dup_mac_delete")) · \(duplicateSourceName(song))")
                 .font(.system(size: 12, weight: isBest ? .semibold : .regular))
                 .foregroundStyle(isBest ? PMColor.text : PMColor.textMuted)
                 .lineLimit(1)
@@ -818,7 +798,25 @@ struct DuplicateSongsView: View {
     }
 
     private func duplicateSourceName(_ song: Song) -> String {
-        sourcesStore.allSources.first(where: { $0.id == song.sourceID })?.name ?? "未知来源"
+        let name = sourcesStore.allSources.first(where: { $0.id == song.sourceID })?.name
+            ?? String(localized: "Unknown Source")
+        return localizedSourceNameForMac(name)
+    }
+
+    private func localizedSourceNameForMac(_ name: String) -> String {
+        guard Locale.preferredLanguages.first?.hasPrefix("zh") != true else { return name }
+        switch name.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "百度网盘":
+            return String(localized: "Baidu Netdisk")
+        case "群晖", "群晖 NAS", "Synology NAS":
+            return "Synology"
+        case "阿里云盘":
+            return "Aliyun Drive"
+        case "本地", "本地文件":
+            return "Local Files"
+        default:
+            return name
+        }
     }
 
     private func bitrateText(_ song: Song) -> String {

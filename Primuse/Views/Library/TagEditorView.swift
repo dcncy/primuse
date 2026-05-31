@@ -128,7 +128,7 @@ struct TagEditorView: View {
                     Text("编辑标签")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(PMColor.text)
-                    Text("LIB-08 · 1 首选中 · 改动会写入资料库记录")
+                    Text("1 首选中 · 改动会写入资料库记录")
                         .font(PMFont.caption)
                         .foregroundStyle(PMColor.textMuted)
                 }

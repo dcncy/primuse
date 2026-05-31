@@ -7,6 +7,7 @@ struct PlaylistDetailView: View {
     @Environment(SourceManager.self) private var sourceManager
     @Environment(SourcesStore.self) private var sourcesStore
     @Environment(MetadataBackfillService.self) private var backfill
+    @Environment(MusicScraperService.self) private var scraperService
     let playlist: Playlist
 
     @State private var exportShareItem: ExportShareItem?
@@ -142,6 +143,24 @@ struct PlaylistDetailView: View {
                         }
                         .disabled(songs.count < 2)
                     }
+                    Button {
+                        player.appendToQueue(songs.filteredPlayable())
+                    } label: {
+                        Label("add_to_queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+                    }
+                    .disabled(songs.filteredPlayable().isEmpty)
+                    Button {
+                        player.insertNextInQueue(songs.filteredPlayable())
+                    } label: {
+                        Label("up_next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    }
+                    .disabled(songs.filteredPlayable().isEmpty)
+                    Button {
+                        scraperService.scrapeMissingMetadata(songs: songs, in: library)
+                    } label: {
+                        Label("scrape_missing_metadata", systemImage: "wand.and.stars")
+                    }
+                    .disabled(songs.isEmpty || scraperService.isScraping)
                     Button {
                         export(format: .m3u8)
                     } label: {
@@ -296,6 +315,11 @@ struct PlaylistDetailView: View {
         middle.append(.init(icon: "arrow.down.circle", title: String(localized: "offline_download"),
                             enabled: !playable.isEmpty) {
             sourceManager.downloadForOffline(songs: songs)
+        })
+        middle.append(.init(icon: "wand.and.stars", title: String(localized: "scrape_missing_metadata"),
+                            trailing: songs.count.formatted(),
+                            enabled: !songs.isEmpty && !scraperService.isScraping) {
+            scraperService.scrapeMissingMetadata(songs: songs, in: library)
         })
 
         return AnyView(MacHeaderMoreMenu(sections: [

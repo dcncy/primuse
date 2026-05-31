@@ -196,7 +196,7 @@ struct ScrapeOptionsView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(PMColor.text)
                     .lineLimit(1)
-                Text("META-07 · \(song.filePath)")
+                Text(song.filePath)
                     .font(.system(size: 11))
                     .foregroundStyle(PMColor.textFaint)
                     .lineLimit(1)

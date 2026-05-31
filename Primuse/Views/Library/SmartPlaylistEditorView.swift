@@ -209,10 +209,6 @@ struct SmartPlaylistEditorView: View {
                 .foregroundStyle(PMColor.text)
                 .padding(.leading, 6)
 
-            Text("LIB-05 · SmartPlaylistEngine")
-                .font(.system(size: 11))
-                .foregroundStyle(PMColor.textFaint)
-
             Spacer()
         }
         .frame(height: 44)

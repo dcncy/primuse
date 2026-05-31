@@ -2,11 +2,14 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="PrimuseMac"
+APP_NAME="Primuse"
 PROJECT="Primuse.xcodeproj"
 SCHEME="PrimuseMac"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 BUNDLE_ID="com.welape.yuanyin"
+SCREENSHOT_SIZE="${SCREENSHOT_SIZE:-1280x800}"
+APP_LANGUAGE="${APP_LANGUAGE:-}"
+APP_LOCALE="${APP_LOCALE:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$ROOT_DIR/build/CodexDerivedData"
@@ -88,8 +91,28 @@ fix_debug_runpaths() {
     "$APP_BUNDLE"
 }
 
+language_args=()
+if [[ -n "$APP_LANGUAGE" ]]; then
+  language_args+=("-AppleLanguages" "($APP_LANGUAGE)")
+fi
+if [[ -n "$APP_LOCALE" ]]; then
+  language_args+=("-AppleLocale" "$APP_LOCALE")
+fi
+
+open_bundle_with_args() {
+  if [[ "$#" -gt 0 ]]; then
+    /usr/bin/open -n "$APP_BUNDLE" --args "$@"
+  else
+    /usr/bin/open -n "$APP_BUNDLE"
+  fi
+}
+
 open_app() {
-  /usr/bin/open -n "$APP_BUNDLE"
+  open_bundle_with_args "${language_args[@]}"
+}
+
+open_screenshot_app() {
+  open_bundle_with_args "${language_args[@]}" "--primuse-screenshot-window=$SCREENSHOT_SIZE"
 }
 
 wait_for_app_ready() {
@@ -117,6 +140,9 @@ case "$MODE" in
   run)
     open_app
     ;;
+  --screenshot|screenshot)
+    open_screenshot_app
+    ;;
   --debug|debug)
     lldb -- "$APP_BINARY"
     ;;
@@ -133,7 +159,7 @@ case "$MODE" in
     wait_for_app_ready
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--screenshot|--debug|--logs|--telemetry|--verify]" >&2
     exit 2
     ;;
 esac

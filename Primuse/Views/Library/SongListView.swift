@@ -206,7 +206,7 @@ struct SongListView: View {
                     coverSong: songs.first(where: { $0.coverArtFileName?.isEmpty == false }),
                     onPlay: { playLibrary(shuffled: false) },
                     onShuffle: { playLibrary(shuffled: true) },
-                    moreMenu: AnyView(listMoreMenu)
+                    moreMenu: listMoreMenu
                 )
 
                 VStack(alignment: .leading, spacing: PMSpace.l) {
@@ -870,92 +870,60 @@ struct SongListView: View {
         }
     }
 
-    private var listMoreMenu: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            listMenuGroup {
-                listMenuRow(icon: "text.line.first.and.arrowtriangle.forward",
-                            title: "全部加入队列",
-                            trailing: visiblePlayableSongs.count.formatted()) {
-                    player.appendToQueue(visiblePlayableSongs)
-                }
-                listMenuRow(icon: "text.line.first.and.arrowtriangle.forward",
-                            title: "插入下一首") {
-                    player.insertNextInQueue(visiblePlayableSongs)
-                }
-                listMenuRow(icon: "text.badge.plus",
-                            title: "加入歌单…") {
+    private var listMoreMenu: AnyView {
+        let playable = visiblePlayableSongs
+        let visible = filteredSongs
+        return AnyView(MacHeaderMoreMenu(sections: [
+            [
+                .init(icon: "text.line.last.and.arrowtriangle.forward",
+                      title: "全部加入队列",
+                      trailing: playable.count.formatted(),
+                      enabled: !playable.isEmpty) {
+                    player.appendToQueue(playable)
+                },
+                .init(icon: "text.line.first.and.arrowtriangle.forward",
+                      title: "插入下一首",
+                      enabled: !playable.isEmpty) {
+                    player.insertNextInQueue(playable)
+                },
+                .init(icon: "text.badge.plus",
+                      title: "加入歌单…",
+                      enabled: !playable.isEmpty) {
                     showAddVisibleToPlaylist = true
-                }
-            }
-            listMenuDivider()
-            listMenuGroup {
-                listMenuRow(icon: "checklist", title: "选择…", trailing: "多选") {}
-                listMenuRow(icon: "shuffle", title: "随机全部") {
+                },
+            ],
+            [
+                .init(icon: "shuffle",
+                      title: "随机全部",
+                      enabled: !playable.isEmpty) {
                     playLibrary(shuffled: true)
-                }
-            }
-            listMenuDivider()
-            listMenuGroup {
-                listMenuRow(icon: "tag", title: "批量刮削缺失元数据", trailing: "META-06") {
-                    scraperService.scrapeMissingMetadata(in: library)
-                }
-                listMenuRow(icon: "square.and.arrow.up", title: "导出 M3U8…", trailing: "PL-07") {
+                },
+            ],
+            [
+                .init(icon: "wand.and.stars",
+                      title: "批量刮削缺失元数据",
+                      trailing: visible.count.formatted(),
+                      enabled: !visible.isEmpty && !scraperService.isScraping) {
+                    scraperService.scrapeMissingMetadata(songs: visible, in: library)
+                },
+                .init(icon: "square.and.arrow.up",
+                      title: "导出 M3U8…",
+                      enabled: !playable.isEmpty) {
                     exportVisibleSongs(format: .m3u8)
-                }
-                listMenuRow(icon: "curlybraces", title: "导出 JSON…") {
+                },
+                .init(icon: "curlybraces",
+                      title: "导出 JSON…",
+                      enabled: !playable.isEmpty) {
                     exportVisibleSongs(format: .json)
-                }
-            }
-            listMenuDivider()
-            listMenuGroup {
-                listMenuRow(icon: "list.bullet.rectangle", title: "列显示设置…", trailing: "›") {
+                },
+            ],
+            [
+                .init(icon: "list.bullet.rectangle",
+                      title: "列显示设置…") {
                     showViewOptions = true
-                }
-            }
-        }
-        .padding(.vertical, 6)
-        .frame(width: 260)
-    }
-
-    private func listMenuGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) { content() }
-    }
-
-    private func listMenuDivider() -> some View {
-        Rectangle()
-            .fill(PMColor.divider)
-            .frame(height: 0.5)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-    }
-
-    private func listMenuRow(icon: String, title: String, trailing: String? = nil, action: @escaping () -> Void) -> some View {
-        Button {
-            action()
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(PMColor.textMuted)
-                    .frame(width: 14)
-                Text(verbatim: title)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(PMColor.text)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                if let trailing {
-                    Text(verbatim: trailing)
-                        .font(.system(size: trailing.contains("-") ? 9.5 : 10.5, design: trailing.contains("-") ? .monospaced : .default))
-                        .foregroundStyle(PMColor.textFaint)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .pmRowBackground(cornerRadius: 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+                },
+            ],
+        ]))
     }
 
     private var viewOptionsPopover: some View {

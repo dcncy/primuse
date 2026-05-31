@@ -1,11 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 MODE="${1:-run}"
 APP_NAME="Primuse"
 PROJECT="Primuse.xcodeproj"
 SCHEME="PrimuseMac"
-CONFIGURATION="${CONFIGURATION:-Debug}"
+CONFIGURATION="${CONFIGURATION:-Release}"
 BUNDLE_ID="com.welape.yuanyin"
 SCREENSHOT_SIZE="${SCREENSHOT_SIZE:-1280x800}"
 APP_LANGUAGE="${APP_LANGUAGE:-}"
@@ -14,8 +14,7 @@ APP_LOCALE="${APP_LOCALE:-}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$ROOT_DIR/build/CodexDerivedData"
 BUILD_APP_BUNDLE="$DERIVED_DATA/Build/Products/$CONFIGURATION/$APP_NAME.app"
-RUN_ROOT="${PRIMUSE_RUN_ROOT:-/tmp/primuse-codex-run}"
-APP_BUNDLE="$RUN_ROOT/$APP_NAME.app"
+APP_BUNDLE="${PRIMUSE_APP_BUNDLE:-/Applications/$APP_NAME-Codex.app}"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 PACKAGE_RPATH="$DERIVED_DATA/Build/Products/$CONFIGURATION/PackageFrameworks"
 FIX_DEBUG_RUNPATHS="${FIX_DEBUG_RUNPATHS:-0}"
@@ -40,8 +39,8 @@ xcodebuild \
   build
 
 stage_app_bundle() {
-  rm -rf "$RUN_ROOT"
-  mkdir -p "$RUN_ROOT"
+  rm -rf "$APP_BUNDLE"
+  mkdir -p "$(dirname "$APP_BUNDLE")"
   ditto "$BUILD_APP_BUNDLE" "$APP_BUNDLE"
 }
 

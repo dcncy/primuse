@@ -1,102 +1,232 @@
 #if os(tvOS)
 import SwiftUI
 
-/// tvOS 设计 token — 跟 macOS 端 PrimuseTheme 同义但更克制 (无玻璃/经典模式切换,
-/// 全暗色, 字号基础 +20% 适配 10ft 观看距离, 焦点用 1.06 缩放 + 4pt accent 边框)。
+// MARK: - 设计 token
+//
+// 对应 design/猿音/scenes/tvos.jsx + theme.jsx 的暗色主题。tvOS 全程暗色、
+// 字号放大适配 10ft 观看距离、焦点用 scale + lift + 4pt 内描边高亮 + 辉光。
+
 enum TVColor {
-    static let bg          = Color(red: 0.06, green: 0.05, blue: 0.04)      // #100D0A
-    static let bgElev      = Color(red: 0.10, green: 0.09, blue: 0.08)      // #1A1714
-    static let bgDeep      = Color(red: 0.03, green: 0.03, blue: 0.02)
-    static let text        = Color(red: 0.95, green: 0.93, blue: 0.91)      // #F3EEE7
-    static let textMuted   = Color(red: 0.95, green: 0.93, blue: 0.91).opacity(0.72)
-    static let textFaint   = Color(red: 0.95, green: 0.93, blue: 0.91).opacity(0.50)
-    static let divider     = Color.white.opacity(0.10)
+    static let bg          = Color(hex: "#000000")
+    static let bgDeep      = Color(hex: "#0a0a0a")
+    static let bgElev      = Color(hex: "#1a1715")
+    static let text        = Color(hex: "#f3eee7")
+    static func textAlpha(_ a: Double) -> Color { Color(hex: "#f3eee7").opacity(a) }
+    static let textMuted   = textAlpha(0.72)
+    static let textFaint   = textAlpha(0.55)
+    static let textGhost   = textAlpha(0.40)
     static let card        = Color.white.opacity(0.06)
+    static let cardElev    = Color.white.opacity(0.10)
     static let cardBorder  = Color.white.opacity(0.12)
-    static let brand       = Color(red: 0.79, green: 0.39, blue: 0.26)      // #C96442
+    static let divider     = Color.white.opacity(0.10)
+    static let brand       = Color(hex: "#c96442")
+    static let ok          = Color(hex: "#7ed187")
+    static let warn        = Color(hex: "#f0b078")
+    static let bad         = Color(hex: "#ff7565")
 }
 
 enum TVSpace {
-    static let pageH: CGFloat = 80      // safe area 加大
-    static let pageV: CGFloat = 60
-    static let row: CGFloat = 40
-    static let card: CGFloat = 28
+    static let pageTop: CGFloat = 140    // 让出顶部 tab bar
+    static let pageBottom: CGFloat = 96  // 让出底部 now-playing 条
+    static let pageH: CGFloat = 80
+    static let row: CGFloat = 28
+    static let card: CGFloat = 22
 }
 
 enum TVRadius {
-    static let card: CGFloat = 18
-    static let cover: CGFloat = 14
+    static let card: CGFloat = 14
+    static let cover: CGFloat = 12
     static let pill: CGFloat = 999
 }
 
 enum TVFont {
-    static let pageTitle: Font = .system(size: 64, weight: .bold)
-    static let sectionTitle: Font = .system(size: 36, weight: .semibold)
-    static let cardTitle: Font = .system(size: 24, weight: .semibold)
+    static let pageTitle: Font = .system(size: 48, weight: .bold)
+    static let sectionTitle: Font = .system(size: 28, weight: .bold)
+    static let cardTitle: Font = .system(size: 22, weight: .semibold)
     static let body: Font = .system(size: 22, weight: .regular)
-    static let caption: Font = .system(size: 18, weight: .regular)
+    static let caption: Font = .system(size: 16, weight: .regular)
+    static let eyebrow: Font = .system(size: 16, weight: .semibold)
 }
 
-/// 焦点容器 — 焦点态时 scale 1.06 + 提升 + 4pt accent 边框 + 微 shadow。
-struct TVFocusable<Content: View>: View {
-    var content: Content
-    var radius: CGFloat = TVRadius.card
-    var accent: Color = TVColor.brand
+// MARK: - Hex 颜色
 
-    @FocusState private var focused: Bool
-    @Environment(\.isFocused) private var envFocused
-
-    init(radius: CGFloat = TVRadius.card,
-         accent: Color = TVColor.brand,
-         @ViewBuilder content: () -> Content) {
-        self.radius = radius
-        self.accent = accent
-        self.content = content()
+extension Color {
+    init(hex: String) {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        if s.count == 3 { s = s.map { "\($0)\($0)" }.joined() }
+        var v: UInt64 = 0
+        Scanner(string: s).scanHexInt64(&v)
+        let r = Double((v >> 16) & 0xff) / 255
+        let g = Double((v >> 8) & 0xff) / 255
+        let b = Double(v & 0xff) / 255
+        self.init(red: r, green: g, blue: b)
     }
+}
 
-    var body: some View {
-        content
+// MARK: - 格式化
+
+enum TVFmt {
+    static func time(_ s: Double) -> String {
+        guard s.isFinite else { return "–:––" }
+        let m = Int(s) / 60
+        let r = Int(s) % 60
+        return "\(m):\(String(format: "%02d", r))"
+    }
+    static func count(_ n: Int) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        return f.string(from: NSNumber(value: n)) ?? "\(n)"
+    }
+}
+
+// MARK: - 焦点高亮
+
+extension View {
+    /// tvOS 焦点态: scale + 上抬 + 4pt 内描边(不被父级 overflow 裁切) + 辉光阴影。
+    func tvFocusRing(_ focused: Bool,
+                     radius: CGFloat = TVRadius.card,
+                     accent: Color = TVColor.brand,
+                     scale: CGFloat = 1.06,
+                     lift: CGFloat = 12) -> some View {
+        self
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
-                if focused {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(accent, lineWidth: 4)
-                }
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(accent, lineWidth: focused ? 4 : 0)
             }
-            .scaleEffect(focused ? 1.06 : 1.0)
+            .shadow(color: .black.opacity(focused ? 0.52 : 0.30),
+                    radius: focused ? 26 : 11, x: 0, y: focused ? 18 : 8)
             .shadow(color: focused ? accent.opacity(0.45) : .clear,
-                    radius: focused ? 30 : 0, x: 0, y: focused ? 12 : 0)
-            .focusable()
-            .focused($focused)
+                    radius: focused ? 30 : 0)
+            .scaleEffect(focused ? scale : 1)
+            .offset(y: focused ? -lift : 0)
+            .zIndex(focused ? 1 : 0)
             .animation(.easeOut(duration: 0.22), value: focused)
     }
 }
 
-/// tvOS 主页大背景 — 跟 macOS AmbientBackdrop 同语义, 但布局适配 1920×1080。
+/// 可聚焦按钮 — 选中触发 action，label 闭包拿到当前焦点态自行换样式。
+struct TVFocusButton<Label: View>: View {
+    var radius: CGFloat
+    var accent: Color
+    var scale: CGFloat
+    var lift: CGFloat
+    var ring: Bool
+    var action: () -> Void
+    @ViewBuilder var label: (Bool) -> Label
+
+    @FocusState private var focused: Bool
+
+    init(radius: CGFloat = TVRadius.card,
+         accent: Color = TVColor.brand,
+         scale: CGFloat = 1.06,
+         lift: CGFloat = 12,
+         ring: Bool = true,
+         action: @escaping () -> Void = {},
+         @ViewBuilder label: @escaping (Bool) -> Label) {
+        self.radius = radius
+        self.accent = accent
+        self.scale = scale
+        self.lift = lift
+        self.ring = ring
+        self.action = action
+        self.label = label
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if ring {
+                    label(focused).tvFocusRing(focused, radius: radius, accent: accent, scale: scale, lift: lift)
+                } else {
+                    label(focused)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .focused($focused)
+        .focusEffectDisabled()   // 关掉 tvOS 默认白卡焦点效果,只保留自定义高亮
+    }
+}
+
+// MARK: - Ambient 背景
+
+/// 对应 theme.jsx 的 AmbientBackdrop: 两个被高斯模糊的封面色斑 + 一层暗罩。
 struct TVAmbientBackdrop: View {
-    var accent: Color = TVColor.brand
+    var tint: Color = TVColor.brand
+    var tint2: Color = Color(hex: "#1f3a5b")
     var strength: Double = 0.7
 
     var body: some View {
+        let s = max(0, min(1, strength))
         ZStack {
             TVColor.bgDeep
-            Circle()
-                .fill(accent.opacity(0.55))
-                .frame(width: 1100, height: 1100)
-                .blur(radius: 220)
-                .offset(x: -260, y: -200)
-            Circle()
-                .fill(accent.opacity(0.30))
-                .frame(width: 900, height: 900)
-                .blur(radius: 200)
-                .offset(x: 360, y: 280)
-            LinearGradient(
-                colors: [Color.black.opacity(0.35), Color.black.opacity(0.6)],
-                startPoint: .top, endPoint: .bottom
-            )
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                ZStack {
+                    Circle()
+                        .fill(tint)
+                        .frame(width: w * 1.1, height: w * 1.1)
+                        .blur(radius: 220)
+                        .opacity(0.85 * s)
+                        .offset(x: -w * 0.18, y: -h * 0.28)
+                    Circle()
+                        .fill(tint2)
+                        .frame(width: w * 0.95, height: w * 0.95)
+                        .blur(radius: 240)
+                        .opacity(0.75 * s)
+                        .offset(x: w * 0.28, y: h * 0.30)
+                }
+            }
+            LinearGradient(colors: [.black.opacity(0.35), .black.opacity(0.62)],
+                           startPoint: .top, endPoint: .bottom)
         }
-        .opacity(strength)
+        .ignoresSafeArea()
         .allowsHitTesting(false)
+    }
+}
+
+// MARK: - 程序化封面
+
+/// 对应 theme.jsx 的 CoverArt: tint→tint2 渐变 + 左上高光 + 同心环 + 字形。
+/// 默认正方形；传 height 可画矩形(歌单磁贴)。
+struct TVCoverArt: View {
+    var tint: Color
+    var tint2: Color
+    var glyph: String
+    var width: CGFloat
+    var height: CGFloat
+    var radius: CGFloat = 0
+
+    init(tint: Color, tint2: Color, glyph: String, size: CGFloat, height: CGFloat? = nil, radius: CGFloat = 0) {
+        self.tint = tint; self.tint2 = tint2; self.glyph = glyph
+        self.width = size; self.height = height ?? size; self.radius = radius
+    }
+    init(album: TVAlbum, size: CGFloat, height: CGFloat? = nil, radius: CGFloat = 0) {
+        self.init(tint: album.tint, tint2: album.tint2, glyph: album.glyph, size: size, height: height, radius: radius)
+    }
+
+    var body: some View {
+        let m = min(width, height)
+        ZStack {
+            LinearGradient(colors: [tint, tint2], startPoint: .topLeading, endPoint: .bottomTrailing)
+            RadialGradient(colors: [.white.opacity(0.35), .clear],
+                           center: UnitPoint(x: 0.3, y: 0.25),
+                           startRadius: 0, endRadius: m * 0.6)
+            ForEach([0.42, 0.34, 0.26], id: \.self) { r in
+                Circle()
+                    .stroke(Color.white.opacity(0.18), lineWidth: 0.6)
+                    .frame(width: m * r * 2, height: m * r * 2)
+            }
+            Text(glyph)
+                .font(.system(size: glyph.count > 1 ? m * 0.26 : m * 0.38, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 }
 #endif

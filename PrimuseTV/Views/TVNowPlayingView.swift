@@ -1,0 +1,219 @@
+#if os(tvOS)
+import SwiftUI
+
+/// tvOS 正在播放 — 左列封面+元数据+进度+传输键,右列巨幅逐字歌词(对应 TVNowPlayingArtboard)。
+/// Menu 键返回;右上角可打开队列 / 选项。
+struct TVNowPlayingView: View {
+    @Environment(TVStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showQueue = false
+    @State private var showOptions = false
+
+    private let ticker = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        let np = store.nowPlaying
+        ZStack {
+            TVAmbientBackdrop(tint: np.tint, tint2: np.tint2, strength: 1)
+
+            HStack(alignment: .top, spacing: 80) {
+                leftColumn.frame(maxWidth: .infinity, maxHeight: .infinity)
+                lyricsColumn.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(.horizontal, 100).padding(.top, 80).padding(.bottom, 70)
+
+            // 右上角:队列 / 选项
+            VStack {
+                HStack(spacing: 18) {
+                    Spacer()
+                    TVRoundBtn(icon: "list.bullet", size: 64) { showQueue = true }
+                    TVRoundBtn(icon: "ellipsis", size: 64) { showOptions = true }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 80).padding(.top, 60)
+
+            // 底部提示
+            VStack {
+                Spacer()
+                HStack {
+                    Text("播放 / 暂停 · 上：队列 · 下：选项 · 左 / 右：上一首 / 下一首")
+                    Spacer()
+                    Text("SIRI：「播放周杰伦的七里香」")
+                }
+                .font(.system(size: 16)).foregroundStyle(.white.opacity(0.45))
+                .padding(.horizontal, 100).padding(.bottom, 28)
+            }
+        }
+        .onExitCommand { dismiss() }
+        .onReceive(ticker) { _ in store.tick(0.05) }
+        .fullScreenCover(isPresented: $showQueue) { TVQueueView().environment(store) }
+        .fullScreenCover(isPresented: $showOptions) { TVOptionsView().environment(store) }
+    }
+
+    // MARK: 左列
+
+    private var leftColumn: some View {
+        let np = store.nowPlaying
+        return VStack(alignment: .leading, spacing: 0) {
+            TVEyebrow(text: "正在播放").padding(.bottom, 16)
+            TVCoverArt(tint: np.tint, tint2: np.tint2, glyph: np.glyph, size: 420, radius: 20)
+                .shadow(color: .black.opacity(0.5), radius: 36, y: 18)
+            Text(np.title).font(.system(size: 48, weight: .bold)).tracking(-0.8)
+                .foregroundStyle(.white).lineLimit(2).padding(.top, 26)
+            Text(np.artist).font(.system(size: 26)).foregroundStyle(.white.opacity(0.72)).padding(.top, 8)
+            Text("\(np.album) · \(np.format) \(np.bitrate) kbps · \(np.sampleRate, specifier: "%.1f") kHz")
+                .font(.system(size: 18)).foregroundStyle(.white.opacity(0.5)).padding(.top, 4)
+
+            Spacer(minLength: 24)
+            scrubber.padding(.bottom, 18)
+            transport
+        }
+    }
+
+    private var scrubber: some View {
+        let np = store.nowPlaying
+        let p = np.duration > 0 ? max(0, min(1, np.currentTime / np.duration)) : 0
+        return HStack(spacing: 16) {
+            Text(TVFmt.time(np.currentTime)).font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6)).frame(width: 56, alignment: .trailing)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.16)).frame(height: 5)
+                    Capsule().fill(np.tint).frame(width: geo.size.width * p, height: 5)
+                    Circle().fill(.white).frame(width: 18, height: 18)
+                        .shadow(color: np.tint.opacity(0.5), radius: 4)
+                        .offset(x: geo.size.width * p - 9)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+            .frame(height: 18)
+            Text("-\(TVFmt.time(np.duration - np.currentTime))").font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.6)).frame(width: 56, alignment: .leading)
+        }
+    }
+
+    private var transport: some View {
+        HStack(spacing: 22) {
+            Spacer()
+            TVRoundBtn(icon: "shuffle", size: 68) {}
+            TVRoundBtn(icon: "backward.fill", size: 68) {}
+            TVRoundBtn(icon: store.isPlaying ? "pause.fill" : "play.fill", size: 92,
+                       primary: true) { store.togglePlayPause() }
+            TVRoundBtn(icon: "forward.fill", size: 68) {}
+            TVRoundBtn(icon: "repeat", size: 68) {}
+            Spacer()
+        }
+    }
+
+    // MARK: 右列 — 歌词
+
+    private var lyricsColumn: some View {
+        let cur = store.currentLyricIndex
+        let lo = max(0, cur - 2)
+        let hi = min(store.lyrics.count, cur + 5)
+        return VStack(alignment: .leading, spacing: 30) {
+            ForEach(lo..<hi, id: \.self) { i in
+                lyricLine(index: i, current: cur)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .mask(
+            LinearGradient(stops: [
+                .init(color: .clear, location: 0), .init(color: .black, location: 0.18),
+                .init(color: .black, location: 0.82), .init(color: .clear, location: 1),
+            ], startPoint: .top, endPoint: .bottom)
+        )
+    }
+
+    @ViewBuilder
+    private func lyricLine(index i: Int, current cur: Int) -> some View {
+        let ln = store.lyrics[i]
+        let isCur = i == cur
+        let offset = abs(i - cur)
+        let opacity = isCur ? 1 : max(0.2, 0.55 - Double(offset) * 0.12)
+        let size: CGFloat = isCur ? 52 : 36
+        VStack(alignment: .leading, spacing: 6) {
+            if isCur {
+                TVKaraokeLine(syllables: ln.syllables, progress: store.currentLyricProgress,
+                              size: size, tint: store.nowPlaying.tint)
+            } else {
+                Text(ln.text).font(.system(size: size, weight: .semibold)).foregroundStyle(.white)
+            }
+            Text(ln.translation).font(.system(size: isCur ? 22 : 18)).italic()
+                .foregroundStyle(.white.opacity(0.55))
+        }
+        .opacity(opacity)
+        .animation(.easeOut(duration: 0.4), value: isCur)
+    }
+}
+
+// MARK: - 逐字卡拉OK行
+
+struct TVKaraokeLine: View {
+    let syllables: [TVSyllable]
+    let progress: Double
+    let size: CGFloat
+    let tint: Color
+
+    var body: some View {
+        let (highlightIdx, charT) = sweep()
+        HStack(spacing: 0) {
+            ForEach(Array(syllables.enumerated()), id: \.offset) { i, s in
+                let active = i < highlightIdx
+                let inFlight = i == highlightIdx
+                let fillT: Double = active ? 1 : (inFlight ? charT : 0)
+                let scale = inFlight ? 1 + 0.05 * sin(charT * .pi) : 1
+                Text(s.w)
+                    .foregroundStyle(.white.opacity(0.42))
+                    .overlay(alignment: .leading) {
+                        Text(s.w)
+                            .foregroundStyle(.white)
+                            .shadow(color: tint.opacity(0.8), radius: 12)
+                            .mask(alignment: .leading) {
+                                GeometryReader { g in
+                                    Rectangle().frame(width: g.size.width * fillT)
+                                }
+                            }
+                    }
+                    .scaleEffect(scale, anchor: .bottom)
+            }
+        }
+        .font(.system(size: size, weight: .bold))
+        .shadow(color: tint.opacity(0.4), radius: 16, y: 2)
+    }
+
+    /// 返回(正在唱的字下标, 该字内进度 0...1)。
+    private func sweep() -> (Int, Double) {
+        let total = syllables.reduce(0) { $0 + $1.d }
+        let t = max(0, min(1, progress)) * total
+        var acc = 0.0
+        for (i, s) in syllables.enumerated() {
+            if acc + s.d > t { return (i, (t - acc) / s.d) }
+            acc += s.d
+        }
+        return (syllables.count, 0)
+    }
+}
+
+// MARK: - 圆形传输按钮
+
+struct TVRoundBtn: View {
+    let icon: String
+    var size: CGFloat = 68
+    var primary: Bool = false
+    var action: () -> Void = {}
+
+    var body: some View {
+        TVFocusButton(radius: size / 2, accent: .white, scale: 1.14, lift: 8, action: action) { _ in
+            Image(systemName: icon)
+                .font(.system(size: size * 0.4, weight: .semibold))
+                .foregroundStyle(primary ? Color(hex: "#1f1c19") : .white)
+                .frame(width: size, height: size)
+                .background(primary ? AnyShapeStyle(.white) : AnyShapeStyle(Color.white.opacity(0.14)),
+                            in: Circle())
+        }
+    }
+}
+#endif

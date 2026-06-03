@@ -115,7 +115,7 @@ struct TVSongRow: View {
     var body: some View {
         let album = store.albumOf(song)
         TVFocusButton(radius: TVRadius.card, scale: 1.02, lift: 0,
-                      action: { store.play(song); action() }) { _ in
+                      action: { store.play(song); action() }) { focused in
             HStack(spacing: 18) {
                 TVArtworkView(coverKey: album?.id ?? "", artist: album?.artist ?? song.artist,
                               album: album?.title ?? "", tint: album?.tint ?? TVColor.brand,
@@ -138,7 +138,7 @@ struct TVSongRow: View {
             }
             .padding(.horizontal, 22).padding(.vertical, 16)
             .frame(maxWidth: .infinity)
-            .background(TVColor.card)
+            .background(focused ? Color.white.opacity(0.12) : TVColor.card)
         }
     }
 }

@@ -58,7 +58,7 @@ private struct TVSourceRow: View {
     let source: TVSource
 
     var body: some View {
-        TVFocusButton(radius: TVRadius.card, scale: 1.015, lift: 4) { _ in
+        TVFocusButton(radius: TVRadius.card, scale: 1.01, lift: 0) { focused in
             HStack(spacing: 18) {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(LinearGradient(colors: [source.color, .black.opacity(0.4)],
@@ -84,7 +84,7 @@ private struct TVSourceRow: View {
             }
             .padding(.horizontal, 22).padding(.vertical, 18)
             .frame(maxWidth: .infinity)
-            .background(TVColor.card)
+            .background(focused ? Color.white.opacity(0.12) : TVColor.card)
         }
     }
 

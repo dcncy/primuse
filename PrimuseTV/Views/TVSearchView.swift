@@ -67,14 +67,14 @@ struct TVSearchView: View {
                 VStack(spacing: 4) {
                     ForEach(suggestions, id: \.self) { s in
                         TVFocusButton(radius: 10, accent: .white, scale: 1.02, lift: 0,
-                                      action: { query = s }) { _ in
+                                      action: { query = s }) { focused in
                             HStack {
                                 Text(s).font(.system(size: 22)).foregroundStyle(.white)
                                 Spacer()
                             }
                             .padding(.horizontal, 20).padding(.vertical, 14)
                             .frame(maxWidth: .infinity)
-                            .background(.white.opacity(0.06))
+                            .background(focused ? Color.white.opacity(0.14) : Color.white.opacity(0.06))
                         }
                     }
                 }
@@ -90,7 +90,7 @@ struct TVSearchView: View {
         VStack(alignment: .leading, spacing: 0) {
             TVEyebrow(text: "顶部匹配").padding(.bottom, 16)
             if let artist = topArtist {
-                TVFocusButton(radius: 16, scale: 1.02, lift: 4, action: openPlayer) { _ in
+                TVFocusButton(radius: 16, scale: 1.02, lift: 4, action: openPlayer) { focused in
                     HStack(spacing: 20) {
                         TVCoverArt(tint: artist.tint, tint2: artist.tint2, glyph: artist.glyph,
                                    size: 92, radius: 46)
@@ -102,7 +102,7 @@ struct TVSearchView: View {
                         Spacer(minLength: 0)
                     }
                     .padding(20).frame(maxWidth: .infinity)
-                    .background(.white.opacity(0.06))
+                    .background(focused ? Color.white.opacity(0.12) : Color.white.opacity(0.06))
                 }
             } else {
                 Text("输入以搜索曲库").font(.system(size: 22)).foregroundStyle(TVColor.textFaint)
@@ -131,7 +131,7 @@ private struct TVSearchSongRow: View {
     var body: some View {
         let album = store.albumOf(song)
         TVFocusButton(radius: 10, scale: 1.02, lift: 0,
-                      action: { store.play(song); action() }) { _ in
+                      action: { store.play(song); action() }) { focused in
             HStack(spacing: 16) {
                 TVArtworkView(coverKey: album?.id ?? "", artist: album?.artist ?? song.artist,
                               album: album?.title ?? "", tint: album?.tint ?? TVColor.brand,
@@ -145,7 +145,7 @@ private struct TVSearchSongRow: View {
                 Image(systemName: "play.fill").font(.system(size: 18)).foregroundStyle(TVColor.textFaint)
             }
             .padding(14).frame(maxWidth: .infinity)
-            .background(.white.opacity(0.06))
+            .background(focused ? Color.white.opacity(0.12) : Color.white.opacity(0.06))
         }
     }
 }

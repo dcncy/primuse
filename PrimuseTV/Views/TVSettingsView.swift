@@ -45,11 +45,10 @@ struct TVSettingsView: View {
                     TVEyebrow(text: "遥控提示").padding(.bottom, 24)
                     HStack { Spacer(); TVSiriRemote(); Spacer() }
                     VStack(alignment: .leading, spacing: 14) {
-                        TVRemoteHint("圆形触控板", "上 / 下移动焦点 · 长按打开选项")
-                        TVRemoteHint("播放 / 暂停", "任意位置切歌 · 双按下一首")
-                        TVRemoteHint("Siri 按钮", "语音搜索 · 全局可用")
-                        TVRemoteHint("Menu / 返回", "返回上一层 · 长按回主页")
-                        TVRemoteHint("TV 按钮", "单按回 Primuse 首页 · 双按多任务")
+                        TVRemoteHint("圆形触控板", "上 / 下 / 左 / 右移动焦点 · 按下选择")
+                        TVRemoteHint("Menu / 返回", "返回上一层")
+                        TVRemoteHint("TV 按钮", "回 Apple TV 主屏")
+                        TVRemoteHint("搜索框", "唤出系统键盘 · 支持语音听写")
                     }
                     .padding(.top, 32)
                 }

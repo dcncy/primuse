@@ -1,39 +1,56 @@
 #if os(tvOS)
 import SwiftUI
 
-/// tvOS 音乐源 — 左列状态列表 + 右列「用 iPhone 配对」扫码卡(对应 TVSourcesArtboard)。
-/// tvOS 不便输入 ftp://、凭据,所以新增源走配对的 iPhone 扫码。
+/// tvOS 音乐源 — 列出经 iCloud 同步过来的音乐源(只读)。
+/// tvOS 不跑原生连接器,音乐源在 iPhone / Mac 上添加后同步到此。
 struct TVSourcesView: View {
     @Environment(TVStore.self) private var store
 
     var body: some View {
         ZStack {
             TVColor.bg.ignoresSafeArea()
-            HStack(alignment: .top, spacing: 60) {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        TVEyebrow(text: "音乐源")
-                        Text("已连接 · \(store.sources.filter { $0.status == .connected }.count) 个")
-                            .font(TVFont.pageTitle).foregroundStyle(.white)
-                            .padding(.bottom, 22)
-                        VStack(spacing: 12) {
-                            ForEach(store.sources) { s in TVSourceRow(source: s) }
+            if store.sources.isEmpty {
+                TVEmptyState(icon: "server.rack", title: "还没有音乐源",
+                             subtitle: "在 iPhone / Mac 上添加音乐源,经 iCloud 同步后在此显示").tvPage()
+            } else {
+                HStack(alignment: .top, spacing: 60) {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TVEyebrow(text: "音乐源")
+                            Text("音乐源 · \(store.sources.count) 个")
+                                .font(TVFont.pageTitle).foregroundStyle(.white)
+                                .padding(.bottom, 22)
+                            VStack(spacing: 12) {
+                                ForEach(store.sources) { s in TVSourceRow(source: s) }
+                            }
                         }
                     }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 0) {
-                    TVEyebrow(text: "添加新源")
-                    Text("用 iPhone 配对")
-                        .font(.system(size: 32, weight: .bold)).foregroundStyle(.white)
-                        .padding(.top, 6).padding(.bottom, 22)
-                    TVPairCard()
+                    VStack(alignment: .leading, spacing: 0) {
+                        TVEyebrow(text: "添加音乐源").padding(.bottom, 16)
+                        TVSourcesInfoCard()
+                    }
+                    .frame(width: 520)
                 }
-                .frame(width: 560)
+                .tvPage()
             }
-            .tvPage()
         }
+    }
+}
+
+/// tvOS 不直接添加源 —— 说明在 iPhone / Mac 上添加,经 iCloud 同步。
+private struct TVSourcesInfoCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "iphone.and.arrow.forward").font(.system(size: 52))
+                .foregroundStyle(TVColor.brand)
+            Text("在 iPhone / Mac 上添加").font(.system(size: 26, weight: .bold)).foregroundStyle(.white)
+            Text("tvOS 端暂不支持直接添加 NAS / 云盘音乐源。在 iPhone 或 Mac 上添加并扫描后,音乐源与曲库会经 iCloud 自动同步到这里。")
+                .font(.system(size: 18)).foregroundStyle(.white.opacity(0.65)).lineSpacing(5)
+        }
+        .padding(28).frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 
@@ -81,10 +98,10 @@ private struct TVSourceRow: View {
     }
     private var statusLabel: String {
         switch source.status {
-        case .connected: return "在线"
-        case .scanning: return "扫描"
+        case .connected: return "已启用"
+        case .scanning: return "扫描中"
         case .authFailed: return "凭据失败"
-        case .disabled: return "禁用"
+        case .disabled: return "已停用"
         }
     }
     private var statusColor: Color {
@@ -97,64 +114,4 @@ private struct TVSourceRow: View {
     }
 }
 
-/// 配对扫码卡 — 程序化二维码 + 说明 + 配对码。
-private struct TVPairCard: View {
-    var body: some View {
-        TVFocusButton(radius: 28, scale: 1.02, lift: 6) { _ in
-            VStack(spacing: 22) {
-                TVQRCode().frame(width: 240, height: 240)
-                VStack(spacing: 6) {
-                    Text("用 iPhone 摄像头扫码")
-                        .font(.system(size: 26, weight: .bold)).foregroundStyle(.white)
-                    Text("在 Primuse 配对的 iPhone 上输入 NAS\n地址 / 凭据 / OAuth 后，会自动同步到 TV")
-                        .font(.system(size: 17)).foregroundStyle(.white.opacity(0.62))
-                        .multilineTextAlignment(.center).lineSpacing(4)
-                    Text("4 7 2 9")
-                        .font(.system(size: 18, design: .monospaced)).tracking(6)
-                        .foregroundStyle(TVColor.textFaint)
-                        .padding(.top, 8)
-                }
-            }
-            .padding(30)
-            .frame(maxWidth: .infinity)
-            .background(.white.opacity(0.08))
-        }
-    }
-}
-
-/// 风格化二维码 — 3 个定位角 + 确定性数据点(纯装饰)。
-struct TVQRCode: View {
-    private let n = 13
-    var body: some View {
-        GeometryReader { geo in
-            let gap: CGFloat = 2
-            let pad: CGFloat = 14
-            let inner = min(geo.size.width, geo.size.height) - pad * 2
-            let dot = (inner - gap * CGFloat(n - 1)) / CGFloat(n)
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.white)
-                .overlay {
-                    VStack(spacing: gap) {
-                        ForEach(0..<n, id: \.self) { y in
-                            HStack(spacing: gap) {
-                                ForEach(0..<n, id: \.self) { x in
-                                    RoundedRectangle(cornerRadius: 1)
-                                        .fill(on(x, y) ? Color(hex: "#1f1c19") : .clear)
-                                        .frame(width: dot, height: dot)
-                                }
-                            }
-                        }
-                    }
-                    .padding(pad)
-                }
-        }
-    }
-
-    private func on(_ x: Int, _ y: Int) -> Bool {
-        let isMarker = (x < 3 && y < 3) || (x > 9 && y < 3) || (x < 3 && y > 9)
-        let isMarkerOuter = isMarker && (x == 0 || x == 2 || y == 0 || y == 2 || (x > 9 && x == 12) || (y > 9 && y == 12))
-        let seed = (x * 31 + y * 17) % 7
-        return isMarkerOuter || (isMarker && x % 3 == 1 && y % 3 == 1) || (!isMarker && seed < 3)
-    }
-}
 #endif

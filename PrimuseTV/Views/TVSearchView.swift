@@ -6,15 +6,7 @@ struct TVSearchView: View {
     @Environment(TVStore.self) private var store
     var openPlayer: () -> Void = {}
 
-    @State private var query: String = "周杰伦"
-    @State private var caretOn = true
-
-    private let keys: [String] = {
-        var k = (0..<26).map { String(UnicodeScalar(65 + $0)!) }
-        k += (0...9).map(String.init)
-        k += ["邓", "丽", "君", "周", "杰", "伦", "陈", "奕", "迅", "王", "菲"]
-        return k
-    }()
+    @State private var query: String = ""
 
     private var matchedSongs: [TVSong] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -37,89 +29,57 @@ struct TVSearchView: View {
 
     var body: some View {
         ZStack {
-            TVAmbientBackdrop(tint: store.album("a08")?.tint ?? TVColor.brand,
-                              tint2: store.album("a08")?.tint2 ?? .black, strength: 0.4)
+            TVAmbientBackdrop(tint: store.albums.first?.tint ?? TVColor.brand,
+                              tint2: store.albums.first?.tint2 ?? .black, strength: 0.4)
             HStack(alignment: .top, spacing: 60) {
                 leftColumn
                 rightColumn
             }
             .tvPage()
         }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) { caretOn = false }
-        }
     }
 
-    // MARK: 左列 — 键盘
+    // MARK: 左列 — 搜索框(系统键盘,支持语音听写)
 
     private var leftColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TVEyebrow(text: "搜索")
-                .padding(.bottom, 16)
+            TVEyebrow(text: "搜索").padding(.bottom, 16)
 
             HStack(spacing: 18) {
                 Image(systemName: "magnifyingglass").font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.55))
-                Text(query.isEmpty ? " " : query)
-                    .font(.system(size: 36, weight: .semibold)).tracking(4).foregroundStyle(.white)
-                Rectangle().fill(TVColor.brand).frame(width: 3, height: 38).opacity(caretOn ? 1 : 0)
-                Spacer(minLength: 0)
-                TVFocusButton(radius: 28, accent: .white, scale: 1.06, lift: 0,
-                              action: { query = "" }) { _ in
-                    Text("清除").font(.system(size: 16, weight: .medium)).foregroundStyle(.white)
-                        .padding(.horizontal, 18).padding(.vertical, 8)
-                        .background(.white.opacity(0.16), in: Capsule())
-                }
+                TextField("搜索歌曲、专辑、艺术家", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(.white)
             }
-            .padding(.horizontal, 28).padding(.vertical, 18)
+            .padding(.horizontal, 28).padding(.vertical, 20)
             .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.bottom, 24)
+            .padding(.bottom, 20)
 
-            Text("建议").font(.system(size: 18)).foregroundStyle(TVColor.textMuted)
-                .padding(.bottom, 10)
-            VStack(spacing: 4) {
-                ForEach(suggestions, id: \.self) { s in
-                    TVFocusButton(radius: 10, accent: .white, scale: 1.02, lift: 0,
-                                  action: { query = s }) { _ in
-                        HStack {
-                            Text(s).font(.system(size: 22)).foregroundStyle(.white)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 20).padding(.vertical, 14)
-                        .frame(maxWidth: .infinity)
-                        .background(.white.opacity(0.06))
-                    }
-                }
-            }
-            .padding(.bottom, 28)
+            Text("选择搜索框唤出系统键盘,可用语音听写输入")
+                .font(.system(size: 15)).foregroundStyle(TVColor.textGhost)
+                .padding(.bottom, 28)
 
-            Text("键盘 — 方向键移动 · 选中追加").font(.system(size: 18)).foregroundStyle(TVColor.textMuted)
-                .padding(.bottom, 10)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(Array(keys.enumerated()), id: \.offset) { _, k in
-                        TVFocusButton(radius: 8, accent: .white, scale: 1.22, lift: 6,
-                                      action: { query += k }) { focused in
-                            Text(k)
-                                .font(.system(size: 22, weight: .semibold))
-                                .foregroundStyle(focused ? Color(hex: "#1f1c19") : .white)
-                                .frame(width: 50, height: 50)
-                                .background(focused ? AnyShapeStyle(.white)
-                                                    : AnyShapeStyle(Color.white.opacity(0.10)))
+            if query.trimmingCharacters(in: .whitespaces).isEmpty, !suggestions.isEmpty {
+                Text("建议").font(.system(size: 18)).foregroundStyle(TVColor.textMuted)
+                    .padding(.bottom, 10)
+                VStack(spacing: 4) {
+                    ForEach(suggestions, id: \.self) { s in
+                        TVFocusButton(radius: 10, accent: .white, scale: 1.02, lift: 0,
+                                      action: { query = s }) { _ in
+                            HStack {
+                                Text(s).font(.system(size: 22)).foregroundStyle(.white)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 20).padding(.vertical, 14)
+                            .frame(maxWidth: .infinity)
+                            .background(.white.opacity(0.06))
                         }
                     }
                 }
-                .padding(.vertical, 12).padding(.horizontal, 12)
             }
-            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            HStack(spacing: 14) {
-                Text("按住 Siri 按钮可语音搜索")
-                Text("·")
-                Text("iPhone 远程键盘弹窗")
-            }
-            .font(.system(size: 14)).foregroundStyle(TVColor.textGhost)
-            .padding(.top, 14)
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

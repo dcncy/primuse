@@ -7,6 +7,7 @@ struct TVSearchView: View {
     var openPlayer: () -> Void = {}
 
     @State private var query: String = ""
+    @FocusState private var fieldFocused: Bool
 
     private var matchedSongs: [TVSong] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -47,14 +48,23 @@ struct TVSearchView: View {
 
             HStack(spacing: 18) {
                 Image(systemName: "magnifyingglass").font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(fieldFocused ? TVColor.brand : .white.opacity(0.55))
                 TextField("搜索歌曲、专辑、艺术家", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(.white)
+                    .focused($fieldFocused)
+                    .focusEffectDisabled()   // 去掉聚焦时的系统白底,保留暗色主题
             }
             .padding(.horizontal, 28).padding(.vertical, 20)
-            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(fieldFocused ? Color.white.opacity(0.16) : Color.white.opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(fieldFocused ? TVColor.brand : Color.white.opacity(0.12),
+                                  lineWidth: fieldFocused ? 4 : 1)
+            }
+            .animation(.easeOut(duration: 0.18), value: fieldFocused)
             .padding(.bottom, 20)
 
             Text("选择搜索框唤出系统键盘,可用语音听写输入")

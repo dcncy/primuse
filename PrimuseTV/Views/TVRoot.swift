@@ -48,7 +48,7 @@ struct TVRoot: View {
             TVNowPlayingView().environment(store)
         }
         .fullScreenCover(isPresented: $showSettings) {
-            TVSettingsView().environment(store)
+            TVSettingsView(onNavigate: { tab = $0 }).environment(store)
         }
         .fullScreenCover(isPresented: $showQueue) {
             TVQueueView().environment(store)
@@ -110,13 +110,13 @@ struct TVTabBar: View {
 
     var body: some View {
         HStack(spacing: 40) {
-            // Logo
+            // Logo(真实 App 图标)
             HStack(spacing: 14) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(LinearGradient(colors: [TVColor.brand, .black.opacity(0.6)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                Image("BrandMark")
+                    .resizable()
+                    .interpolation(.high)
                     .frame(width: 56, height: 56)
-                    .overlay { Text("猿").font(.system(size: 28, weight: .bold)).foregroundStyle(.white) }
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .shadow(color: TVColor.brand.opacity(0.33), radius: 12, y: 6)
                 Text("Primuse").font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
             }

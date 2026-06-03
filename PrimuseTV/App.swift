@@ -3,10 +3,9 @@ import SwiftUI
 
 /// tvOS app 入口。
 ///
-/// 当前为 UI 层:界面按 design/猿音/scenes/tvos.jsx 还原,由 TVStore 的样例数据驱动,
-/// 保证可独立编译、可在 tvOS 模拟器预览。后续接入真实曲库(经 iCloud 同步)与播放时,
-/// 只需补一个把 PrimuseKit 的 Song/Album/Playlist/MusicSource 映射成 TV* view-model
-/// 的 adapter,各 View 无需改动。
+/// 界面按 design/猿音/scenes/tvos.jsx 还原,由 TVStore 读取经 iCloud 同步下来的
+/// 真实曲库快照(library-cache.json / sources.json)驱动。启动时按「自动同步」
+/// 偏好决定联网拉取还是仅本地重载。
 @main
 struct PrimuseTVApp: App {
     @State private var store = TVStore()
@@ -17,7 +16,10 @@ struct PrimuseTVApp: App {
                 .environment(store)
                 .preferredColorScheme(.dark)
                 .tint(TVColor.brand)
-                .task { await store.bootstrap() }
+                .task {
+                    let autoSync = UserDefaults.standard.object(forKey: "tvAutoSync") as? Bool ?? true
+                    if autoSync { await store.bootstrap() } else { store.reload() }
+                }
         }
     }
 }

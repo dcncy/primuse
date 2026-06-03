@@ -38,6 +38,7 @@ struct TVNowPlayingView: View {
 
             HStack(alignment: .top, spacing: 80) {
                 leftColumn.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .focusSection()
                 lyricsColumn.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(.horizontal, 100).padding(.top, 80).padding(.bottom, 70)
@@ -48,6 +49,7 @@ struct TVNowPlayingView: View {
                     TVRoundBtn(icon: "list.bullet", size: 64) { showQueue = true }
                     TVRoundBtn(icon: "ellipsis", size: 64) { showOptions = true }
                 }
+                .focusSection()   // 让焦点能从左侧传输键跨到右上角队列/选项
                 Spacer()
             }
             .padding(.horizontal, 80).padding(.top, 60)

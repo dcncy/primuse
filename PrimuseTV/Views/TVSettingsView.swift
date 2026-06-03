@@ -6,6 +6,8 @@ import SwiftUI
 struct TVSettingsView: View {
     @Environment(TVStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    var onNavigate: (TVRoot.Tab) -> Void = { _ in }
+    @AppStorage("tvAutoSync") private var autoSync = true
     @State private var isSyncing = false
     @State private var syncMsg: String?
 
@@ -32,11 +34,12 @@ struct TVSettingsView: View {
                     TVEyebrow(text: "设置").padding(.bottom, 6)
                     Text("常用").font(TVFont.pageTitle).foregroundStyle(.white).padding(.bottom, 24)
                     VStack(spacing: 12) {
-                        settingRow("icloud.fill", "iCloud 同步", syncValue, action: sync)
-                        settingRow("music.note", "曲库", libraryStat)
-                        settingRow("music.note.list", "歌单", "\(store.playlists.count) 个")
-                        settingRow("server.rack", "音乐源", "\(store.sources.count) 个")
-                        settingRow("info.circle", "关于 Primuse", "\(version) (\(build)) · tvOS \(osVersion)")
+                        navRow("icloud.fill", "iCloud 同步", syncValue, trailing: "arrow.clockwise", action: sync)
+                        toggleRow("arrow.triangle.2.circlepath", "启动时自动同步", isOn: $autoSync)
+                        navRow("music.note", "曲库", libraryStat) { go(.library) }
+                        navRow("music.note.list", "歌单", "\(store.playlists.count) 个") { go(.playlists) }
+                        navRow("server.rack", "音乐源", "\(store.sources.count) 个") { go(.sources) }
+                        infoRow("info.circle", "关于 Primuse", "\(version) (\(build)) · tvOS \(osVersion)")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -70,27 +73,70 @@ struct TVSettingsView: View {
         }
     }
 
-    private func settingRow(_ icon: String, _ title: String, _ value: String,
-                            action: (() -> Void)? = nil) -> some View {
-        TVFocusButton(radius: 14, scale: 1.02, lift: 0, action: { action?() }) { focused in
+    private func go(_ tab: TVRoot.Tab) {
+        onNavigate(tab)
+        dismiss()
+    }
+
+    private func settingIcon(_ icon: String, focused: Bool) -> some View {
+        Image(systemName: icon).font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 40, height: 40)
+            .background(focused ? AnyShapeStyle(TVColor.brand) : AnyShapeStyle(Color.white.opacity(0.10)),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    /// 可点击行(同步 / 跳转);trailing 默认箭头表示可进入。
+    private func navRow(_ icon: String, _ title: String, _ value: String,
+                        trailing: String = "chevron.right",
+                        action: @escaping () -> Void) -> some View {
+        TVFocusButton(radius: 14, scale: 1.02, lift: 0, action: action) { focused in
             HStack(spacing: 18) {
-                Image(systemName: icon).font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(focused ? AnyShapeStyle(TVColor.brand) : AnyShapeStyle(Color.white.opacity(0.10)),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                settingIcon(icon, focused: focused)
                 Text(title).font(.system(size: 22, weight: focused ? .bold : .medium)).foregroundStyle(.white)
                 Spacer(minLength: 0)
                 Text(value).font(.system(size: 18)).foregroundStyle(.white.opacity(0.62)).lineLimit(1)
-                if action != nil {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.45))
-                }
+                Image(systemName: trailing).font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(focused ? 0.85 : 0.45))
             }
             .padding(.horizontal, 22).padding(.vertical, 16)
             .frame(maxWidth: .infinity)
-            .background(focused ? Color.white.opacity(0.10) : TVColor.card)
+            .background(focused ? Color.white.opacity(0.12) : TVColor.card)
         }
+    }
+
+    /// 开关行 — 真实持久化偏好(@AppStorage),启动时被读取。
+    private func toggleRow(_ icon: String, _ title: String, isOn: Binding<Bool>) -> some View {
+        TVFocusButton(radius: 14, scale: 1.02, lift: 0, action: { isOn.wrappedValue.toggle() }) { focused in
+            HStack(spacing: 18) {
+                settingIcon(icon, focused: focused)
+                Text(title).font(.system(size: 22, weight: focused ? .bold : .medium)).foregroundStyle(.white)
+                Spacer(minLength: 0)
+                ZStack(alignment: isOn.wrappedValue ? .trailing : .leading) {
+                    Capsule().fill(isOn.wrappedValue ? AnyShapeStyle(TVColor.brand)
+                                                     : AnyShapeStyle(Color.white.opacity(0.18)))
+                        .frame(width: 62, height: 34)
+                    Circle().fill(.white).frame(width: 28, height: 28).padding(3)
+                }
+                .animation(.easeOut(duration: 0.18), value: isOn.wrappedValue)
+            }
+            .padding(.horizontal, 22).padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+            .background(focused ? Color.white.opacity(0.12) : TVColor.card)
+        }
+    }
+
+    /// 只读信息行(不可聚焦)。
+    private func infoRow(_ icon: String, _ title: String, _ value: String) -> some View {
+        HStack(spacing: 18) {
+            settingIcon(icon, focused: false)
+            Text(title).font(.system(size: 22, weight: .medium)).foregroundStyle(.white)
+            Spacer(minLength: 0)
+            Text(value).font(.system(size: 18)).foregroundStyle(.white.opacity(0.62)).lineLimit(1)
+        }
+        .padding(.horizontal, 22).padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .background(TVColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

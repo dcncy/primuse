@@ -209,6 +209,11 @@ final class TVStore {
 
     func bootstrap() async {
         await LibrarySnapshotSync.shared.download()
+        reload()
+    }
+
+    /// 仅从本地磁盘重载(不联网),用于关闭自动同步时的启动。
+    func reload() {
         library.reloadFromDisk()
         sourcesStore.reloadFromDisk()
     }

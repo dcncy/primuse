@@ -107,6 +107,16 @@ extension View {
     }
 }
 
+/// 纯渲染 label 的 ButtonStyle — 不加 tvOS 默认的聚焦平台层(大白卡)/缩放,
+/// 焦点视觉完全由各 label 根据 @FocusState 自定义。tvOS 的 `.plain` 仍会画系统
+/// 平台层,所以这里用空实现彻底去掉。
+struct TVBareButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.85 : 1)
+    }
+}
+
 /// 可聚焦按钮 — 选中触发 action，label 闭包拿到当前焦点态自行换样式。
 struct TVFocusButton<Label: View>: View {
     var radius: CGFloat
@@ -145,7 +155,7 @@ struct TVFocusButton<Label: View>: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TVBareButtonStyle())
         .focused($focused)
         .focusEffectDisabled()   // 关掉 tvOS 默认白卡焦点效果,只保留自定义高亮
     }

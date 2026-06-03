@@ -182,7 +182,7 @@ private struct TVTabItem: View {
                 .scaleEffect(focused ? 1.08 : 1)
                 .animation(.easeOut(duration: 0.18), value: focused)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TVBareButtonStyle())
         .focused($focused)
         .focusEffectDisabled()
         .onAppear {
@@ -248,7 +248,7 @@ struct TVBottomBar: View {
                 Rectangle().fill(.white.opacity(focused ? 0.9 : 0)).frame(height: 3)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TVBareButtonStyle())
         .focused($focused)
         .focusEffectDisabled()
         .animation(.easeOut(duration: 0.18), value: focused)

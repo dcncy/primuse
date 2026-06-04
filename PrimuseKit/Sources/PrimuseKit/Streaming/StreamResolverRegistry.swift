@@ -12,10 +12,14 @@ public actor StreamResolverRegistry {
         // Phase 1:Subsonic 家族共用一个无状态 resolver。直接在 init 里建表
         // (actor init 是同步的,不能调用 actor-isolated 方法)。
         let subsonic = SubsonicStreamResolver()
+        let synology = SynologyStreamResolver()
+        let s3 = S3StreamResolver()
         var map: [MusicSourceType: StreamResolver] = [:]
         for type in [MusicSourceType.subsonic, .navidrome, .airsonic, .gonic] {
             map[type] = subsonic
         }
+        map[.synology] = synology
+        map[.s3] = s3
         resolvers = map
     }
 

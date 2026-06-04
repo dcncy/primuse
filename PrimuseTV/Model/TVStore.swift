@@ -117,6 +117,7 @@ final class TVStore {
     var lyrics: [TVLyricLine] = []        // tvOS 暂未同步歌词
     var queueUpNextIDs: [String] = []
     var playbackIssue: TVPlaybackIssue?   // 解析/播放受阻原因(展示用)
+    var credentialBundle: CredentialBundle?   // 经 iCloud(CloudKit 加密)同步下来的源凭据
     private var queue: [String] = []      // 当前队列(真实 Song id)
     private var queueIndex = 0
     private var localLiked = Set<String>()
@@ -223,6 +224,7 @@ final class TVStore {
     func bootstrap() async {
         await LibrarySnapshotSync.shared.download()
         reload()
+        credentialBundle = await LibrarySnapshotSync.shared.downloadCredentials()
     }
 
     /// 仅从本地磁盘重载(不联网),用于关闭自动同步时的启动。

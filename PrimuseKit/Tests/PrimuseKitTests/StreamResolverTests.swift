@@ -77,3 +77,25 @@ import Testing
     #expect(!supported.contains(.smb))      // 原生库源仍不支持
     #expect(!supported.contains(.appleMusic))
 }
+
+// MARK: - 凭据包(CloudKit 加密同步的载荷)
+
+@Test func credentialBundleRoundTrip() throws {
+    let entry = CredentialEntry(username: "u", password: "p", token: "tok",
+                                refreshToken: "rt", clientID: "cid", clientSecret: "sec",
+                                extra: ["drive_id": "9"])
+    let bundle = CredentialBundle(entries: ["src1": entry, "src2": CredentialEntry(password: "x")])
+    let decoded = CredentialBundle.decode(try bundle.jsonData())
+    #expect(decoded == bundle)
+
+    let cred = decoded?.credential(for: "src1", defaultUsername: "fallback")
+    #expect(cred?.username == "u")
+    #expect(cred?.token == "tok")
+    #expect(cred?.extra["drive_id"] == "9")
+
+    // entry.username 为空时回退到默认用户名
+    #expect(bundle.credential(for: "src2", defaultUsername: "fallback")?.username == "fallback")
+    #expect(bundle.credential(for: "missing", defaultUsername: nil) == nil)
+    #expect(CredentialEntry().isEmpty)
+    #expect(!CredentialEntry(password: "p").isEmpty)
+}

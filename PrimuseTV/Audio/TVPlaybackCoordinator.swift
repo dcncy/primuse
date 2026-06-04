@@ -40,7 +40,7 @@ final class TVPlaybackCoordinator {
             store.playbackIssue = .unsupported(song.sourceID)
             return
         }
-        let credential = TVCredentialStore.credential(for: source)
+        let credential = TVCredentialStore.credential(for: source, bundle: store.credentialBundle)
         do {
             let url = try await resolve(song: song, source: source, credential: credential, retried: false)
             engine.load(url: url,

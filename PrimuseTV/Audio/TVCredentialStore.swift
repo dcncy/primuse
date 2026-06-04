@@ -12,7 +12,11 @@ import Security
 /// 链式设计:钥匙串 →(Phase 2)CloudKit 加密凭据包 →(Phase 2)设备配对缓存。
 /// Phase 1 只接第一环;后续环加入时本方法签名不变。
 enum TVCredentialStore {
-    static func credential(for source: MusicSource) -> SourceCredential? {
+    /// 凭据来源链:① 经 CloudKit 加密同步下来的凭据包(主路径)② 可同步 iCloud 钥匙串(兜底)。
+    static func credential(for source: MusicSource, bundle: CredentialBundle?) -> SourceCredential {
+        if let entry = bundle?.entries[source.id], !entry.isEmpty {
+            return entry.toCredential(defaultUsername: source.username)
+        }
         let password = keychainPassword(account: source.id)
         return SourceCredential(username: source.username, password: password)
     }

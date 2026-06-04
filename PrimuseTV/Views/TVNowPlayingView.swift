@@ -71,6 +71,12 @@ struct TVNowPlayingView: View {
             Text("\(np.album) · \(np.format) \(np.bitrate) kbps · \(np.sampleRate, specifier: "%.1f") kHz")
                 .font(.system(size: 18)).foregroundStyle(.white.opacity(0.5)).padding(.top, 4)
 
+            if let issue = store.playbackIssue {
+                Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 16, weight: .medium)).foregroundStyle(TVColor.warn)
+                    .lineLimit(3).frame(maxWidth: 580, alignment: .leading).padding(.top, 14)
+            }
+
             Spacer(minLength: 24)
             scrubber.padding(.bottom, 18)
             transport
@@ -79,22 +85,15 @@ struct TVNowPlayingView: View {
 
     private var scrubber: some View {
         let np = store.nowPlaying
-        let p = np.duration > 0 ? max(0, min(1, np.currentTime / np.duration)) : 0
+        let cur = store.currentTime
+        let dur = store.duration
+        let p = dur > 0 ? max(0, min(1, cur / dur)) : 0
         return HStack(spacing: 16) {
-            Text(TVFmt.time(np.currentTime)).font(.system(size: 16, design: .monospaced))
+            Text(TVFmt.time(cur)).font(.system(size: 16, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.6)).frame(width: 56, alignment: .trailing)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.16)).frame(height: 5)
-                    Capsule().fill(np.tint).frame(width: geo.size.width * p, height: 5)
-                    Circle().fill(.white).frame(width: 18, height: 18)
-                        .shadow(color: np.tint.opacity(0.5), radius: 4)
-                        .offset(x: geo.size.width * p - 9)
-                }
-                .frame(maxHeight: .infinity, alignment: .center)
-            }
-            .frame(height: 18)
-            Text("-\(TVFmt.time(np.duration - np.currentTime))").font(.system(size: 16, design: .monospaced))
+            TVScrubber(progress: p, tint: np.tint,
+                       onBack: { store.skipBackward() }, onForward: { store.skipForward() })
+            Text("-\(TVFmt.time(max(0, dur - cur)))").font(.system(size: 16, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.6)).frame(width: 56, alignment: .leading)
         }
     }
@@ -103,10 +102,10 @@ struct TVNowPlayingView: View {
         HStack(spacing: 22) {
             Spacer()
             TVRoundBtn(icon: "shuffle", size: 68) {}
-            TVRoundBtn(icon: "backward.fill", size: 68) {}
+            TVRoundBtn(icon: "backward.fill", size: 68) { store.previous() }
             TVRoundBtn(icon: store.isPlaying ? "pause.fill" : "play.fill", size: 92,
                        primary: true) { store.togglePlayPause() }
-            TVRoundBtn(icon: "forward.fill", size: 68) {}
+            TVRoundBtn(icon: "forward.fill", size: 68) { store.next() }
             TVRoundBtn(icon: "repeat", size: 68) {}
             Spacer()
         }
@@ -212,6 +211,44 @@ struct TVKaraokeLine: View {
             acc += s.d
         }
         return (syllables.count, 0)
+    }
+}
+
+// MARK: - 可聚焦进度条(Siri Remote 左右拖动 ∓10s 定位)
+
+private struct TVScrubber: View {
+    let progress: Double
+    let tint: Color
+    var onBack: () -> Void
+    var onForward: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(focused ? 0.3 : 0.16))
+                    .frame(height: focused ? 8 : 5)
+                Capsule().fill(tint)
+                    .frame(width: max(0, geo.size.width * progress), height: focused ? 8 : 5)
+                Circle().fill(.white)
+                    .frame(width: focused ? 26 : 18, height: focused ? 26 : 18)
+                    .shadow(color: tint.opacity(0.6), radius: focused ? 8 : 4)
+                    .offset(x: geo.size.width * progress - (focused ? 13 : 9))
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+        }
+        .frame(height: 26)
+        .focusable(true)
+        .focused($focused)
+        .focusEffectDisabled()
+        .onMoveCommand { direction in
+            switch direction {
+            case .left: onBack()
+            case .right: onForward()
+            default: break
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
 

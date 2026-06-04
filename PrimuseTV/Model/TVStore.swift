@@ -102,6 +102,12 @@ struct TVNowPlaying {
 final class TVStore {
     let library = MusicLibrary()
     let sourcesStore = SourcesStore()
+    @ObservationIgnored let engine = TVAudioEngine()
+    @ObservationIgnored private lazy var coordinator = TVPlaybackCoordinator(store: self, engine: engine)
+
+    init() {
+        engine.onEnded = { [weak self] in self?.next() }
+    }
 
     var hasRealLibrary: Bool { !library.visibleAlbums.isEmpty }
 
@@ -109,9 +115,16 @@ final class TVStore {
     var nowPlaying: TVNowPlaying = .none
     var hasNowPlaying: Bool = false
     var lyrics: [TVLyricLine] = []        // tvOS 暂未同步歌词
-    var queueUpNextIDs: [String] = []     // 暂无真实队列
-    var isPlaying: Bool = false
+    var queueUpNextIDs: [String] = []
+    var playbackIssue: TVPlaybackIssue?   // 解析/播放受阻原因(展示用)
+    private var queue: [String] = []      // 当前队列(真实 Song id)
+    private var queueIndex = 0
     private var localLiked = Set<String>()
+
+    /// 播放状态镜像自引擎(@Observable 组合,视图读取即订阅引擎变化)。
+    var isPlaying: Bool { engine.isPlaying }
+    var currentTime: Double { engine.currentTime }
+    var duration: Double { engine.duration > 0 ? engine.duration : nowPlaying.duration }
 
     // MARK: 浏览数据(全部来自真实曲库;为空即显示空态)
 
@@ -223,7 +236,7 @@ final class TVStore {
     /// 当前播放时间所在的歌词行索引。
     var currentLyricIndex: Int {
         var idx = 0
-        for (i, l) in lyrics.enumerated() where l.time <= nowPlaying.currentTime { idx = i }
+        for (i, l) in lyrics.enumerated() where l.time <= currentTime { idx = i }
         return idx
     }
     /// 当前行内逐字进度 0...1。
@@ -232,15 +245,57 @@ final class TVStore {
         guard i < lyrics.count else { return 0 }
         let start = lyrics[i].time
         let end = i + 1 < lyrics.count ? lyrics[i + 1].time : start + 3
-        return max(0, min(1, (nowPlaying.currentTime - start) / max(0.5, end - start)))
+        return max(0, min(1, (currentTime - start) / max(0.5, end - start)))
     }
 
-    // MARK: 播放控制(tvOS 暂无真实音频,只设置/展示元数据)
+    // MARK: 播放控制(AVPlayer 流式播放,真实流 URL 由 TVPlaybackCoordinator 解析)
 
-    func togglePlayPause() { isPlaying.toggle() }
+    func togglePlayPause() { engine.togglePlayPause() }
+    func seek(toFraction f: Double) { engine.seekToFraction(f) }
+    func skipForward() { engine.skip(by: 10) }
+    func skipBackward() { engine.skip(by: -10) }
 
-    /// 选中一首歌作为「正在播放」(展示真实元数据,暂不实际出声)。
+    /// 选中一首歌播放:以其所属专辑为队列,从该曲开始。
     func play(_ song: TVSong) {
+        setQueueAround(song)
+        startPlaying(song)
+    }
+
+    func play(album: TVAlbum) {
+        let albumSongs = songs(forAlbum: album.id)
+        guard let first = albumSongs.first else { return }
+        queue = albumSongs.map(\.id)
+        queueIndex = 0
+        startPlaying(first)
+    }
+
+    func next() {
+        guard queueIndex + 1 < queue.count, let s = song(queue[queueIndex + 1]) else { return }
+        queueIndex += 1
+        startPlaying(s)
+    }
+
+    func previous() {
+        // 播过 3 秒先回到开头,否则切上一首。
+        if currentTime > 3 { engine.seek(to: 0); return }
+        guard queueIndex - 1 >= 0, let s = song(queue[queueIndex - 1]) else { engine.seek(to: 0); return }
+        queueIndex -= 1
+        startPlaying(s)
+    }
+
+    private func setQueueAround(_ song: TVSong) {
+        let albumSongs = songs(forAlbum: song.albumID)
+        if albumSongs.count > 1, let idx = albumSongs.firstIndex(where: { $0.id == song.id }) {
+            queue = albumSongs.map(\.id)
+            queueIndex = idx
+        } else {
+            queue = [song.id]
+            queueIndex = 0
+        }
+    }
+
+    /// 设置展示元数据 + 触发真实解析播放。
+    private func startPlaying(_ song: TVSong) {
         let a = albumOf(song)
         nowPlaying = TVNowPlaying(
             title: song.title, artist: song.artist, album: a?.title ?? "",
@@ -248,13 +303,9 @@ final class TVStore {
             glyph: a?.glyph ?? "♪", duration: song.duration, currentTime: 0,
             format: song.format, bitrate: song.bitrate, sampleRate: song.sampleRate, sourcePath: "")
         hasNowPlaying = true
-        isPlaying = false
         lyrics = []
-        queueUpNextIDs = []
-    }
-
-    func play(album: TVAlbum) {
-        if let first = songs(forAlbum: album.id).first { play(first) }
+        queueUpNextIDs = queueIndex + 1 < queue.count ? Array(queue[(queueIndex + 1)...]) : []
+        Task { await coordinator.play(songID: song.id) }
     }
 }
 

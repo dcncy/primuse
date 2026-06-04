@@ -59,7 +59,13 @@ struct TVRoot: View {
         .task {
             #if DEBUG
             switch ProcessInfo.processInfo.environment["TV_SCREEN"] {
-            case "nowPlaying": showNowPlaying = true
+            case "nowPlaying":
+                var tries = 0
+                while store.albums.isEmpty && tries < 25 {
+                    try? await Task.sleep(nanoseconds: 200_000_000); tries += 1
+                }
+                if let album = store.albums.first { store.play(album: album) }
+                showNowPlaying = true
             case "queue": showQueue = true
             case "options": showOptions = true
             case "settings": showSettings = true

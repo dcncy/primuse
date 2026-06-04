@@ -17,6 +17,12 @@ struct PrimuseTVApp: App {
                 .preferredColorScheme(.dark)
                 .tint(TVColor.brand)
                 .task {
+                    store.engine.configureAudioSession()
+                    #if DEBUG
+                    if ProcessInfo.processInfo.environment["TV_AUDIO_SMOKE"] == "1" {
+                        store.engine.runSmokeTest()
+                    }
+                    #endif
                     let autoSync = UserDefaults.standard.object(forKey: "tvAutoSync") as? Bool ?? true
                     if autoSync { await store.bootstrap() } else { store.reload() }
                 }

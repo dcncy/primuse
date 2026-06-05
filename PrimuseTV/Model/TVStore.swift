@@ -222,10 +222,29 @@ final class TVStore {
     // MARK: 启动引导(从 iCloud 拉取快照并重载真实曲库)
 
     func bootstrap() async {
+        #if DEBUG
+        injectDebugCredential()   // 先注入,避免与自动播放钩子竞态(CloudKit await 期间)
+        #endif
         await LibrarySnapshotSync.shared.download()
         reload()
-        credentialBundle = await LibrarySnapshotSync.shared.downloadCredentials()
+        // 真实凭据(CloudKit)拉到才覆盖;模拟器无 iCloud 返回 nil 时保留上面注入的。
+        if let creds = await LibrarySnapshotSync.shared.downloadCredentials() {
+            credentialBundle = creds
+        }
     }
+
+    #if DEBUG
+    /// 模拟器/截图测试:`TV_DEMO_CRED="sourceID:username:password"` 注入一条凭据,
+    /// 绕过 CloudKit(模拟器无 iCloud 账号)直接演示真实流式播放。
+    private func injectDebugCredential() {
+        guard let raw = ProcessInfo.processInfo.environment["TV_DEMO_CRED"] else { return }
+        let parts = raw.split(separator: ":", maxSplits: 2).map(String.init)
+        guard parts.count == 3 else { return }
+        var bundle = credentialBundle ?? CredentialBundle()
+        bundle.entries[parts[0]] = CredentialEntry(username: parts[1], password: parts[2])
+        credentialBundle = bundle
+    }
+    #endif
 
     /// 仅从本地磁盘重载(不联网),用于关闭自动同步时的启动。
     func reload() {

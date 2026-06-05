@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 @testable import PrimuseKit
 
@@ -75,7 +76,7 @@ import Testing
     let supported = await StreamResolverRegistry().supportedTypes
     #expect(supported.isSuperset(of: [.subsonic, .navidrome, .airsonic, .gonic, .synology, .s3,
                                       .aliyunDrive, .oneDrive, .dropbox, .pan123,
-                                      .jellyfin, .emby, .plex, .qnap, .fnos]))
+                                      .jellyfin, .emby, .plex, .qnap, .fnos, .ugreen]))
     #expect(!supported.contains(.smb))          // 原生库源仍不支持
     #expect(!supported.contains(.appleMusic))
     #expect(!supported.contains(.baiduPan))     // 需播放头/UA,待引擎支持后再接
@@ -101,6 +102,37 @@ import Testing
     #expect(MediaServerStreamResolver.mediaBrowserAuth(deviceID: "d1", token: nil).contains("DeviceId=\"d1\""))
     #expect(MediaServerStreamResolver.baseURL(host: "h", port: 8096, useSsl: false, basePath: "/jf")?.absoluteString
             == "http://h:8096/jf")
+}
+
+// MARK: - 绿联 Ugreen(含 RSA 往返验证)
+
+@Test func ugreenURLAndParse() {
+    let url = UgreenStreamResolver.downloadURL(base: URL(string: "https://ug.local:9999")!,
+                                               path: "/音乐/a b.flac", token: "TKN")
+    let s = url?.absoluteString ?? ""
+    #expect(s.hasPrefix("https://ug.local:9999/ugreen/v1/file/download?path="))
+    #expect(s.contains("&token=TKN"))
+    #expect(s.contains("%20"))   // 空格已编码
+    #expect(UgreenStreamResolver.parseToken(Data(#"{"code":200,"data":{"token":"TT","uid":"u"}}"#.utf8)) == "TT")
+    #expect(UgreenStreamResolver.parseToken(Data(#"{"code":200,"data":{"static_token":"ST"}}"#.utf8)) == "ST")
+    #expect(UgreenStreamResolver.parseToken(Data(#"{"code":401,"data":{}}"#.utf8)) == nil)
+}
+
+@Test func ugreenRSARoundTrip() throws {
+    // 生成 RSA 密钥对 → 用我们的 encrypt(公钥)加密 → 私钥解密,验证 RSA + 取公钥逻辑。
+    var err: Unmanaged<CFError>?
+    let priv = SecKeyCreateRandomKey([
+        kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
+        kSecAttrKeySizeInBits as String: 2048,
+    ] as CFDictionary, &err)
+    let privateKey = try #require(priv)
+    let publicKey = try #require(SecKeyCopyPublicKey(privateKey))
+    let pubData = try #require(SecKeyCopyExternalRepresentation(publicKey, &err) as Data?)
+
+    let b64 = try UgreenStreamResolver.encrypt(password: "hunter2", withPublicKeyData: pubData)
+    let cipher = try #require(Data(base64Encoded: b64))
+    let plain = try #require(SecKeyCreateDecryptedData(privateKey, .rsaEncryptionPKCS1, cipher as CFData, &err) as Data?)
+    #expect(String(data: plain, encoding: .utf8) == "hunter2")
 }
 
 // MARK: - QNAP / fnOS NAS

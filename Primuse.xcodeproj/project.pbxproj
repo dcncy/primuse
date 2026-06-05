@@ -61,6 +61,7 @@
 		17385B54C3275E7F6DBFC4D0 /* GoogleDriveSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF18B2B6584B7988608C004 /* GoogleDriveSource.swift */; };
 		1794D1037671E0C9091F0E5E /* ArtworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 363F869C6171BAEF3E787B3A /* ArtworkView.swift */; };
 		1796183C484EAF5D198BF953 /* MusicScraperFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6255A91A1DE2B2C344A5491 /* MusicScraperFactory.swift */; };
+		17F49E86FA92CB0D1341670E /* RelayStreamResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99EF0A47317166C18FD865D /* RelayStreamResolver.swift */; };
 		184E4A32C4D50AC805AB9DDC /* ScraperTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60D668FE9811EE6FEF380039 /* ScraperTypes.swift */; };
 		1866EF3460DA7C421215CBC2 /* UserNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24CA1E9D7FDCD0F25BE8D43A /* UserNotificationService.swift */; };
 		18D9115DD587058F8DADE067 /* PrimuseWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0079EF685D04AD5701F7F80F /* PrimuseWatchApp.swift */; };
@@ -1065,6 +1066,7 @@
 		F6255A91A1DE2B2C344A5491 /* MusicScraperFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicScraperFactory.swift; sourceTree = "<group>"; };
 		F652918A8A39CEF7841384ED /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		F8C714C150FC7495AF3988FB /* CloudAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAccount.swift; sourceTree = "<group>"; };
+		F99EF0A47317166C18FD865D /* RelayStreamResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayStreamResolver.swift; sourceTree = "<group>"; };
 		F9B1688ED9374813585EC4C6 /* StoredCoverArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredCoverArtView.swift; sourceTree = "<group>"; };
 		FA44FA865D7C3D6FC4DFCC9E /* TVSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVSettingsView.swift; sourceTree = "<group>"; };
 		FAE228964342BBAAB23DCAD8 /* MusicScraperService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicScraperService.swift; sourceTree = "<group>"; };
@@ -1952,6 +1954,7 @@
 				2536FC64E50FD6E0FAE8B75B /* CredentialBundle.swift */,
 				462A1CC2221A693AE52A85E3 /* MediaServerStreamResolver.swift */,
 				984D9BE82FF301BBD6F0FAD7 /* NasHttpStreamResolver.swift */,
+				F99EF0A47317166C18FD865D /* RelayStreamResolver.swift */,
 				C603E86C2F865CDFD1D1C8EB /* S3StreamResolver.swift */,
 				4430B0204E343AF011F490F1 /* StreamResolver.swift */,
 				F24FFA868034F06D26F041E3 /* StreamResolverRegistry.swift */,
@@ -2361,6 +2364,7 @@
 				E1E6E2746C97E7523587FBF4 /* Playlist.swift in Sources */,
 				AFD5B53A36622430D2016CAE /* PrimuseIntentBridge.swift in Sources */,
 				8057E3B6274053DAFEA3F8F7 /* RecentAlbumsStore.swift in Sources */,
+				17F49E86FA92CB0D1341670E /* RelayStreamResolver.swift in Sources */,
 				055E8F5093B42BCBDF08DA4F /* S3StreamResolver.swift in Sources */,
 				C067C2586AAA10F3F398296C /* SharedConstants.swift in Sources */,
 				4104522A47C989851CAB4E72 /* SmartPlaylist.swift in Sources */,

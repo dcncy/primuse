@@ -91,8 +91,9 @@ import Testing
 
 @Test func registryUnsupportedType() async {
     let song = Song(id: "s4", title: "T", fileFormat: .flac, filePath: "/x/a.flac", sourceID: "src1")
-    let source = MusicSource(name: "SMB", type: .smb, host: "h.com")
-    await #expect(throws: StreamResolveError.unsupportedSourceType(.smb)) {
+    // appleMusicLibrary 是 macOS-only,不注册任何 resolver。
+    let source = MusicSource(name: "AML", type: .appleMusicLibrary, host: "h.com")
+    await #expect(throws: StreamResolveError.unsupportedSourceType(.appleMusicLibrary)) {
         try await StreamResolverRegistry().streamURL(for: song, source: source, credential: nil)
     }
 }
@@ -101,5 +102,5 @@ import Testing
     let reg = StreamResolverRegistry()
     let supported = await reg.supportedTypes
     #expect(supported.isSuperset(of: [.subsonic, .navidrome, .airsonic, .gonic]))
-    #expect(!supported.contains(.smb))
+    #expect(!supported.contains(.appleMusicLibrary))
 }

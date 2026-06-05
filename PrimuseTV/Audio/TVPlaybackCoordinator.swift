@@ -75,6 +75,8 @@ final class TVPlaybackCoordinator {
         case .authFailed: return .failed("鉴权失败,请在手机上重新登录该音乐源")
         case .badServerResponse(let code): return .failed("服务器返回 HTTP \(code)")
         case .cannotBuildURL: return .failed("无法构造播放地址")
+        case .relayUnavailable:
+            return .failed("此来源需经 iPhone 中继播放——请在手机上保持 Primuse 打开、与 Apple TV 同一局域网")
         }
     }
 }

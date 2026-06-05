@@ -32,6 +32,9 @@ public actor StreamResolverRegistry {
             map[type] = nas
         }
         map[.ugreen] = ugreen
+        // Phase 3:不可直连的源经 iPhone 局域网中继。
+        let relay = RelayStreamResolver()
+        for type in RelayStreamResolver.relayTypes { map[type] = relay }
         // 云盘:阿里/OneDrive/Dropbox/123 直链直连;Google/115 经 resource loader 带播放头。
         for type in [MusicSourceType.aliyunDrive, .oneDrive, .dropbox, .pan123, .googleDrive, .pan115] {
             map[type] = cloud

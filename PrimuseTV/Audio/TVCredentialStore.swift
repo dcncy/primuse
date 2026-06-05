@@ -13,12 +13,20 @@ import Security
 /// Phase 1 只接第一环;后续环加入时本方法签名不变。
 enum TVCredentialStore {
     /// 凭据来源链:① 经 CloudKit 加密同步下来的凭据包(主路径)② 可同步 iCloud 钥匙串(兜底)。
+    /// 中继类型还会附上 iPhone 中继端点(放 extra,供 RelayStreamResolver 拼 URL)。
     static func credential(for source: MusicSource, bundle: CredentialBundle?) -> SourceCredential {
+        var cred: SourceCredential
         if let entry = bundle?.entries[source.id], !entry.isEmpty {
-            return entry.toCredential(defaultUsername: source.username)
+            cred = entry.toCredential(defaultUsername: source.username)
+        } else {
+            cred = SourceCredential(username: source.username, password: keychainPassword(account: source.id))
         }
-        let password = keychainPassword(account: source.id)
-        return SourceCredential(username: source.username, password: password)
+        if let relay = bundle?.relay, RelayStreamResolver.relayTypes.contains(source.type) {
+            cred.extra["relay_host"] = relay.host
+            cred.extra["relay_port"] = String(relay.port)
+            cred.extra["relay_token"] = relay.token
+        }
+        return cred
     }
 
     /// service = `PrimuseConstants.keychainServiceName`,account = sourceID。

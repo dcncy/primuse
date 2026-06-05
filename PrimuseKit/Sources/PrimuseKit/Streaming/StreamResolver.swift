@@ -44,6 +44,8 @@ public enum StreamResolveError: Error, Sendable, Equatable {
     case authFailed
     case badServerResponse(Int)
     case cannotBuildURL
+    /// 该源需经 iPhone 中继播放,但中继端点未同步到(iPhone 未开启 / 不在同一局域网)。
+    case relayUnavailable
 }
 
 /// 解析结果:可播放 URL + 播放时需附带的自定义 HTTP 头(UA / Bearer 等)。

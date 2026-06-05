@@ -78,8 +78,27 @@ import Testing
                                       .aliyunDrive, .oneDrive, .dropbox, .pan123,
                                       .jellyfin, .emby, .plex, .qnap, .fnos, .ugreen,
                                       .googleDrive, .pan115, .baiduPan]))
-    #expect(!supported.contains(.smb))          // 原生库源仍不支持(需 Phase 3 中继)
-    #expect(!supported.contains(.appleMusic))
+    // Phase 3:原生库源经中继也注册了
+    #expect(supported.isSuperset(of: [.smb, .sftp, .nfs, .webdav, .local, .appleMusic]))
+    #expect(!supported.contains(.appleMusicLibrary))   // macOS-only,不接
+}
+
+@Test func relayResolver() async throws {
+    let song = Song(id: "r", title: "T", fileFormat: .flac, filePath: "/share/m/a b.flac", sourceID: "smb1")
+    let source = MusicSource(id: "smb1", name: "NAS", type: .smb, host: "x")
+
+    // 无中继端点 → relayUnavailable
+    await #expect(throws: StreamResolveError.relayUnavailable) {
+        try await RelayStreamResolver().streamURL(for: song, source: source, credential: nil)
+    }
+    // 有中继端点 → 拼出中继 URL
+    let cred = SourceCredential(extra: ["relay_host": "192.168.1.5", "relay_port": "8080", "relay_token": "TK"])
+    let url = try await RelayStreamResolver().streamURL(for: song, source: source, credential: cred)
+    #expect(url.host == "192.168.1.5")
+    #expect(url.port == 8080)
+    let q = Dictionary(uniqueKeysWithValues:
+        (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    #expect(q["source"] == "smb1" && q["path"] == "/share/m/a b.flac" && q["token"] == "TK")
 }
 
 // MARK: - 媒体服务器(Jellyfin/Emby/Plex)

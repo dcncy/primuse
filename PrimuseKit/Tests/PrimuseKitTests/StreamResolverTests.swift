@@ -74,10 +74,60 @@ import Testing
 @Test func registryCoversNasAndS3() async {
     let supported = await StreamResolverRegistry().supportedTypes
     #expect(supported.isSuperset(of: [.subsonic, .navidrome, .airsonic, .gonic, .synology, .s3,
-                                      .aliyunDrive, .oneDrive, .dropbox, .pan123]))
+                                      .aliyunDrive, .oneDrive, .dropbox, .pan123,
+                                      .jellyfin, .emby, .plex, .qnap, .fnos]))
     #expect(!supported.contains(.smb))          // 原生库源仍不支持
     #expect(!supported.contains(.appleMusic))
     #expect(!supported.contains(.baiduPan))     // 需播放头/UA,待引擎支持后再接
+}
+
+// MARK: - 媒体服务器(Jellyfin/Emby/Plex)
+
+@Test func mediaServerStreamURLs() {
+    let base = URL(string: "https://jelly.example.com:8096")!
+    let jf = MediaServerStreamResolver.jellyfinStreamURL(base: base, itemID: "abc123", token: "TK")
+    #expect(jf?.absoluteString == "https://jelly.example.com:8096/Videos/abc123/stream?Static=true&api_key=TK")
+
+    let plexBase = URL(string: "http://plex.local:32400")!
+    let px = MediaServerStreamResolver.plexStreamURL(base: plexBase, partKey: "/library/parts/77/file.mp3", token: "PT")
+    #expect(px?.absoluteString == "http://plex.local:32400/library/parts/77/file.mp3?X-Plex-Token=PT")
+}
+
+@Test func mediaServerParsing() {
+    #expect(MediaServerStreamResolver.parseAccessToken(Data(#"{"AccessToken":"TK","User":{"Id":"u1"}}"#.utf8)) == "TK")
+    let plexJSON = #"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"key":"/library/parts/9/a.flac"}]}]}]}}"#
+    #expect(MediaServerStreamResolver.parsePlexPartKey(Data(plexJSON.utf8)) == "/library/parts/9/a.flac")
+    #expect(MediaServerStreamResolver.itemID(from: "/items/xyz789.mp3") == "xyz789")
+    #expect(MediaServerStreamResolver.mediaBrowserAuth(deviceID: "d1", token: nil).contains("DeviceId=\"d1\""))
+    #expect(MediaServerStreamResolver.baseURL(host: "h", port: 8096, useSsl: false, basePath: "/jf")?.absoluteString
+            == "http://h:8096/jf")
+}
+
+// MARK: - QNAP / fnOS NAS
+
+@Test func nasHttpURLs() {
+    let qnap = NasHttpStreamResolver.qnapDownloadURL(
+        base: URL(string: "http://nas:8080")!, path: "/Music/a.flac", sid: "S1")
+    let q = Dictionary(uniqueKeysWithValues:
+        (URLComponents(url: qnap!, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    #expect(qnap?.path == "/cgi-bin/filemanager/utilRequest.cgi")
+    #expect(q["func"] == "download" && q["source_path"] == "/Music/a.flac" && q["sid"] == "S1")
+
+    let fnos = NasHttpStreamResolver.fnosDownloadURL(
+        base: URL(string: "http://fn:5666")!, path: "/m/b.mp3", token: "T1")
+    let f = Dictionary(uniqueKeysWithValues:
+        (URLComponents(url: fnos!, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    #expect(fnos?.path == "/api/v1/file/download")
+    #expect(f["path"] == "/m/b.mp3" && f["token"] == "T1")
+}
+
+@Test func nasHttpAuthParsing() {
+    #expect(NasHttpStreamResolver.parseQnapSID(Data(#"{"authPassed":1,"authSid":"SID9"}"#.utf8)) == "SID9")
+    #expect(NasHttpStreamResolver.parseQnapSID(Data("<QDocRoot><authPassed>1</authPassed><authSid><![CDATA[XSID]]></authSid></QDocRoot>".utf8)) == "XSID")
+    #expect(NasHttpStreamResolver.parseQnapSID(Data(#"{"authPassed":0}"#.utf8)) == nil)
+    #expect(NasHttpStreamResolver.parseFnosToken(Data(#"{"code":200,"data":{"token":"TK"}}"#.utf8)) == "TK")
+    #expect(NasHttpStreamResolver.parseFnosToken(Data(#"{"code":0,"data":{"access_token":"AT"}}"#.utf8)) == "AT")
+    #expect(NasHttpStreamResolver.parseFnosToken(Data(#"{"code":1001,"data":{}}"#.utf8)) == nil)
 }
 
 // MARK: - 云盘:响应解析 + 请求构造

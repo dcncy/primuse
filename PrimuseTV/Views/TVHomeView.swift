@@ -1,204 +1,103 @@
 #if os(tvOS)
 import SwiftUI
-import PrimuseKit
 
-/// tvOS 首页 — 上方 Top Shelf hero (1920×440 banner 风) + 下方多行水平滚动条。
+/// tvOS 首页 — Top Shelf hero + 三行横向 shelf(对应 tvos.jsx 的 TVHomeArtboard)。
 struct TVHomeView: View {
-    @Environment(MusicLibrary.self) private var library
-    @Environment(AudioPlayerService.self) private var player
+    @Environment(TVStore.self) private var store
+    var openPlayer: () -> Void = {}
+
+    private var hero: TVAlbum {
+        store.albums.first
+            ?? TVAlbum(id: "_", title: "Primuse", artist: "", year: 0,
+                       tint: TVColor.brand, tint2: .black, glyph: "♪")
+    }
+    private var heroSongs: [TVSong] { store.songs(forAlbum: hero.id) }
+    private var heroSubtitle: String {
+        var parts = ["\(heroSongs.count) 首"]
+        let mins = Int(heroSongs.reduce(0) { $0 + $1.duration } / 60)
+        if mins > 0 { parts.append("\(mins) 分钟") }
+        if hero.year > 0 { parts.append("\(hero.year)") }
+        parts.append(hero.artist)
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         ZStack {
-            TVAmbientBackdrop(accent: TVColor.brand, strength: 0.8)
-                .ignoresSafeArea()
-
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: TVSpace.row) {
-                    topShelf
-                    if !library.recentlyAddedAlbums(limit: 12).isEmpty {
-                        section(titleKey: "recently_added") {
-                            albumRow(library.recentlyAddedAlbums(limit: 12))
-                        }
-                    }
-                    let recent = library.recentlyPlayedSongs(limit: 12)
-                    if !recent.isEmpty {
-                        section(titleKey: "recently_played") {
-                            songRow(recent)
-                        }
-                    }
-                    if !library.visibleArtists.isEmpty {
-                        section(titleKey: "tab_artists") {
-                            artistRow(Array(library.visibleArtists.prefix(12)))
-                        }
-                    }
-                    Spacer(minLength: TVSpace.row)
-                }
-                .padding(.horizontal, TVSpace.pageH)
-                .padding(.top, TVSpace.pageV)
-                .padding(.bottom, TVSpace.pageV)
-            }
-        }
-    }
-
-    // MARK: - Top shelf hero
-
-    private var topShelf: some View {
-        let hero = library.recentlyPlayedSongs(limit: 1).first
-            ?? library.visibleSongs.first(where: { $0.coverArtFileName?.isEmpty == false })
-
-        return HStack(alignment: .center, spacing: 60) {
-            // 大封面
-            Group {
-                if let hero {
-                    CachedArtworkView(
-                        coverRef: hero.coverArtFileName, songID: hero.id,
-                        size: 380, cornerRadius: TVRadius.cover,
-                        sourceID: hero.sourceID, filePath: hero.filePath
-                    )
-                } else {
-                    RoundedRectangle(cornerRadius: TVRadius.cover)
-                        .fill(Color.white.opacity(0.1))
-                        .frame(width: 380, height: 380)
-                        .overlay {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 96))
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
+            // Top Shelf hero 背景
+            TVAmbientBackdrop(tint: hero.tint, tint2: hero.tint2, strength: 0.7)
+            GeometryReader { geo in
+                ZStack {
+                    RadialGradient(colors: [hero.tint.opacity(0.4), .clear],
+                                   center: UnitPoint(x: 0.8, y: 0.3),
+                                   startRadius: 0, endRadius: geo.size.width * 0.5)
+                    LinearGradient(colors: [.black.opacity(0.92), .black.opacity(0.78),
+                                            .black.opacity(0.2), .clear],
+                                   startPoint: .leading, endPoint: .trailing)
                 }
             }
-            .shadow(color: .black.opacity(0.45), radius: 30, y: 16)
+            .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 16) {
-                Text(LocalizedStringKey("greeting_afternoon").uppercased())
-                    .font(.system(size: 22, weight: .semibold))
-                    .tracking(1.5)
-                    .foregroundStyle(.white.opacity(0.7))
-                Text("home_dashboard_title")
-                    .font(.system(size: 72, weight: .bold))
-                    .tracking(-1)
-                    .foregroundStyle(.white)
-                Text("home_dashboard_subtitle")
-                    .font(.system(size: 24))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(2)
-                HStack(spacing: 16) {
-                    TVFocusable(radius: TVRadius.pill) {
-                        Label("play_all", systemImage: "play.fill")
-                            .font(.system(size: 24, weight: .semibold))
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 16)
-                            .background(.white, in: Capsule())
-                            .foregroundStyle(.black)
-                    }
-                    TVFocusable(radius: TVRadius.pill) {
-                        Label("shuffle", systemImage: "shuffle")
-                            .font(.system(size: 24, weight: .semibold))
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 16)
-                            .background(Color.white.opacity(0.18), in: Capsule())
-                            .overlay { Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 0.5) }
-                            .foregroundStyle(.white)
-                    }
-                }
-                .padding(.top, 8)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 40)
-    }
-
-    // MARK: - Section helper
-
-    @ViewBuilder
-    private func section<Content: View>(titleKey: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(titleKey)
-                .font(TVFont.sectionTitle)
-                .foregroundStyle(TVColor.text)
-            content()
-        }
-    }
-
-    private func albumRow(_ albums: [Album]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: TVSpace.card) {
-                ForEach(albums) { album in
-                    let song = library.songs(forAlbum: album.id).first
-                    TVFocusable(radius: TVRadius.cover) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            CachedArtworkView(
-                                coverRef: song?.coverArtFileName, songID: song?.id ?? "",
-                                size: 240, cornerRadius: TVRadius.cover,
-                                sourceID: song?.sourceID, filePath: song?.filePath
-                            )
-                            Text(album.title)
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(TVColor.text)
-                                .lineLimit(1)
-                            if let artist = album.artistName {
-                                Text(artist)
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(TVColor.textFaint)
-                                    .lineLimit(1)
+            if store.albums.isEmpty {
+                TVEmptyState(icon: "music.note.house", title: "还没有曲库").tvPage()
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 30) {
+                    heroZone
+                    if !store.recentlyPlayed.isEmpty {
+                        TVRow(label: "最近播放") {
+                            ForEach(store.recentlyPlayed) { song in
+                                TVSongCard(song: song, action: openPlayer)
                             }
                         }
-                        .frame(width: 240, alignment: .leading)
                     }
-                }
-            }
-            .padding(.vertical, 8)
-        }
-    }
-
-    private func songRow(_ songs: [Song]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: TVSpace.card) {
-                ForEach(songs) { song in
-                    TVFocusable(radius: TVRadius.cover) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            CachedArtworkView(
-                                coverRef: song.coverArtFileName, songID: song.id,
-                                size: 200, cornerRadius: TVRadius.cover,
-                                sourceID: song.sourceID, filePath: song.filePath
-                            )
-                            Text(song.title)
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(TVColor.text)
-                                .lineLimit(1)
-                            Text(song.artistName ?? "")
-                                .font(.system(size: 14))
-                                .foregroundStyle(TVColor.textFaint)
-                                .lineLimit(1)
+                    if !store.recentlyAddedAlbums.isEmpty {
+                        TVRow(label: "最近添加专辑") {
+                            ForEach(store.recentlyAddedAlbums) { album in
+                                TVAlbumCard(album: album, action: openPlayer)
+                            }
                         }
-                        .frame(width: 200, alignment: .leading)
                     }
-                }
-            }
-            .padding(.vertical, 8)
-        }
-    }
-
-    private func artistRow(_ artists: [Artist]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: TVSpace.card) {
-                ForEach(artists) { artist in
-                    TVFocusable(radius: 100) {
-                        VStack(spacing: 12) {
-                            CachedArtworkView(
-                                artistID: artist.id, artistName: artist.name,
-                                size: 180, cornerRadius: 90
-                            )
-                            Text(artist.name)
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(TVColor.text)
-                                .lineLimit(1)
-                                .frame(width: 200)
+                    if !store.recommended.isEmpty {
+                        TVRow(label: "为你推荐") {
+                            ForEach(Array(store.recommended.enumerated()), id: \.offset) { _, album in
+                                TVAlbumCard(album: album, action: openPlayer)
+                            }
                         }
                     }
                 }
+                .tvPage()
             }
-            .padding(.vertical, 8)
+            }
         }
+    }
+
+    private var heroZone: some View {
+        HStack(alignment: .center, spacing: 64) {
+            VStack(alignment: .leading, spacing: 0) {
+                TVEyebrow(text: "今晚听")
+                Text("\(hero.artist) · \(hero.title)")
+                    .font(.system(size: 84, weight: .bold)).tracking(-1.5)
+                    .foregroundStyle(.white).lineLimit(2)
+                    .padding(.top, 16)
+                Text(heroSubtitle)
+                    .font(.system(size: 22)).foregroundStyle(.white.opacity(0.78))
+                    .lineLimit(2).frame(maxWidth: 760, alignment: .leading)
+                    .padding(.top, 14)
+                HStack(spacing: 16) {
+                    TVPillButton(title: "播放", systemImage: "play.fill", style: .solid,
+                                 action: { store.play(album: hero); openPlayer() })
+                    TVPillButton(title: "随机", systemImage: "shuffle",
+                                 action: { store.play(album: hero); openPlayer() })
+                    TVPillButton(title: "喜欢", systemImage: "heart")
+                }
+                .padding(.top, 32)
+            }
+            Spacer(minLength: 0)
+            TVArtworkView(album: hero, size: 380, radius: 18)
+                .shadow(color: .black.opacity(0.5), radius: 36, y: 18)
+        }
+        .frame(minHeight: 460)
+        .padding(.bottom, 10)
     }
 }
 #endif

@@ -94,6 +94,18 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    AppleTVPushRow()
+
+                    NavigationLink {
+                        RelaySettingsView()
+                    } label: {
+                        Label("settings_relay_section", systemImage: "appletv")
+                    }
+                } header: {
+                    Text("settings_appletv_section")
+                }
+
                 Section("playback") {
                     NavigationLink {
                         EqualizerView()
@@ -756,6 +768,139 @@ struct PlaybackSettingsView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+    }
+}
+
+// MARK: - Send to Apple TV
+
+/// 一键把当前曲库 + 音乐源 + 凭据(含中继端点)立刻上传到 iCloud,供 Apple TV 拉取。
+/// 平时退后台也会自动上传;这个按钮是「立即、可见」的显式入口。
+private struct AppleTVPushRow: View {
+    @AppStorage("primuse.iCloudSyncEnabled") private var iCloudSyncEnabled: Bool = true
+    @Environment(MusicLibrary.self) private var musicLibrary
+    @State private var pushing = false
+    @State private var result: Bool?   // nil=空闲, true=已推送, false=失败
+
+    var body: some View {
+        Button {
+            guard !pushing else { return }
+            pushing = true; result = nil
+            // 先把最新曲库落盘成快照,否则 uploadNow 会因本地没有 library-cache.json 直接跳过(按钮看似没反应)。
+            musicLibrary.persistNow()
+            Task {
+                let ok = await LibrarySnapshotSync.shared.uploadNow()
+                pushing = false; result = ok
+                try? await Task.sleep(for: .seconds(4))
+                result = nil
+            }
+        } label: {
+            HStack {
+                Label("settings_push_to_tv", systemImage: "appletv.fill")
+                Spacer()
+                if pushing {
+                    ProgressView()
+                } else if let result {
+                    Label(result ? "settings_push_to_tv_done" : "settings_push_to_tv_failed",
+                          systemImage: result ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.subheadline)
+                        .foregroundStyle(result ? .green : .orange)
+                }
+            }
+        }
+        .disabled(pushing || !iCloudSyncEnabled)
+    }
+}
+
+// MARK: - Apple TV Relay
+
+/// Phase 3:Apple TV 局域网中继开关。开启后,登录同一 Apple ID 的 Apple TV
+/// 可经本机中继播放本地 / SMB / SFTP / NFS / WebDAV 等无法直连的源。
+///
+/// 开关持久化用 @AppStorage(`phoneRelayEnabled`,与 PhoneRelayServer 守卫的
+/// key 同一个),实际生效靠 onChange 调 server.start/stop;app 启动时
+/// AppServices 已按这个 key 自动拉起,所以无需在此恢复状态。
+/// 变更后顺手把凭据包(含中继端点)推到 iCloud,让 TV 尽快拿到 / 失效。
+struct RelaySettingsView: View {
+    @AppStorage(PhoneRelayServer.enabledKey) private var enabled: Bool = false
+    @AppStorage("primuse.iCloudSyncEnabled") private var iCloudSyncEnabled: Bool = true
+    @State private var endpoint: RelayEndpoint?
+
+    var body: some View {
+        Form {
+            Section {
+                Text(String(localized: "settings_push_to_tv_footer"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle(String(localized: "settings_relay_enable"), isOn: $enabled)
+                    .onChange(of: enabled) { _, on in
+                        if on { startRelay() } else { PhoneRelayServer.shared.stop() }
+                        pushCredentialsToTV(relayOn: on)
+                    }
+
+                if enabled {
+                    if let endpoint {
+                        HStack {
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                                .foregroundStyle(.green)
+                            Text(verbatim: "\(endpoint.host):\(endpoint.port)")
+                                .font(.subheadline.monospacedDigit())
+                                .textSelection(.enabled)
+                        }
+                    } else {
+                        HStack {
+                            Image(systemName: "wifi.exclamationmark")
+                                .foregroundStyle(.orange)
+                            Text(String(localized: "settings_relay_waiting"))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } footer: {
+                Text(String(localized: "settings_relay_footer"))
+                    .font(.footnote)
+            }
+        }
+        .navigationTitle("settings_relay_section")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        // 进页面 / 开关翻动后刷新端点显示。端口绑定是异步的,开启时轮询几次再读。
+        .task(id: enabled) {
+            endpoint = enabled ? await waitForEndpoint() : nil
+        }
+    }
+
+    private func startRelay() {
+        let services = AppServices.shared
+        PhoneRelayServer.shared.startIfEnabled(
+            sourceManager: services.sourceManager,
+            sourcesStore: services.sourcesStore,
+            library: services.musicLibrary
+        )
+    }
+
+    /// 把凭据包(含中继端点)覆盖上传到 iCloud。开启时监听端口要等几十毫秒才
+    /// ready,先等 endpoint 就绪再传,确保端点进包;关闭时立即传,让 TV 端失效。
+    private func pushCredentialsToTV(relayOn: Bool) {
+        guard iCloudSyncEnabled else { return }   // iCloud 同步关闭时不上传(中继端点也无从下发)
+        Task {
+            if relayOn { _ = await waitForEndpoint() }
+            await LibrarySnapshotSync.shared.uploadNow()
+        }
+    }
+
+    /// 轮询直到监听端口绑定好(或 ~1.8s 超时)。未连 Wi-Fi 时始终 nil。
+    private func waitForEndpoint() async -> RelayEndpoint? {
+        for _ in 0..<12 {
+            if let ep = PhoneRelayServer.shared.endpoint() { return ep }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        return PhoneRelayServer.shared.endpoint()
     }
 }
 

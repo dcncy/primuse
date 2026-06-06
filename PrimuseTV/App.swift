@@ -1,38 +1,34 @@
 #if os(tvOS)
 import SwiftUI
-import PrimuseKit
 
-/// tvOS app 入口 — 注入跟 iOS/macOS 共享的核心服务 (PrimuseKit 的 AppServices.shared),
-/// 然后渲染 TVRoot。后端 (DB / scan / sync) 跟 iOS 共用; UI 是 tvOS 专属。
+/// tvOS app 入口。
+///
+/// 界面按 design/猿音/scenes/tvos.jsx 还原,由 TVStore 读取经 iCloud 同步下来的
+/// 真实曲库快照(library-cache.json / sources.json)驱动。启动时按「自动同步」
+/// 偏好决定联网拉取还是仅本地重载。
 @main
 struct PrimuseTVApp: App {
-    @State private var playerService = AppServices.shared.playerService
-    @State private var musicLibrary = AppServices.shared.musicLibrary
-    @State private var sourcesStore = AppServices.shared.sourcesStore
-    @State private var sourceManager = AppServices.shared.sourceManager
-    @State private var themeService = AppServices.shared.themeService
-    @State private var scanService = AppServices.shared.scanService
-    @State private var metadataBackfill = AppServices.shared.metadataBackfill
-    @State private var appleMusic = AppServices.shared.appleMusic
-    @State private var appleMusicLibrary = AppServices.shared.appleMusicLibrary
-    @State private var dlnaRenderer = AppServices.shared.dlnaRenderer
+    @State private var store = TVStore()
 
     var body: some Scene {
         WindowGroup {
             TVRoot()
-                .environment(playerService)
-                .environment(playerService.audioEngine)
-                .environment(musicLibrary)
-                .environment(sourcesStore)
-                .environment(sourceManager)
-                .environment(themeService)
-                .environment(scanService)
-                .environment(metadataBackfill)
-                .environment(appleMusic)
-                .environment(appleMusicLibrary)
-                .environment(dlnaRenderer)
+                .environment(store)
                 .preferredColorScheme(.dark)
                 .tint(TVColor.brand)
+                .onOpenURL { store.handleDeepLink($0) }
+                .task {
+                    store.engine.configureAudioSession()
+                    #if DEBUG
+                    switch ProcessInfo.processInfo.environment["TV_AUDIO_SMOKE"] {
+                    case "1": store.engine.runSmokeTest()
+                    case "hdr": store.engine.runSmokeTest(viaLoader: true)   // 验证 resource loader 代理路径
+                    default: break
+                    }
+                    #endif
+                    let autoSync = UserDefaults.standard.object(forKey: "tvAutoSync") as? Bool ?? true
+                    if autoSync { await store.bootstrap() } else { store.reload() }
+                }
         }
     }
 }

@@ -269,7 +269,7 @@ struct SourcesView: View {
             }
             // Apple Music 没有 edit / diagnose / delete 概念 ── 删了 AppServices
             // 下次启动会自动重建, 反而带来困惑; 编辑/体检都依赖 connector。
-            if source.type != .appleMusic {
+            if source.id != AppleMusicLibraryService.systemSourceID {
                 Button { editingSource = source } label: { Label("edit", systemImage: "pencil") }
                 Button { diagnosingSource = source } label: { Label("source_diagnostics", systemImage: "stethoscope") }
                 Divider()
@@ -277,7 +277,7 @@ struct SourcesView: View {
             }
         }
         .swipeActions(edge: .trailing) {
-            if source.type != .appleMusic {
+            if source.id != AppleMusicLibraryService.systemSourceID {
                 Button(role: .destructive) { deleteSource(source) } label: { Label("delete", systemImage: "trash") }
                 Button { editingSource = source } label: { Label("edit", systemImage: "pencil") }.tint(.orange)
                 Button { diagnosingSource = source } label: { Label("source_diagnostics_short", systemImage: "stethoscope") }.tint(.blue)
@@ -398,7 +398,7 @@ struct SourcesView: View {
             NFSBrowserView(source: source, selectedDirectories: selectedDirectories)
         case .upnp:
             UPnPBrowserView(source: source, selectedDirectories: selectedDirectories)
-        case .baiduPan, .aliyunDrive, .googleDrive, .oneDrive, .dropbox:
+        case .baiduPan, .aliyunDrive, .googleDrive, .oneDrive, .dropbox, .pan115, .pan123:
             CloudDriveConnectionView(
                 source: source,
                 selectedDirectories: selectedDirectories

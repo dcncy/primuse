@@ -14,8 +14,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "1.3.2"
-    CURRENT_PROJECT_VERSION: "10"
+    MARKETING_VERSION: "1.6.0"
+    CURRENT_PROJECT_VERSION: "12"
     DEVELOPMENT_TEAM: "2U97K3U27A"
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: YES
@@ -169,6 +169,10 @@ targets:
         PrimuseGoogleClientID: "$(GOOGLE_CLIENT_ID)"
         PrimuseGoogleReversedClientID: "$(GOOGLE_REVERSED_CLIENT_ID)"
         PrimuseOneDriveClientID: "$(ONEDRIVE_CLIENT_ID)"
+        PrimuseU115ClientID: "$(U115_CLIENT_ID)"
+        PrimuseU115ClientSecret: "$(U115_CLIENT_SECRET)"
+        PrimusePan123ClientID: "$(PAN123_CLIENT_ID)"
+        PrimusePan123ClientSecret: "$(PAN123_CLIENT_SECRET)"
         PrimuseLastFmAPIKey: "$(LASTFM_API_KEY)"
         PrimuseLastFmAPISecret: "$(LASTFM_API_SECRET)"
         UILaunchScreen: {}
@@ -427,6 +431,10 @@ targets:
         PrimuseGoogleClientID: "$(GOOGLE_CLIENT_ID)"
         PrimuseGoogleReversedClientID: "$(GOOGLE_REVERSED_CLIENT_ID)"
         PrimuseOneDriveClientID: "$(ONEDRIVE_CLIENT_ID)"
+        PrimuseU115ClientID: "$(U115_CLIENT_ID)"
+        PrimuseU115ClientSecret: "$(U115_CLIENT_SECRET)"
+        PrimusePan123ClientID: "$(PAN123_CLIENT_ID)"
+        PrimusePan123ClientSecret: "$(PAN123_CLIENT_SECRET)"
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
@@ -465,10 +473,25 @@ targets:
     platform: tvOS
     sources:
       - path: PrimuseTV
+        excludes:
+          # 仅供独立预览 target(tvpreview.yml)使用、被 git 忽略的生成文件,
+          # 不应进入正式 tvOS app 的资源/源
+          - "Info-preview.plist"
+      # 复用 iOS app 的「干净」曲库数据核心(与 tvpreview.yml 一致,直接编进 tvOS app)
+      - path: Primuse/Services/Library/MusicLibrary.swift
+      - path: Primuse/Services/Library/LibraryDatabase.swift
+      - path: Primuse/Services/Library/PlayHistoryStore.swift
+      - path: Primuse/Services/Sources/SourcesStore.swift
+      - path: Primuse/Services/Metadata/MetadataAssetStore.swift
+      - path: Primuse/Services/Metadata/FileMetadataReader.swift
+      - path: Primuse/Services/Cloud/LibrarySnapshotSync.swift
+      - path: Primuse/Utilities/FileLogger.swift
+      - path: Primuse/Utilities/Extensions/TimeInterval+Format.swift
     resources:
       - path: PrimuseTV/Resources
     dependencies:
       - target: PrimuseKit
+      - target: PrimuseTopShelf
       - package: GRDB
     info:
       path: PrimuseTV/Info.plist
@@ -477,13 +500,52 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleDisplayName: "Primuse"
         CFBundleName: "Primuse"
+        # 允许播放局域网明文 HTTP(iPhone 中继 / http NAS 直链);AVPlayer 默认被 ATS 拦截
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        # Top Shelf 卡片点击经 primuse:// deep link 唤起 app(App.swift onOpenURL),
+        # tvOS 必须在此注册该 scheme 才会把 URL 路由回来
+        CFBundleURLTypes:
+          - CFBundleURLName: "com.welape.yuanyin.tv"
+            CFBundleURLSchemes:
+              - primuse
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.tv
+        # tvOS app 需引用 entitlements 才能拿到 App Group(Top Shelf 共享数据)+ iCloud/CloudKit
+        CODE_SIGN_ENTITLEMENTS: Config/PrimuseTV.entitlements
         TARGETED_DEVICE_FAMILY: "3"
         TVOS_DEPLOYMENT_TARGET: "17.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SWIFT_EMIT_LOC_STRINGS: YES
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
+
+  # Apple TV「顶部内容展示」扩展:独立进程,经 App Group 读主 app 预取的曲库数据 + 封面
+  PrimuseTopShelf:
+    type: app-extension
+    platform: tvOS
+    sources:
+      - path: PrimuseTopShelf
+    dependencies:
+      - target: PrimuseKit
+      - package: GRDB
+      - sdk: TVServices.framework
+    info:
+      path: PrimuseTopShelf/Info.plist
+      properties:
+        CFBundleDisplayName: "Primuse Top Shelf"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).TopShelfProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.tv.topshelf
+        SKIP_INSTALL: YES
+        TVOS_DEPLOYMENT_TARGET: "17.0"
+        CODE_SIGN_ENTITLEMENTS: Config/PrimuseTopShelf.entitlements

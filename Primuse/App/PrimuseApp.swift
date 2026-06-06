@@ -375,6 +375,8 @@ struct PrimuseApp: App {
     @State private var authAlertSource: MusicSource?
     @State private var authAlertMessage: String = ""
     @State private var reauthSource: MusicSource?
+    /// Apple TV 上的二维码扫码后(primuse://add-source)触发的"添加音乐源" sheet。
+    @State private var deepLinkAddSource = false
 
     init() {
         let services = AppServices.shared
@@ -586,23 +588,34 @@ struct PrimuseApp: App {
                         songID: updated.id
                     )
                 }
-                #if os(macOS)
-                // macOS OAuth 走系统浏览器,callback 通过 primuse:// URL Scheme
-                // 回到 app。把 URL 转给 OAuthService 的 bridge 唤醒等待中的请求。
                 .onOpenURL { url in
                     plog("🔗 onOpenURL: \(url.absoluteString)")
+                    // Apple TV 二维码:primuse://add-source → 手机扫码后弹「发送到 Apple TV」
+                    // (把已有曲库/源/凭据发过去;也可在其中新建源)。
+                    if url.scheme == "primuse", url.host == "add-source" {
+                        deepLinkAddSource = true
+                        return
+                    }
+                    #if os(macOS)
+                    // macOS OAuth 走系统浏览器,callback 通过 primuse:// 回到 app。
                     if MacOAuthBridge.shared.handle(url) {
                         plog("🔗 onOpenURL handled by MacOAuthBridge")
                         return
                     }
                     plog("⚠️ Unhandled openURL: \(url.absoluteString)")
+                    #endif
                 }
-                #endif
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
                     case .background, .inactive:
                         playerService.handleAppWillResignActive()
                         musicLibrary.persistNow()
+                        // 把整库快照上传到 iCloud,供 tvOS 等不扫描的端下载浏览。
+                        if iCloudSyncEnabled {
+                            Task.detached(priority: .background) {
+                                await LibrarySnapshotSync.shared.uploadNow()
+                            }
+                        }
                         // If a scan was running OR backfill has pending work, ask
                         // iOS to wake us later via BGProcessingTask so we can keep
                         // going past the beginBackgroundTask 30s ceiling. (No-op
@@ -674,6 +687,11 @@ struct PrimuseApp: App {
                         Task { await sourceManager.refreshConnector(for: updated.id) }
                         SourceAuthAlert.clear(sourceID: updated.id)
                     }
+                }
+                .sheet(isPresented: $deepLinkAddSource) {
+                    SendToTVSheet()
+                        .environment(musicLibrary)
+                        .environment(sourcesStore)
                 }
         }
         #if os(macOS)

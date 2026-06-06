@@ -12,11 +12,16 @@ import Security
 /// 链式设计:钥匙串 →(Phase 2)CloudKit 加密凭据包 →(Phase 2)设备配对缓存。
 /// Phase 1 只接第一环;后续环加入时本方法签名不变。
 enum TVCredentialStore {
-    /// 凭据来源链:① 经 CloudKit 加密同步下来的凭据包(主路径)② 可同步 iCloud 钥匙串(兜底)。
+    /// 凭据来源链:① 用户在 **TV 本地手动输入** 的凭据(最高优先,跨设备 session 不通用时
+    /// 直接在 TV 登录)② 经 CloudKit 加密同步下来的凭据包 ③ 可同步 iCloud 钥匙串(兜底)。
     /// 中继类型还会附上 iPhone 中继端点(放 extra,供 RelayStreamResolver 拼 URL)。
     static func credential(for source: MusicSource, bundle: CredentialBundle?) -> SourceCredential {
         var cred: SourceCredential
-        if let entry = bundle?.entries[source.id], !entry.isEmpty {
+        if let local = loadLocalCredential(sourceID: source.id), !local.password.isEmpty {
+            // 本地输入优先:用户在 TV 上为该源亲手登录过,胜过同步过来的(可能不通用的)凭据。
+            cred = SourceCredential(username: local.username.isEmpty ? source.username : local.username,
+                                    password: local.password)
+        } else if let entry = bundle?.entries[source.id], !entry.isEmpty {
             cred = entry.toCredential(defaultUsername: source.username)
         } else {
             cred = SourceCredential(username: source.username, password: keychainPassword(account: source.id))
@@ -27,6 +32,71 @@ enum TVCredentialStore {
             cred.extra["relay_token"] = relay.token
         }
         return cred
+    }
+
+    // MARK: - TV 本地手动输入凭据(本地钥匙串,不同步)
+    //
+    // 存在 **本地(non-synchronizable)钥匙串** 的独立 account 命名空间下,与同步读取
+    // (上面的 keychainPassword)彻底隔离:既不会被 iCloud 覆盖,也总能压过 bundle。
+    // 用户名 + 密码打包成一个 JSON blob 存一条目。
+
+    private static func localAccount(_ sourceID: String) -> String { "tv-local-cred." + sourceID }
+
+    private struct LocalCred: Codable { var u: String; var p: String }
+
+    static func saveLocalCredential(sourceID: String, username: String, password: String) {
+        let account = localAccount(sourceID)
+        guard let data = try? JSONEncoder().encode(LocalCred(u: username, p: password)) else { return }
+        // 先删后加,保证覆盖。
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: PrimuseConstants.keychainServiceName,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
+        ]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    static func loadLocalCredential(sourceID: String) -> (username: String, password: String)? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: PrimuseConstants.keychainServiceName,
+            kSecAttrAccount as String: localAccount(sourceID),
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let cred = try? JSONDecoder().decode(LocalCred.self, from: data) else {
+            return nil
+        }
+        return (cred.u, cred.p)
+    }
+
+    static func clearLocalCredential(sourceID: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: PrimuseConstants.keychainServiceName,
+            kSecAttrAccount as String: localAccount(sourceID),
+            kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    static func hasLocalCredential(sourceID: String) -> Bool {
+        if let c = loadLocalCredential(sourceID: sourceID), !c.password.isEmpty { return true }
+        return false
+    }
+
+    /// 是否能从同步 iCloud 钥匙串读到该源密码(供 UI 判断「有无可用凭据」)。
+    static func hasSyncedPassword(sourceID: String) -> Bool {
+        keychainPassword(account: sourceID) != nil
     }
 
     /// service = `PrimuseConstants.keychainServiceName`,account = sourceID。

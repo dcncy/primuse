@@ -52,6 +52,12 @@ public actor StreamResolverRegistry {
     /// 支持在 tvOS 上流式播放的源类型(已注册 resolver)。
     public var supportedTypes: Set<MusicSourceType> { Set(resolvers.keys) }
 
+    /// `supportedTypes` 的同步可读版,供 UI(非 async 上下文)判断源能否在 TV 播放。
+    /// 必须与 `init` 注册表保持一致:当前唯一没有 resolver 的是 `appleMusicLibrary`
+    /// (macOS iTunesLibrary 源)。新增源类型时,这里与 init 一起更新。
+    public nonisolated static let tvSupportedTypes: Set<MusicSourceType> =
+        Set(MusicSourceType.allCases).subtracting([.appleMusicLibrary])
+
     public func streamURL(for song: Song,
                           source: MusicSource,
                           credential: SourceCredential?) async throws -> URL {

@@ -57,6 +57,14 @@ struct TVPlaylist: Identifiable, Hashable {
 
 enum TVSourceStatus { case connected, scanning, authFailed, disabled }
 
+/// 该源能否在 Apple TV 上直接播放。
+enum TVPlayability: Equatable {
+    case ok                 // 有可用凭据(或 relay 端点),类型受支持
+    case missingCredential  // 类型受支持但缺凭据(不在 bundle、无本地输入、无同步密码)
+    case needsRelay         // SMB/SFTP/NFS/WebDAV 等需经 iPhone 中继,但中继端点未同步到
+    case unsupported        // 类型在 TV 上无 resolver(如 macOS Apple Music 资料库)
+}
+
 struct TVSource: Identifiable, Hashable {
     let id: String
     let name: String
@@ -66,6 +74,8 @@ struct TVSource: Identifiable, Hashable {
     let status: TVSourceStatus
     let songs: Int
     let color: Color
+    let playability: TVPlayability   // 能否在 TV 播放(徽标用)
+    let canEnterCredential: Bool     // 是否适合在 TV 上手动输入账号密码(服务端登录类源)
     static func == (l: TVSource, r: TVSource) -> Bool { l.id == r.id }
     func hash(into h: inout Hasher) { h.combine(id) }
 }
@@ -219,7 +229,91 @@ final class TVStore {
         return TVSource(id: s.id, name: s.name, type: s.type.rawValue,
                         iconName: s.type.iconName,
                         host: s.host ?? s.basePath ?? s.type.displayName,
-                        status: s.isEnabled ? .connected : .disabled, songs: cnt, color: c)
+                        status: s.isEnabled ? .connected : .disabled, songs: cnt, color: c,
+                        playability: playability(for: s),
+                        canEnterCredential: Self.manualCredentialTypes.contains(s.type))
+    }
+
+    // MARK: - TV 可播放性判断 + 手动凭据
+
+    /// 用「服务端账号 + 密码」登录、且能在 TV 直连的源类型 —— 适合在 TV 上手动输入凭据。
+    /// 云盘(OAuth)、relay 类(凭据在 iPhone 侧)、原生库源不在此列。
+    private static let manualCredentialTypes: Set<MusicSourceType> = [
+        .subsonic, .navidrome, .airsonic, .gonic,
+        .synology, .qnap, .fnos, .ugreen,
+        .jellyfin, .emby, .plex,
+    ]
+
+    /// 判断一个源能否在 Apple TV 上播放(注册表支持类型 + 凭据/中继可用性)。
+    private func playability(for s: MusicSource) -> TVPlayability {
+        let type = s.type
+        // relay 类:能否播放取决于 iPhone 中继端点是否已同步过来。
+        if RelayStreamResolver.relayTypes.contains(type) {
+            return credentialBundle?.relay != nil ? .ok : .needsRelay
+        }
+        // 注册表里没有 resolver 的类型(如 macOS Apple Music 资料库)。
+        if !StreamResolverRegistry.tvSupportedTypes.contains(type) {
+            return .unsupported
+        }
+        return hasUsableCredential(for: s) ? .ok : .missingCredential
+    }
+
+    /// 是否有可用凭据:TV 本地输入 > 同步凭据包条目 > 同步 iCloud 钥匙串密码。
+    private func hasUsableCredential(for s: MusicSource) -> Bool {
+        if TVCredentialStore.hasLocalCredential(sourceID: s.id) { return true }
+        if let e = credentialBundle?.entries[s.id], !e.isEmpty { return true }
+        return TVCredentialStore.hasSyncedPassword(sourceID: s.id)
+    }
+
+    /// 当前用于预填输入框的用户名(本地输入 > bundle > 源自带 username)。
+    func manualCredentialUsername(sourceID: String) -> String {
+        if let local = TVCredentialStore.loadLocalCredential(sourceID: sourceID), !local.username.isEmpty {
+            return local.username
+        }
+        if let u = credentialBundle?.entries[sourceID]?.username, !u.isEmpty { return u }
+        return sourcesStore.source(id: sourceID)?.username ?? ""
+    }
+
+    /// 保存用户在 TV 上手动输入的账号密码(本地钥匙串),并失效旧会话、刷新徽标。
+    func saveManualCredential(sourceID: String, username: String, password: String) {
+        TVCredentialStore.saveLocalCredential(sourceID: sourceID, username: username, password: password)
+        sourcesRevision += 1
+        if let src = sourcesStore.source(id: sourceID) {
+            Task { await StreamResolverRegistry.shared.invalidateSession(for: src) }
+        }
+    }
+
+    /// 清除 TV 本地手动输入凭据(回退到同步凭据)。
+    func clearManualCredential(sourceID: String) {
+        TVCredentialStore.clearLocalCredential(sourceID: sourceID)
+        sourcesRevision += 1
+        if let src = sourcesStore.source(id: sourceID) {
+            Task { await StreamResolverRegistry.shared.invalidateSession(for: src) }
+        }
+    }
+
+    /// 「测试连接」:用当前凭据尝试解析该源的一首歌,返回给用户看的结果文案。
+    func testConnection(forSourceID id: String) async -> String {
+        guard let source = sourcesStore.source(id: id) else { return "找不到该音乐源" }
+        guard let song = library.songs.first(where: { $0.sourceID == id }) else {
+            return "该源在曲库中暂无歌曲,无法测试解析"
+        }
+        let cred = TVCredentialStore.credential(for: source, bundle: credentialBundle)
+        do {
+            let resolved = try await StreamResolverRegistry.shared.resolve(for: song, source: source, credential: cred)
+            return "连接成功 · \(resolved.url.host ?? "已解析")"
+        } catch let e as StreamResolveError {
+            switch e {
+            case .unsupportedSourceType(let t): return "类型「\(t.displayName)」在 Apple TV 上不支持播放"
+            case .missingCredential: return "缺少登录凭据 —— 请在此输入账号密码"
+            case .authFailed: return "鉴权失败 —— 账号或密码不正确"
+            case .badServerResponse(let code): return "服务器返回 HTTP \(code)"
+            case .cannotBuildURL: return "无法构造播放地址"
+            case .relayUnavailable: return "需经 iPhone 中继 —— 请在手机上保持 Primuse 打开、与 TV 同一局域网"
+            }
+        } catch {
+            return "连接失败 · \(error.localizedDescription)"
+        }
     }
 
     /// 由字符串确定性派生封面渐变两端色。

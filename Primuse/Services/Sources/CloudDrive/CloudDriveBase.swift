@@ -94,6 +94,25 @@ struct CloudDriveHelper: Sendable {
         return components.percentEncodedQuery?.data(using: .utf8)
     }
 
+    /// 云盘 Range 专用 session。不能用 `URLSession.shared`: 它的
+    /// `httpMaximumConnectionsPerHost` 继承平台默认值 —— iOS=4 而 macOS=6。
+    /// 起播瞬间 CloudPlaybackSource 的 prefetchAhead(4)+user fetch=5 路 Range
+    /// 同打同一个 OneDrive CDN host, iOS 只有 4 条连接时第 5 路排队; 叠加冷大
+    /// 文件首 chunk 被服务端 hydration 长占连接, 后续 chunk head-of-line block
+    /// 集体撞 30s 超时 —— 这正是"大文件播 2 秒断、macOS(6 连接)却正常"的根因。
+    /// 显式设 6 把 iOS 对齐到 macOS。
+    static let rangeSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.httpMaximumConnectionsPerHost = 6
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 600
+        return URLSession(
+            configuration: config,
+            delegate: CloudRangeConnectionMetrics(),
+            delegateQueue: nil
+        )
+    }()
+
     // MARK: - Range request
 
     /// HTTP Range GET. `offset < 0` means "from end" — translated to `Range: bytes=-N`.
@@ -136,7 +155,7 @@ struct CloudDriveHelper: Sendable {
             request.setValue(referer, forHTTPHeaderField: "Referer")
         }
         request.timeoutInterval = timeoutSeconds
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.rangeSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw CloudDriveError.invalidResponse }
         switch http.statusCode {
         case 206:
@@ -348,5 +367,28 @@ struct CloudDriveHelper: Sendable {
                 }
             }
         }
+    }
+}
+
+/// 记录每个云盘 Range 请求实际复用了哪条连接、协商出什么协议。用来证实/证伪
+/// "iOS 把 5 路 Range 多路复用坍缩到单条 TCP(HTTP/2 connection coalescing)"
+/// —— 若真坍缩成单连接, `httpMaximumConnectionsPerHost=6` 形同虚设, 需要改走
+/// 降并发方案。只对 OneDrive/SharePoint host 打日志, 避免刷屏。
+final class CloudRangeConnectionMetrics: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didFinishCollecting metrics: URLSessionTaskMetrics
+    ) {
+        let host = task.originalRequest?.url?.host ?? "?"
+        guard host.contains("microsoft") || host.contains("sharepoint")
+                || host.contains("1drv") || host.contains("onedrive") else { return }
+        guard let t = metrics.transactionMetrics.last else { return }
+        let dur = metrics.taskInterval.duration
+        plog(String(format: "🔌 range conn host=%@ reused=%@ proto=%@ dur=%.2fs",
+                    host,
+                    t.isReusedConnection ? "Y" : "N",
+                    t.networkProtocolName ?? "?",
+                    dur))
     }
 }

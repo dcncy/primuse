@@ -768,17 +768,6 @@ final class AudioPlayerService {
                     return
                 }
             } else if isCloudStream, let manager = sourceManager,
-               song.fileSize >= 16 * 1024 * 1024,
-               let directURL = await manager.resolveDirectDownloadURL(for: song) {
-                // 云盘大文件(目前 OneDrive): 逐 chunk Range 会被服务端挂死(冷文件
-                // hydration ── 实测 40MB+ FLAC 单 chunk 26s+, 后续并发请求全超时),
-                // 但整文件直接下载很快。改走整文件渐进下载(StreamingDownloadDecoder),
-                // 边下边播、写持久缓存, 绕开 Range。
-                plog("▶️ Decoder: StreamingDownloadDecoder (reason: cloud large file \(song.fileSize / 1_048_576)MB, full progressive download to avoid chunked-range hang) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
-                let cacheURL = playbackSettings.audioCacheEnabled ? manager.cacheURL(for: song) : nil
-                await playWithStreamingDownload(song: song, url: directURL, outputFormat: outputFormat, playID: id, cacheURL: cacheURL)
-                return
-            } else if isCloudStream, let manager = sourceManager,
                let inputSource = try? await manager.makeStreamingInputSource(
                    for: song,
                    cacheEnabled: playbackSettings.audioCacheEnabled
@@ -824,6 +813,11 @@ final class AudioPlayerService {
                 firstBuffer = buffer
             } catch is CancellationError {
                 guard !Task.isCancelled, playID == id else { return }
+                // 云盘大文件逐 chunk 流式卡死(连接饥饿 / 冷文件 hydration)时,
+                // 退回整文件渐进下载再试一次, 而不是直接报错跳过。
+                if isCloudStream, await cloudFullDownloadFallback(song: song, outputFormat: outputFormat, playID: id) {
+                    return
+                }
                 plog("⚠️ '\(song.title)' first-buffer timeout (35s) — likely cloud fetch stalled")
                 showPlaybackError(String(localized: "playback_error_connection"))
                 isLoading = false
@@ -846,6 +840,8 @@ final class AudioPlayerService {
                     }
                 } else if !isCloudStream {
                     await playWithFallbackDecoder(song: song, url: url, outputFormat: outputFormat, playID: id)
+                } else if await cloudFullDownloadFallback(song: song, outputFormat: outputFormat, playID: id) {
+                    return
                 } else {
                     isLoading = false
                 }
@@ -975,6 +971,20 @@ final class AudioPlayerService {
             // instead of looping a broken file).
             await autoAdvanceAfterFailure()
         }
+    }
+
+    /// 云盘逐 chunk 流式失败(首缓冲超时 / serve 报错)时的兜底: 用预授权直链
+    /// 整文件渐进下载再试一次, 而不是直接报错跳过。直链解析仅 OneDrive 支持
+    /// (resolveDirectDownloadURL 对其他源返回 nil), 故此兜底天然只对 OneDrive 生效。
+    /// 返回 true 表示已接管(发起了下载或已切歌), 调用方不应再走默认错误分支。
+    private func cloudFullDownloadFallback(song: Song, outputFormat: AVAudioFormat, playID id: UUID) async -> Bool {
+        guard let manager = sourceManager,
+              let directURL = await manager.resolveDirectDownloadURL(for: song) else { return false }
+        guard playID == id else { return true }
+        plog("↳ cloud chunked-stream failed; falling back to full progressive download (\(song.fileSize / 1_048_576)MB) via \(directURL.host ?? "?")")
+        let cacheURL = playbackSettings.audioCacheEnabled ? manager.cacheURL(for: song) : nil
+        await playWithStreamingDownload(song: song, url: directURL, outputFormat: outputFormat, playID: id, cacheURL: cacheURL)
+        return true
     }
 
     /// Full-download fallback for remote URLs whose length is unknown or

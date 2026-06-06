@@ -105,18 +105,23 @@ actor OneDriveSource: MusicSourceConnector, OAuthCloudSource {
         helper.scanAudioFiles(from: path) { [self] p in try await listFiles(at: p) }
     }
 
+    /// Microsoft 推荐第三方流量带「装饰」User-Agent(格式 NONISV|公司|应用/版本),
+    /// 否则 undecorated 流量在 SharePoint/OneDrive CDN 可能被降级调度。URLSession
+    /// 跨 302 保留自定义 header, 所以重定向到 *.microsoftpersonalcontent.com CDN 后仍生效。
+    private static let rangeUserAgent = "NONISV|Welape|Primuse/1.6.0"
+
     func fetchRange(path: String, offset: Int64, length: Int64) async throws -> Data {
         // OneDrive returns a short-lived pre-authenticated downloadUrl per
         // item. Range requests against that URL don't need our Bearer token.
         // Cache it for ~50min (Microsoft documents 1h validity, leave margin).
         let fileURL = try await getDownloadURL(for: path)
         do {
-            return try await helper.rangeRequest(url: fileURL, offset: offset, length: length)
+            return try await helper.rangeRequest(url: fileURL, offset: offset, length: length, userAgent: Self.rangeUserAgent)
         } catch CloudDriveError.apiError(let code, _) where code == 401 || code == 403 || code == 410 {
             // URL expired between cache and use — invalidate and retry once.
             invalidateDownloadURL(for: path)
             let fresh = try await getDownloadURL(for: path)
-            return try await helper.rangeRequest(url: fresh, offset: offset, length: length)
+            return try await helper.rangeRequest(url: fresh, offset: offset, length: length, userAgent: Self.rangeUserAgent)
         }
     }
 

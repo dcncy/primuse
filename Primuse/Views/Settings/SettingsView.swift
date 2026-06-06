@@ -104,8 +104,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("settings_appletv_section")
-                } footer: {
-                    Text("settings_push_to_tv_footer").font(.footnote)
                 }
 
                 Section("playback") {
@@ -826,6 +824,12 @@ struct RelaySettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                Text(String(localized: "settings_push_to_tv_footer"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Toggle(String(localized: "settings_relay_enable"), isOn: $enabled)
                     .onChange(of: enabled) { _, on in

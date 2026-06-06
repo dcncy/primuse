@@ -47,6 +47,7 @@ targets:
       - path: Primuse/Utilities/Extensions/TimeInterval+Format.swift
     dependencies:
       - target: PrimuseKit
+      - target: PrimuseTopShelf
       - package: GRDB
     info:
       path: PrimuseTV/Info-preview.plist
@@ -57,6 +58,11 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
+        # 与正式 target 一致:注册 primuse:// 以便 Top Shelf 点击深链回到 app
+        CFBundleURLTypes:
+          - CFBundleURLName: "com.welape.yuanyin.tvpreview"
+            CFBundleURLSchemes:
+              - primuse
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.tvpreview
@@ -65,3 +71,29 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Config/PrimuseTV.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+
+  # 顶部内容展示扩展(与正式工程一致),让模拟器也能验证 Top Shelf
+  PrimuseTopShelf:
+    type: app-extension
+    platform: tvOS
+    sources:
+      - path: PrimuseTopShelf
+    dependencies:
+      - target: PrimuseKit
+      - package: GRDB
+      - sdk: TVServices.framework
+    info:
+      path: PrimuseTopShelf/Info.plist
+      properties:
+        CFBundleDisplayName: "Primuse Top Shelf"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).TopShelfProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.tvpreview.topshelf
+        SKIP_INSTALL: YES
+        TVOS_DEPLOYMENT_TARGET: "17.0"
+        CODE_SIGN_ENTITLEMENTS: Config/PrimuseTopShelf.entitlements

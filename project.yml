@@ -481,6 +481,7 @@ targets:
       - path: PrimuseTV/Resources
     dependencies:
       - target: PrimuseKit
+      - target: PrimuseTopShelf
       - package: GRDB
     info:
       path: PrimuseTV/Info.plist
@@ -493,9 +494,17 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
+        # Top Shelf 卡片点击经 primuse:// deep link 唤起 app(App.swift onOpenURL),
+        # tvOS 必须在此注册该 scheme 才会把 URL 路由回来
+        CFBundleURLTypes:
+          - CFBundleURLName: "com.welape.yuanyin.tv"
+            CFBundleURLSchemes:
+              - primuse
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.tv
+        # tvOS app 需引用 entitlements 才能拿到 App Group(Top Shelf 共享数据)+ iCloud/CloudKit
+        CODE_SIGN_ENTITLEMENTS: Config/PrimuseTV.entitlements
         TARGETED_DEVICE_FAMILY: "3"
         TVOS_DEPLOYMENT_TARGET: "17.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -504,3 +513,29 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: YES
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
+
+  # Apple TV「顶部内容展示」扩展:独立进程,经 App Group 读主 app 预取的曲库数据 + 封面
+  PrimuseTopShelf:
+    type: app-extension
+    platform: tvOS
+    sources:
+      - path: PrimuseTopShelf
+    dependencies:
+      - target: PrimuseKit
+      - package: GRDB
+      - sdk: TVServices.framework
+    info:
+      path: PrimuseTopShelf/Info.plist
+      properties:
+        CFBundleDisplayName: "Primuse Top Shelf"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).TopShelfProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.tv.topshelf
+        SKIP_INSTALL: YES
+        TVOS_DEPLOYMENT_TARGET: "17.0"
+        CODE_SIGN_ENTITLEMENTS: Config/PrimuseTopShelf.entitlements

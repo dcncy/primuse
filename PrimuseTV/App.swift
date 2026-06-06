@@ -16,6 +16,7 @@ struct PrimuseTVApp: App {
                 .environment(store)
                 .preferredColorScheme(.dark)
                 .tint(TVColor.brand)
+                .onOpenURL { store.handleDeepLink($0) }
                 .task {
                     store.engine.configureAudioSession()
                     #if DEBUG

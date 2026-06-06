@@ -251,6 +251,59 @@ final class TVStore {
         library.reloadFromDisk()
         sourcesStore.reloadFromDisk()
         refreshVisibility()
+        publishTopShelf()
+        flushPendingDeepLink()
+    }
+
+    /// 生成 Top Shelf 展示数据(最近播放 + 资料库专辑),后台预取封面并写入 App Group,
+    /// 供 Apple TV 主屏「顶部内容展示」扩展读取。没配 App Group 时发布器自身会跳过。
+    func publishTopShelf() {
+        let recent: [TopShelfPublisher.Draft] = recentlyPlayed.prefix(8).map { s in
+            let alb = albumOf(s)
+            return .init(id: s.id, title: s.title, subtitle: s.artist, artist: s.artist,
+                         album: alb?.title ?? "", playURL: Self.topShelfLink(host: "play", key: "song", s.id))
+        }
+        let albumList = recentlyAddedAlbums.isEmpty ? albums : recentlyAddedAlbums
+        let lib: [TopShelfPublisher.Draft] = albumList.prefix(12).map { a in
+            .init(id: a.id, title: a.title, subtitle: a.artist, artist: a.artist,
+                  album: a.title, playURL: Self.topShelfLink(host: "album", key: "id", a.id))
+        }
+        guard !recent.isEmpty || !lib.isEmpty else { return }
+        Task.detached { await TopShelfPublisher.publish(recent: recent, albums: lib) }
+    }
+
+    private static func topShelfLink(host: String, key: String, _ value: String) -> String {
+        var c = URLComponents()
+        c.scheme = "primuse"; c.host = host
+        c.queryItems = [URLQueryItem(name: key, value: value)]
+        return c.url?.absoluteString ?? "primuse://\(host)"
+    }
+
+    // MARK: 深链(主屏 Top Shelf 点击 → 播放)
+
+    /// 曲库未就绪时暂存的深链,reload/bootstrap 完成后再执行。
+    @ObservationIgnored private var pendingDeepLink: URL?
+
+    /// 处理 primuse:// 深链(主屏 Top Shelf 点击)。冷启动时曲库可能还没加载好,
+    /// 先暂存,bootstrap/reload 完成后由 flushPendingDeepLink 执行。
+    func handleDeepLink(_ url: URL) {
+        pendingDeepLink = url
+        flushPendingDeepLink()
+    }
+
+    func flushPendingDeepLink() {
+        guard let url = pendingDeepLink, url.scheme == "primuse", hasRealLibrary else { return }
+        pendingDeepLink = nil
+        let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        func q(_ name: String) -> String? { comps?.queryItems?.first { $0.name == name }?.value }
+        switch url.host {
+        case "play":
+            if let id = q("song"), let s = song(id) { play(s) }
+        case "album":
+            if let id = q("id"), let a = album(id) { play(album: a) }
+        default:
+            break
+        }
     }
 
     /// 隐藏「停用 / 已删除」音乐源的歌曲——资料库只显示有效源的内容。

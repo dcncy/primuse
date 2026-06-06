@@ -55,6 +55,9 @@ struct TVSearchView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(.white)
+                    // 关掉 tvOS TextField 自带的亮白系统焦点高亮(太晃眼),
+                    // 焦点视觉只用下面的低调底 + 品牌色描边。
+                    .focusEffectDisabled()
             }
             .padding(.horizontal, 28).padding(.vertical, 20)
             .frame(maxWidth: .infinity)

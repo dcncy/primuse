@@ -119,6 +119,7 @@ final class TVStore {
     var queueUpNextIDs: [String] = []
     var playbackIssue: TVPlaybackIssue?   // 解析/播放受阻原因(展示用)
     var credentialBundle: CredentialBundle?   // 经 iCloud(CloudKit 加密)同步下来的源凭据
+    var sourcesRevision = 0   // 源启用/删除后 bump,强制 sources 视图重渲染(嵌套 store 观察传导不稳)
     private var queue: [String] = []      // 当前队列(真实 Song id)
     private var queueIndex = 0
     private var localLiked = Set<String>()
@@ -152,7 +153,10 @@ final class TVStore {
         let smart = library.smartPlaylists.map { self.mapSmart($0) }
         return liked + plain + smart
     }
-    var sources: [TVSource] { sourcesStore.sources.map { self.map($0) } }
+    var sources: [TVSource] {
+        _ = sourcesRevision   // 建立观察依赖:bump 即触发本视图刷新
+        return sourcesStore.sources.map { self.map($0) }
+    }
 
     // MARK: 查询
 
@@ -330,6 +334,7 @@ final class TVStore {
     func deleteSource(_ id: String) {
         sourcesStore.remove(id: id)
         refreshVisibility()
+        sourcesRevision += 1
         Task.detached { await LibrarySnapshotSync.shared.uploadNow() }
     }
 
@@ -338,6 +343,7 @@ final class TVStore {
     func setSourceEnabled(_ id: String, _ enabled: Bool) {
         sourcesStore.updateLocal(id) { $0.isEnabled = enabled }
         refreshVisibility()
+        sourcesRevision += 1
         let fromThis = library.songs.filter { $0.sourceID == id }.count
         let visibleFromThis = library.visibleSongs.filter { $0.sourceID == id }.count
         plog("🔀 TV setSourceEnabled \(id)→\(enabled); 该源歌曲 全量=\(fromThis) 可见=\(visibleFromThis); 总可见=\(library.visibleSongs.count)")

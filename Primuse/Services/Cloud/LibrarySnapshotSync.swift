@@ -204,7 +204,9 @@ final class LibrarySnapshotSync: Sendable {
         guard let sources = try? decoder.decode([MusicSource].self, from: data) else { return }
 
         var entries: [String: CredentialEntry] = [:]
-        for source in sources where source.isEnabled && !source.isDeleted {
+        // 含手机上「停用」的源:Apple TV 可能本地启用某个手机上停用的源来播放,
+        // 若只传已启用源的凭证,TV 上会「缺登录凭证」无法播。只排除已删除的。
+        for source in sources where !source.isDeleted {
             var entry = CredentialEntry(username: source.username)
             entry.password = KeychainService.getPassword(for: source.id)
             let tokenManager = CloudTokenManager(sourceID: source.id)

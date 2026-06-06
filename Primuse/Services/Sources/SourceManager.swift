@@ -821,12 +821,22 @@ final class SourceManager {
         return dir
     }
 
+    /// 缓存文件名:sanitize 后的 filePath 末尾补音频格式扩展名。OneDrive 等的 filePath
+    /// 是无扩展名的 item id,缓存文件没扩展名时命中后 file:// 播放会因 pathExtension 为空
+    /// 被判 "Unsupported format" 而秒退(表现为"播放后瞬间消失")。
+    private func cacheFileName(for song: Song) -> String {
+        let sanitized = song.filePath.replacingOccurrences(of: "/", with: "_")
+        let ext = song.fileFormat.rawValue.lowercased()
+        if ext.isEmpty || sanitized.lowercased().hasSuffix(".\(ext)") { return sanitized }
+        return "\(sanitized).\(ext)"
+    }
+
     private func audioCacheRelativePath(for song: Song) -> String {
-        "\(song.sourceID)/\(song.filePath.replacingOccurrences(of: "/", with: "_"))"
+        "\(song.sourceID)/\(cacheFileName(for: song))"
     }
 
     func cachedURL(for song: Song) -> URL? {
-        let sanitized = song.filePath.replacingOccurrences(of: "/", with: "_")
+        let sanitized = cacheFileName(for: song)
         let fileURL = audioCacheDirectory(for: song.sourceID).appendingPathComponent(sanitized)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
         // 完整性校验: 云盘断流 / 用户中途切歌时会留下 partial 文件
@@ -851,8 +861,7 @@ final class SourceManager {
     }
 
     func cacheURL(for song: Song) -> URL {
-        let sanitized = song.filePath.replacingOccurrences(of: "/", with: "_")
-        return audioCacheDirectory(for: song.sourceID).appendingPathComponent(sanitized)
+        return audioCacheDirectory(for: song.sourceID).appendingPathComponent(cacheFileName(for: song))
     }
 
     func offlineAudioSnapshot(for song: Song) -> OfflineAudioCacheSnapshot {
@@ -1683,8 +1692,7 @@ final class SourceManager {
         // 真正写满前不一定能 evict 完, 但能保证 LRU 不再被绕过。
         let cacheRelativePath: String?
         if cacheEnabled {
-            let sanitized = song.filePath.replacingOccurrences(of: "/", with: "_")
-            cacheRelativePath = "\(song.sourceID)/\(sanitized)"
+            cacheRelativePath = audioCacheRelativePath(for: song)
             await AudioCacheManager.shared.evictIfNeeded(reserveBytes: song.fileSize)
         } else {
             cacheRelativePath = nil

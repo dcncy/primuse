@@ -275,7 +275,7 @@ final class AudioPlayerService {
     /// rather than a sudden cut, but short enough to feel responsive.
     private static let midStreamErrorGrace: TimeInterval = 3
     private static let firstBufferTimeoutSeconds = 35
-    private static let remoteFallbackFirstBufferTimeoutSeconds = 20
+    private static let remoteFallbackFirstBufferTimeoutSeconds = 60
     private static let dlnaSourceID = "dlna"
 
     let playbackSettings: PlaybackSettingsStore

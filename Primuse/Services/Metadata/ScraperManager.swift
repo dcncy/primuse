@@ -21,8 +21,9 @@ actor ScraperManager {
         var result = ScrapeResult(errors: [])
         let enabledSources = settings.enabledSources
 
-        // Clean title for better search results (remove brackets, numbering etc.)
-        let cleanedTitle = Self.searchTitle(title, artist: artist)
+        // Clean title for search; also split "歌手 - 标题" 文件名(云盘无标签歌曲常见)
+        // 推出 effectiveArtist,避免用「阿蝉蝉 - 不谓侠（…）」整串脏标题去搜导致错配。
+        let (cleanedTitle, effectiveArtist) = Self.searchTitleArtist(title, artist: artist)
 
         // Scrape metadata from first successful source
         if needs.metadata {
@@ -31,10 +32,10 @@ actor ScraperManager {
                     NSLog("🔍 Scraping metadata from \(config.type.displayName) for '\(cleanedTitle)'")
                     let scraper = getScraper(for: config)
                     let searchResult = try await scraper.search(
-                        query: cleanedTitle, artist: artist, album: nil, limit: Self.autoScrapeLimit
+                        query: cleanedTitle, artist: effectiveArtist, album: nil, limit: Self.autoScrapeLimit
                     )
                     NSLog("🔍 \(config.type.displayName) returned \(searchResult.items.count) results")
-                    if let best = Self.bestMatch(in: searchResult.items, title: title, artist: artist, durationMs: durationMs(duration)) {
+                    if let best = Self.bestMatch(in: searchResult.items, title: cleanedTitle, artist: effectiveArtist, durationMs: durationMs(duration)) {
                         result.detail = try await scraper.getDetail(externalId: best.externalId)
                         if result.detail != nil { break }
                     }
@@ -62,9 +63,9 @@ actor ScraperManager {
 
                     // Otherwise search and get cover
                     let searchResult = try await scraper.search(
-                        query: cleanedTitle, artist: artist, album: nil, limit: Self.autoScrapeLimit
+                        query: cleanedTitle, artist: effectiveArtist, album: nil, limit: Self.autoScrapeLimit
                     )
-                    if let best = Self.bestMatch(in: searchResult.items, title: title, artist: artist, durationMs: durationMs(duration)) {
+                    if let best = Self.bestMatch(in: searchResult.items, title: cleanedTitle, artist: effectiveArtist, durationMs: durationMs(duration)) {
                         let covers = try await scraper.getCoverArt(externalId: best.externalId)
                         if let coverUrl = covers.first?.coverUrl,
                            let data = try await downloadImage(url: coverUrl, sourceConfig: config) {
@@ -103,10 +104,10 @@ actor ScraperManager {
                         // 用第一个行级 fallback。这样同源内 score 相同的几个
                         // 候选(常见: title+duration 都接近)能挑到带逐字的版本。
                         let searchResult = try await scraper.search(
-                            query: cleanedTitle, artist: artist, album: nil, limit: Self.autoScrapeLimit
+                            query: cleanedTitle, artist: effectiveArtist, album: nil, limit: Self.autoScrapeLimit
                         )
                         let candidates = Self.topMatches(
-                            in: searchResult.items, title: title, artist: artist,
+                            in: searchResult.items, title: cleanedTitle, artist: effectiveArtist,
                             durationMs: durationMs(duration), maxCount: 3
                         )
                         plog("🎤 [\(config.type.displayName)] lyrics search: \(searchResult.items.count) items → top \(candidates.count) candidates: \(candidates.map { "\($0.title)/\($0.artist ?? "?")" })")
@@ -285,6 +286,25 @@ actor ScraperManager {
         }
 
         return cleanedTitle
+    }
+
+    /// 像 `searchTitle`,但当 artist 为空且标题是「歌手 - 标题」(云盘无标签歌曲的
+    /// 文件名常见)时,把歌手也拆出来,返回 (干净标题, 歌手)。已有可信 artist 时沿用。
+    static func searchTitleArtist(_ title: String, artist: String?) -> (title: String, artist: String?) {
+        let cleanedArtist = normalizeComparableText(artist)
+        if !cleanedArtist.isEmpty {
+            return (searchTitle(title, artist: artist), artist)
+        }
+        let cleaned = cleanTitle(title)
+        if let split = splitTitleAroundDash(cleaned) {
+            let left = split.left.trimmingCharacters(in: .whitespaces)
+            let right = split.right.trimmingCharacters(in: .whitespaces)
+            if !left.isEmpty, !right.isEmpty {
+                // 约定「歌手 - 标题」:左歌手、右标题。
+                return (cleanTitle(right), left)
+            }
+        }
+        return (cleaned, nil)
     }
 
     static func shouldAppendArtist(to query: String, artist: String?) -> Bool {

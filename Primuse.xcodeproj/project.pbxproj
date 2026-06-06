@@ -28,7 +28,6 @@
 		07C43E3A486DD629EE8D3046 /* YearlyReportAutoTrigger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7480FCEBE3DAE7ABBFEEF62 /* YearlyReportAutoTrigger.swift */; };
 		08D30CAC5C97F4CE7FA56648 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88A168D4C0759AC51316AAB9 /* Constants.swift */; };
 		08E777E2F1647E94EBF91766 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F569D02D3E6102A0C0E1CF /* FileLogger.swift */; };
-		08FCA772CC5C79D0C2D276A3 /* OneDriveSequentialReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02CBA42EA0E89857F45C120C /* OneDriveSequentialReader.swift */; };
 		0931D21CB53640BBBCBC0B98 /* ScrapeWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAE593077B230AED26E36FAF /* ScrapeWindowController.swift */; };
 		095D3AC85C603732F7ADF48D /* MetadataAssetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A24F02124D01EC09135B0F9 /* MetadataAssetStore.swift */; };
 		09AED938D1C5CFDD279BCB08 /* UPnPSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A7C2D0F07C125A333AC1046 /* UPnPSource.swift */; };
@@ -89,7 +88,6 @@
 		1EE5E389A8FE771DA64B8810 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F6B266B199B4973F7A9134 /* NetworkMonitor.swift */; };
 		1F47DB3FE4EE61F5E3D5C8B9 /* BaiduPanStreamResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DF5DE888D6B46DD9A60F16 /* BaiduPanStreamResolver.swift */; };
 		1FBA61CFD8F9EEC38167C64E /* UpdateBannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 428DCE75417C9BAE087880F9 /* UpdateBannerSheet.swift */; };
-		1FF14F2B77B5C4632DFC7026 /* OneDriveSequentialReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02CBA42EA0E89857F45C120C /* OneDriveSequentialReader.swift */; };
 		212511EFE29CDB7FBFCA233B /* PhoneRelayServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 299BA8CA4513E33F5CF2BC7C /* PhoneRelayServer.swift */; };
 		21E496A1A424DA68570A7928 /* PrimuseKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1E36F2FECF46E724081F983 /* PrimuseKit.framework */; };
 		2258673CDC1F146D06F403A0 /* SynologySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E60AA3C090087F657145292 /* SynologySource.swift */; };
@@ -788,7 +786,6 @@
 		01A3E8F6656778B940F633F3 /* TVQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVQueueView.swift; sourceTree = "<group>"; };
 		029A35BDC1548EE87EBC6549 /* AppleMusicService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicService.swift; sourceTree = "<group>"; };
 		02C67038ECF67BC44982A1C8 /* TimeInterval+Format.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TimeInterval+Format.swift"; sourceTree = "<group>"; };
-		02CBA42EA0E89857F45C120C /* OneDriveSequentialReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneDriveSequentialReader.swift; sourceTree = "<group>"; };
 		02F0CA17DCBE23FCB6FF6791 /* ArtistListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtistListView.swift; sourceTree = "<group>"; };
 		041E51884E571993062DF610 /* MacTrustedDomainsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTrustedDomainsView.swift; sourceTree = "<group>"; };
 		04E02F82BB81A881C4607BDC /* FnOSAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FnOSAPI.swift; sourceTree = "<group>"; };
@@ -1949,7 +1946,6 @@
 				AC2D3494E7475F44773698F9 /* DropboxSource.swift */,
 				6FF18B2B6584B7988608C004 /* GoogleDriveSource.swift */,
 				3C85D6EDF29DAED03773957A /* OAuthService.swift */,
-				02CBA42EA0E89857F45C120C /* OneDriveSequentialReader.swift */,
 				3E648713A25DB3912120693A /* OneDriveSource.swift */,
 				309F9BB53ECA9FA54F805457 /* Pan123Source.swift */,
 				4DB4788BFEC669118576E7E2 /* U115Source.swift */,
@@ -2687,7 +2683,6 @@
 				BF73E59C806B448CEA0BAAE2 /* NowPlayingView.swift in Sources */,
 				96053C421D166878E3F074C4 /* OAuthService.swift in Sources */,
 				49A5B455D71D7C8E0FE0E628 /* OnboardingView.swift in Sources */,
-				1FF14F2B77B5C4632DFC7026 /* OneDriveSequentialReader.swift in Sources */,
 				3F8513D64E7EAB2667895EEC /* OneDriveSource.swift in Sources */,
 				33291B00F794529D46E2B888 /* PMTitleBar.swift in Sources */,
 				A145E09220ABEC39967A4B66 /* Pan123Source.swift in Sources */,
@@ -2964,7 +2959,6 @@
 				15DBB04327A405ACF38C9162 /* NowPlayingView.swift in Sources */,
 				4ACD5BA7D98E9557368E3ABE /* OAuthService.swift in Sources */,
 				F45510F7EDAE425A749A03CF /* OnboardingView.swift in Sources */,
-				08FCA772CC5C79D0C2D276A3 /* OneDriveSequentialReader.swift in Sources */,
 				235C8FC6F296376EB5E6A8F1 /* OneDriveSource.swift in Sources */,
 				E3900CCC1A7A9AEC7FAB20FE /* PMTitleBar.swift in Sources */,
 				13753B3DF25C5DF4CFD69FDB /* Pan123Source.swift in Sources */,

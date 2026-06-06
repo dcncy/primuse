@@ -105,44 +105,26 @@ actor OneDriveSource: MusicSourceConnector, OAuthCloudSource {
         helper.scanAudioFiles(from: path) { [self] p in try await listFiles(at: p) }
     }
 
-    /// 每首歌一个「连续下载缓冲」(per-path)。用 Task 去重,避免 actor 在 await
-    /// getDownloadURL 期间被并发 fetchRange 重入而重复建连。
-    private var seqReaderTasks: [String: Task<OneDriveSequentialReader, Error>] = [:]
-
     func fetchRange(path: String, offset: Int64, length: Int64) async throws -> Data {
-        // OneDrive 对大文件的逐段小 Range 请求会被服务端挂死(冷文件 hydration / 限流),
-        // 但一个连续的整文件 GET 很快。所以这里不再逐段 Range,而是用「单连接连续下载缓冲」:
-        // 一个连续 GET 把字节顺序灌进本地临时文件,本方法按 [offset,length) 从这个正在
-        // 增长的文件读(没下到就 await)。上层 CloudPlaybackSource 仍逐 chunk 调本方法、
-        // 把拿到的字节写进它的持久缓存 —— 整体实现「边下边播边缓存」,且只在 OneDrive
-        // connector 内部,完全不影响其它源。
-        let reader = try await sequentialReader(for: path)
+        // OneDrive returns a short-lived pre-authenticated downloadUrl per
+        // item. Range requests against that URL don't need our Bearer token.
+        // Cache it for ~50min (Microsoft documents 1h validity, leave margin).
+        let fileURL = try await getDownloadURL(for: path)
         do {
-            return try await reader.read(offset: offset, length: length)
-        } catch {
-            // 连续下载失败(dlink 过期 / 网络中断):丢弃缓冲与 dlink,下次重建。
-            let stale = seqReaderTasks[path]
-            seqReaderTasks[path] = nil
-            stale?.cancel()
-            Task { (try? await stale?.value)?.cancel() }
+            return try await helper.rangeRequest(url: fileURL, offset: offset, length: length)
+        } catch CloudDriveError.apiError(let code, _) where code == 401 || code == 403 || code == 410 {
+            // URL expired between cache and use — invalidate and retry once.
             invalidateDownloadURL(for: path)
-            throw error
+            let fresh = try await getDownloadURL(for: path)
+            return try await helper.rangeRequest(url: fresh, offset: offset, length: length)
         }
     }
 
-    private func sequentialReader(for path: String) async throws -> OneDriveSequentialReader {
-        if let task = seqReaderTasks[path] { return try await task.value }
-        // 切歌:取消上一首的连续下载,只保留当前曲目的缓冲。
-        for (key, task) in seqReaderTasks where key != path {
-            seqReaderTasks[key] = nil
-            Task { (try? await task.value)?.cancel() }
-        }
-        let task = Task { () throws -> OneDriveSequentialReader in
-            let url = try await getDownloadURL(for: path)
-            return OneDriveSequentialReader(url: url)
-        }
-        seqReaderTasks[path] = task
-        return try await task.value
+    /// 暴露预授权下载直链,供大文件「整文件渐进下载」绕开逐 chunk Range。
+    /// OneDrive 服务端对大文件的分段 Range 会挂死(冷文件 hydration),但整文件直接
+    /// 下载很快 —— 大文件改走 StreamingDownloadDecoder 一次性渐进下载。
+    func publicDownloadURL(path: String) async throws -> URL {
+        try await getDownloadURL(for: path)
     }
 
     private var downloadURLCache: [String: (url: URL, expiresAt: Date)] = [:]

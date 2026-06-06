@@ -768,6 +768,17 @@ final class AudioPlayerService {
                     return
                 }
             } else if isCloudStream, let manager = sourceManager,
+               song.fileSize >= 16 * 1024 * 1024,
+               let directURL = await manager.resolveDirectDownloadURL(for: song) {
+                // 云盘大文件(目前 OneDrive): 逐 chunk Range 会被服务端挂死(冷文件
+                // hydration ── 实测 40MB+ FLAC 单 chunk 26s+, 后续并发请求全超时),
+                // 但整文件直接下载很快。改走整文件渐进下载(StreamingDownloadDecoder),
+                // 边下边播、写持久缓存, 绕开 Range。
+                plog("▶️ Decoder: StreamingDownloadDecoder (reason: cloud large file \(song.fileSize / 1_048_576)MB, full progressive download to avoid chunked-range hang) outputFormat: sr=\(outputFormat.sampleRate) ch=\(outputFormat.channelCount)")
+                let cacheURL = playbackSettings.audioCacheEnabled ? manager.cacheURL(for: song) : nil
+                await playWithStreamingDownload(song: song, url: directURL, outputFormat: outputFormat, playID: id, cacheURL: cacheURL)
+                return
+            } else if isCloudStream, let manager = sourceManager,
                let inputSource = try? await manager.makeStreamingInputSource(
                    for: song,
                    cacheEnabled: playbackSettings.audioCacheEnabled

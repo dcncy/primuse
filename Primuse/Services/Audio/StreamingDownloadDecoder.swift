@@ -54,7 +54,15 @@ final class StreamingDownloadDecoder: Sendable {
                     plog("🌊 StreamingDecoder: downloading from \(url.host ?? "?")")
                     let startTime = CFAbsoluteTimeGetCurrent()
 
-                    let (downloadedURL, response) = try await session.download(from: url)
+                    // OneDrive 个人版 CDN(microsoftpersonalcontent.com)对非浏览器
+                    // User-Agent 的整文件下载会限速到 ~1-2MB/s,大文件因此拖到几十秒
+                    // 才下完(首缓冲超时)。带上浏览器 UA 后下载速度对齐网页端。
+                    var request = URLRequest(url: url)
+                    request.setValue(
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+                        forHTTPHeaderField: "User-Agent"
+                    )
+                    let (downloadedURL, response) = try await session.download(for: request)
 
                     guard let http = response as? HTTPURLResponse,
                           (200...299).contains(http.statusCode) else {

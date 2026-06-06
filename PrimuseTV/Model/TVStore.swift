@@ -338,6 +338,9 @@ final class TVStore {
     func setSourceEnabled(_ id: String, _ enabled: Bool) {
         sourcesStore.updateLocal(id) { $0.isEnabled = enabled }
         refreshVisibility()
+        let fromThis = library.songs.filter { $0.sourceID == id }.count
+        let visibleFromThis = library.visibleSongs.filter { $0.sourceID == id }.count
+        plog("🔀 TV setSourceEnabled \(id)→\(enabled); 该源歌曲 全量=\(fromThis) 可见=\(visibleFromThis); 总可见=\(library.visibleSongs.count)")
         Task.detached { await LibrarySnapshotSync.shared.uploadNow() }
     }
 

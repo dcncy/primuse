@@ -58,8 +58,14 @@ struct TVSearchView: View {
             }
             .padding(.horizontal, 28).padding(.vertical, 20)
             .frame(maxWidth: .infinity)
-            .background(inputActive ? Color.white.opacity(0.16) : Color.white.opacity(0.07),
+            // 低调填充 + 聚焦时品牌色描边,不再用晃眼的亮白底。
+            .background(Color.white.opacity(inputActive ? 0.10 : 0.06),
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(inputActive ? TVColor.brand : .white.opacity(0.10),
+                                  lineWidth: inputActive ? 2.5 : 1)
+            }
             .padding(.bottom, 14)
 
             Text("选中搜索框唤出系统键盘,可用语音听写输入")

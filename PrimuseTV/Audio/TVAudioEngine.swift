@@ -68,11 +68,11 @@ final class TVAudioEngine {
         currentTime = 0
         status = .loading
         let item: AVPlayerItem
-        if headers.isEmpty {
-            resourceLoader = nil
-            item = AVPlayerItem(url: url)
-        } else if let masked = TVStreamResourceLoader.maskedURL(from: url) {
-            // 需自定义播放头(UA/Bearer)→ 自定义 scheme + resource loader 代理
+        // 所有 http(s) 流都走 resource loader:它能接受自签证书(个人 NAS)、带自定义头
+        // (UA/Bearer)、按 Range 取数支持 seek。裸 AVPlayerItem(url:) 对自签证书会
+        // 直接「Cannot Open」。file:// 等非网络 scheme 才直连。
+        if (url.scheme == "https" || url.scheme == "http"),
+           let masked = TVStreamResourceLoader.maskedURL(from: url) {
             let loader = TVStreamResourceLoader(realURL: url, headers: headers)
             let asset = AVURLAsset(url: masked)
             asset.resourceLoader.setDelegate(loader, queue: DispatchQueue(label: "tv.resourceloader"))

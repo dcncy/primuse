@@ -21,7 +21,12 @@ final class TVStreamResourceLoader: NSObject, AVAssetResourceLoaderDelegate, @un
         self.headers = headers
         let cfg = URLSessionConfiguration.default
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        self.session = URLSession(configuration: cfg)
+        // 关键:带一个接受自签/不受信任证书的 TLS delegate。个人 NAS(Synology 等)
+        // 多用自签或非公认 CA 证书,AVPlayer 裸播会直接「Cannot Open」;经此 session
+        // 代理拉数据即可正常播放(与 iOS 端 SmartSSLDelegate 同策略)。
+        self.session = URLSession(configuration: cfg,
+                                  delegate: TVInsecureTLSDelegate(),
+                                  delegateQueue: nil)
         super.init()
     }
 
@@ -90,6 +95,21 @@ final class TVStreamResourceLoader: NSObject, AVAssetResourceLoaderDelegate, @un
         } else if http.statusCode == 200,
                   let lenStr = http.value(forHTTPHeaderField: "Content-Length"), let len = Int64(lenStr) {
             info.contentLength = len
+        }
+    }
+}
+
+/// 接受自签 / 不受信任的服务器证书(个人 NAS 常见)。AVPlayer 无 app 层 TLS 钩子,
+/// 所以把流走这条带此 delegate 的 URLSession 代理,才能播放自签证书的 NAS。
+final class TVInsecureTLSDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
         }
     }
 }

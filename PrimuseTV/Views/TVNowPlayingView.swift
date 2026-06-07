@@ -9,6 +9,7 @@ struct TVNowPlayingView: View {
 
     @State private var showQueue = false
     @State private var showOptions = false
+    @Namespace private var playerFocus
 
     var body: some View {
         ZStack {
@@ -45,6 +46,7 @@ struct TVNowPlayingView: View {
                     .focusSection()
                 lyricsColumn.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .focusScope(playerFocus)
             .padding(.horizontal, 100).padding(.top, 80).padding(.bottom, 70)
         }
     }
@@ -98,6 +100,8 @@ struct TVNowPlayingView: View {
             TVRoundBtn(icon: "backward.fill", size: 64) { store.previous() }
             TVRoundBtn(icon: store.isPlaying ? "pause.fill" : "play.fill", size: 92,
                        primary: true) { store.togglePlayPause() }
+                // 进入播放页默认聚焦播放/暂停键,避免落在进度条上误触快进快退。
+                .prefersDefaultFocus(true, in: playerFocus)
             TVRoundBtn(icon: "forward.fill", size: 64) { store.next() }
             TVRoundBtn(icon: store.repeatMode == .one ? "repeat.1" : "repeat", size: 64,
                        active: store.repeatMode != .off) { store.cycleRepeatMode() }
@@ -150,8 +154,14 @@ struct TVNowPlayingView: View {
         let size: CGFloat = isCur ? 52 : 36
         VStack(alignment: .leading, spacing: 6) {
             if isCur {
-                TVKaraokeLine(syllables: ln.syllables, progress: store.currentLyricProgress,
-                              size: size, tint: store.nowPlaying.tint)
+                if ln.syllables.isEmpty {
+                    // 普通 .lrc 无逐字时间——直接高亮整行,否则卡拉OK行无音节可画会整行不可见。
+                    Text(ln.text).font(.system(size: size, weight: .bold)).foregroundStyle(.white)
+                        .shadow(color: store.nowPlaying.tint.opacity(0.5), radius: 16, y: 2)
+                } else {
+                    TVKaraokeLine(syllables: ln.syllables, progress: store.currentLyricProgress,
+                                  size: size, tint: store.nowPlaying.tint)
+                }
             } else {
                 Text(ln.text).font(.system(size: size, weight: .semibold)).foregroundStyle(.white)
             }
@@ -223,18 +233,32 @@ private struct TVScrubber: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(focused ? 0.3 : 0.16))
-                    .frame(height: focused ? 8 : 5)
+                Capsule().fill(.white.opacity(focused ? 0.32 : 0.16))
+                    .frame(height: focused ? 10 : 5)
                 Capsule().fill(tint)
-                    .frame(width: max(0, geo.size.width * progress), height: focused ? 8 : 5)
+                    .frame(width: max(0, geo.size.width * progress), height: focused ? 10 : 5)
+                    .shadow(color: focused ? tint.opacity(0.8) : .clear, radius: focused ? 8 : 0)
                 Circle().fill(.white)
-                    .frame(width: focused ? 26 : 18, height: focused ? 26 : 18)
-                    .shadow(color: tint.opacity(0.6), radius: focused ? 8 : 4)
-                    .offset(x: geo.size.width * progress - (focused ? 13 : 9))
+                    .frame(width: focused ? 30 : 16, height: focused ? 30 : 16)
+                    .overlay(Circle().strokeBorder(tint, lineWidth: focused ? 4 : 0))
+                    .shadow(color: tint.opacity(focused ? 0.9 : 0.5), radius: focused ? 12 : 4)
+                    .offset(x: max(0, geo.size.width * progress) - (focused ? 15 : 8))
             }
             .frame(maxHeight: .infinity, alignment: .center)
         }
-        .frame(height: 26)
+        .frame(height: 30)
+        .padding(.vertical, 12).padding(.horizontal, 16)
+        // 聚焦时整条进度条套上品牌色描边 + 辉光的高亮框,清楚区分「选中在此处」。
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.white.opacity(focused ? 0.12 : 0))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(tint, lineWidth: focused ? 3 : 0)
+                }
+        }
+        .shadow(color: focused ? tint.opacity(0.45) : .clear, radius: focused ? 18 : 0)
+        .scaleEffect(focused ? 1.03 : 1)
         .focusable(true)
         .focused($focused)
         .focusEffectDisabled()
@@ -245,7 +269,7 @@ private struct TVScrubber: View {
             default: break
             }
         }
-        .animation(.easeOut(duration: 0.15), value: focused)
+        .animation(.easeOut(duration: 0.18), value: focused)
     }
 }
 

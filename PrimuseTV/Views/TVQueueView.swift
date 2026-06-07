@@ -34,6 +34,8 @@ struct TVQueueView: View {
                                 queueRow(index: idx, song: song)
                             }
                         }
+                        // 留出边距,否则选中行的左右描边会被竖向 ScrollView 的横向裁切切掉。
+                        .padding(.horizontal, 10).padding(.vertical, 6)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

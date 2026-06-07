@@ -114,7 +114,8 @@ final class TVPlaybackCoordinator {
     private nonisolated static func toTVLyrics(_ lines: [LyricLine]) -> [TVLyricLine] {
         lines.map { line in
             TVLyricLine(time: line.timestamp, text: line.text,
-                        syllables: (line.syllables ?? []).map { TVSyllable(w: $0.text, d: $0.start) },
+                        // start/end 是相对歌曲起点的绝对时间戳;卡拉OK扫词需要每字时长。
+                        syllables: (line.syllables ?? []).map { TVSyllable(w: $0.text, d: max(0.001, $0.end - $0.start)) },
                         translation: "")
         }
     }

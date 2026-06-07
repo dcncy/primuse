@@ -86,6 +86,8 @@ struct ScrapeOptionsView: View {
     #if os(macOS)
     /// 候选优先单页 (macOS): 窗口打开后只触发一次自动搜索 + 自动选中第一个候选。
     @State private var macDidInitialLoad = false
+    @State private var macDisplayTitle: String?
+    @State private var macSidecarBaseNameOverride: String?
     /// 当前在左栏选中的候选 id, 用于高亮 + 取中栏封面对比的来源名。
     @State private var selectedItemID: String?
     #endif
@@ -192,7 +194,7 @@ struct ScrapeOptionsView: View {
         HStack(spacing: 14) {
             PMWindowTrafficLights(closeOnly: true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("刮削 · \(song.title)")
+                Text("刮削 · \(macDisplayTitle ?? song.title)")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(PMColor.text)
                     .lineLimit(1)
@@ -675,9 +677,7 @@ struct ScrapeOptionsView: View {
     /// Sidecar 文件名跟着源音频文件走 (`<basename>-cover.jpg` / `<basename>.lrc`),
     /// 不是歌曲标题 —— 跟 SidecarWriteService 实际写盘逻辑一致。
     private var macSidecarBaseName: String {
-        let last = (song.filePath as NSString).lastPathComponent
-        let base = (last as NSString).deletingPathExtension
-        return base.isEmpty ? song.title : base
+        macSidecarBaseNameOverride ?? MusicScraperService.sidecarBaseName(for: song)
     }
 
     private func macSectionTitle(_ title: LocalizedStringKey) -> some View {
@@ -749,12 +749,11 @@ struct ScrapeOptionsView: View {
     }
 
     private func macInitialLoad() async {
-        manualSearchQuery = ScraperManager.searchTitle(song.title, artist: song.artistName)
-        if let artist = song.artistName,
-           !artist.isEmpty,
-           ScraperManager.shouldAppendArtist(to: manualSearchQuery, artist: artist) {
-            manualSearchQuery += " \(artist)"
-        }
+        let title = await scraperService.suggestedScrapeTitle(for: song)
+        let sidecarBaseName = await scraperService.suggestedSidecarBaseName(for: song)
+        macDisplayTitle = title
+        macSidecarBaseNameOverride = sidecarBaseName
+        manualSearchQuery = MusicScraperService.searchQuery(title: title, artist: song.artistName)
         await macRunSearch()
     }
 
@@ -1175,12 +1174,13 @@ struct ScrapeOptionsView: View {
     }
 
     private func manualSearch() async {
-        manualSearchQuery = ScraperManager.searchTitle(song.title, artist: song.artistName)
-        if let artist = song.artistName,
-           !artist.isEmpty,
-           ScraperManager.shouldAppendArtist(to: manualSearchQuery, artist: artist) {
-            manualSearchQuery += " \(artist)"
-        }
+        let title = await scraperService.suggestedScrapeTitle(for: song)
+        #if os(macOS)
+        let sidecarBaseName = await scraperService.suggestedSidecarBaseName(for: song)
+        macDisplayTitle = title
+        macSidecarBaseNameOverride = sidecarBaseName
+        #endif
+        manualSearchQuery = MusicScraperService.searchQuery(title: title, artist: song.artistName)
         mode = .manual
         await performManualSearch()
     }
@@ -1432,8 +1432,6 @@ struct ScrapeOptionsView: View {
             // 占用 connector actor。
             if needsCover || needsLyrics {
                 let titleSnapshot = final.title
-                let songDir = (final.filePath as NSString).deletingLastPathComponent
-                let baseNameNoExt = ((final.filePath as NSString).lastPathComponent as NSString).deletingPathExtension
                 let finalSnapshot = final
                 Task.detached(priority: .utility) {
                     plog("📝 Sidecar: writing back to source for '\(titleSnapshot)'")
@@ -1448,9 +1446,6 @@ struct ScrapeOptionsView: View {
                             plog("📝 Sidecar: result cover=\(writeResult.coverWritten) lyrics=\(writeResult.lyricsWritten)")
 
                             if writeResult.coverWritten {
-                                let coverPath = (songDir as NSString).appendingPathComponent("\(baseNameNoExt)-cover.jpg")
-                                var refSong = finalSnapshot
-                                refSong.coverArtFileName = coverPath
                                 // sidecar 已落盘 → 回写 hash cache 作为可信 mirror。
                                 // 不要先 invalidate 再 cacheCover ── 制造空窗期, 期间 view
                                 // reload 会拿不到本地 cache 被迫走 NAS, 拉到 HTTP 端缓存的旧
@@ -1458,13 +1453,13 @@ struct ScrapeOptionsView: View {
                                 if let data = coverData {
                                     await MetadataAssetStore.shared.cacheCover(data, forSongID: songID)
                                 }
-                                // 不要把 song.lyricsFileName 改成 NAS 的 .lrc 路径 ──
-                                // 那只是给其他播放器看的备份, 内容是行级 (没字时间)。
-                                // 字级数据在本地 App Support hash JSON 里, song 必须
-                                // 一直指向那个, 否则下次读会从 NAS .lrc 拿行级歌词。
                                 await MainActor.run {
                                     CachedArtworkView.invalidateCache(for: songID)
-                                    lib.replaceSong(refSong)
+                                    if let coverPath = MusicScraperService.sidecarReferencePath(for: finalSnapshot, suffix: "-cover.jpg") {
+                                        var refSong = finalSnapshot
+                                        refSong.coverArtFileName = coverPath
+                                        lib.replaceSong(refSong)
+                                    }
                                 }
                             }
                             if !writeResult.errors.isEmpty {
@@ -1498,16 +1493,18 @@ struct ScrapeOptionsView: View {
     ) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
-                // SourceManager 是 @MainActor, await 会切到 main actor 上跑
-                // auxiliaryConnector / connect; 真正的 NAS IO (writeSidecars)
-                // 走 SidecarWriteService actor (背景 executor), 不占 main actor。
-                let connector = try await sourceManager.auxiliaryConnector(for: song)
+                // Sidecar 写回使用独立 connector, 避免复用正在播放/离线缓存的
+                // 云盘 connector 状态。
+                let connector = try await sourceManager.sidecarWriteConnector(for: song)
                 let writeResult = await SidecarWriteService.shared.writeSidecars(
                     for: song,
                     using: connector,
                     coverData: coverData,
                     lyricsLines: lyricsLines
                 )
+                if writeResult.coverWritten || writeResult.lyricsWritten {
+                    await sourceManager.invalidateDownloadCacheAfterSidecarWrite(for: song)
+                }
                 await applyResult(writeResult)
             }
             group.addTask {

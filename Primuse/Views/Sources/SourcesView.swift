@@ -1,6 +1,70 @@
 import SwiftUI
 import PrimuseKit
 
+private enum SourceCacheAlert: Identifiable {
+    case confirm(SourceCacheRequest)
+    case completed(SourceCacheCompletion)
+
+    var id: String {
+        switch self {
+        case .confirm(let request): "confirm-\(request.id.uuidString)"
+        case .completed(let completion): "completed-\(completion.id.uuidString)"
+        }
+    }
+}
+
+private struct SourceCacheRequest: Identifiable {
+    let id = UUID()
+    let source: MusicSource
+    let songs: [Song]
+    let estimate: SourceCacheEstimate
+}
+
+private struct SourceCacheRun: Identifiable {
+    let id = UUID()
+    let sourceID: String
+    let sourceName: String
+    let songs: [Song]
+    let estimate: SourceCacheEstimate
+}
+
+private struct SourceCacheCompletion: Identifiable {
+    let id = UUID()
+    let sourceName: String
+    let result: OfflineDownloadBatchResult
+}
+
+private struct SourceCacheEstimate {
+    let totalCount: Int
+    let remainingCount: Int
+    let alreadyCachedCount: Int
+    let knownBytes: Int64
+    let unknownCount: Int
+    let remainingSongIDs: Set<String>
+}
+
+private struct SourceCacheProgressState {
+    let handledCount: Int
+    let completedCount: Int
+    let failedCount: Int
+    let totalCount: Int
+    let downloadedKnownBytes: Int64
+    let estimatedKnownBytes: Int64
+    let unknownCount: Int
+
+    var remainingKnownBytes: Int64 {
+        max(0, estimatedKnownBytes - downloadedKnownBytes)
+    }
+
+    var fraction: Double? {
+        if estimatedKnownBytes > 0 {
+            return min(1, max(0, Double(downloadedKnownBytes) / Double(estimatedKnownBytes)))
+        }
+        guard totalCount > 0 else { return nil }
+        return min(1, max(0, Double(handledCount) / Double(totalCount)))
+    }
+}
+
 struct SourcesView: View {
     @Environment(SourceManager.self) private var sourceManager
     @Environment(SourcesStore.self) private var sourceStore
@@ -12,6 +76,8 @@ struct SourcesView: View {
     @State private var editingSource: MusicSource?
     @State private var connectingSource: MusicSource?
     @State private var diagnosingSource: MusicSource?
+    @State private var cacheAlert: SourceCacheAlert?
+    @State private var activeCacheRun: SourceCacheRun?
     @State private var cloudDirectoryNameRefreshID = UUID()
     /// Apple Music 这个虚拟 source 没有目录 / 体检的概念, 行内按钮换成
     /// "打开 Apple Music 设置" 的跳转 ── 走 NavigationStack 的 destination 而不是 sheet,
@@ -46,6 +112,25 @@ struct SourcesView: View {
             }
             .sheet(item: $diagnosingSource) { source in
                 SourceDiagnosticsView(source: source)
+            }
+            .alert(item: $cacheAlert) { alert in
+                switch alert {
+                case .confirm(let request):
+                    return Alert(
+                        title: Text("source_cache_all_title"),
+                        message: Text(cacheConfirmationMessage(for: request)),
+                        primaryButton: .default(Text("source_cache_all_confirm")) {
+                            startCaching(request)
+                        },
+                        secondaryButton: .cancel(Text("cancel"))
+                    )
+                case .completed(let completion):
+                    return Alert(
+                        title: Text(cacheCompletionTitle(for: completion)),
+                        message: Text(cacheCompletionMessage(for: completion)),
+                        dismissButton: .default(Text("done"))
+                    )
+                }
             }
             .navigationDestination(isPresented: $openAppleMusicSettings) {
                 AppleMusicSettingsView()
@@ -87,6 +172,16 @@ struct SourcesView: View {
         } else {
             source.songCount
         }
+        let sourcePlayableSongs = playableSongs(for: source)
+        let hasSourceDownloads = sourcePlayableSongs.contains {
+            sourceManager.offlineAudioSnapshot(for: $0).isDownloading
+        }
+        let hasOtherSourceDownloads = library.visibleSongs.contains {
+            $0.sourceID != source.id && sourceManager.offlineAudioSnapshot(for: $0).isDownloading
+        }
+        let isSourceCaching = activeCacheRun?.sourceID == source.id || hasSourceDownloads
+        let isAnotherSourceCaching = (activeCacheRun != nil && activeCacheRun?.sourceID != source.id) || hasOtherSourceDownloads
+        let cacheButtonTitle: LocalizedStringKey = isSourceCaching ? "source_cache_all_loading" : "source_cache_all_short"
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
@@ -192,6 +287,10 @@ struct SourcesView: View {
                 }
             }
 
+            if let progress = sourceCacheProgress(for: source, songs: sourcePlayableSongs) {
+                sourceCacheProgressView(progress)
+            }
+
             HStack(spacing: 10) {
                 if source.type == .appleMusic {
                     // Apple Music 走 ApplicationMusicPlayer, 没有目录/扫描/体检概念,
@@ -205,8 +304,14 @@ struct SourcesView: View {
                     }
                 } else if source.type.isServerLibrary {
                     // 服务端整库源(媒体服务器 / Subsonic)直接全库扫描 — 无需选目录
-                    sourceActionButton("source_diagnostics_short", systemImage: "stethoscope") {
-                        diagnosingSource = source
+                    sourceActionButton(
+                        cacheButtonTitle,
+                        systemImage: "arrow.down.circle",
+                        prominence: .accent,
+                        isLoading: isSourceCaching,
+                        isDisabled: isSourceCaching || sourcePlayableSongs.isEmpty || isAnotherSourceCaching
+                    ) {
+                        presentCacheConfirmation(for: source, songs: sourcePlayableSongs)
                     }
 
                     sourceActionButton(
@@ -232,8 +337,14 @@ struct SourcesView: View {
                         connectingSource = source
                     }
 
-                    sourceActionButton("source_diagnostics_short", systemImage: "stethoscope") {
-                        diagnosingSource = source
+                    sourceActionButton(
+                        cacheButtonTitle,
+                        systemImage: "arrow.down.circle",
+                        prominence: .accent,
+                        isLoading: isSourceCaching,
+                        isDisabled: isSourceCaching || sourcePlayableSongs.isEmpty || isAnotherSourceCaching
+                    ) {
+                        presentCacheConfirmation(for: source, songs: sourcePlayableSongs)
                     }
 
                     if !dirs.isEmpty {
@@ -306,15 +417,23 @@ struct SourcesView: View {
         _ title: LocalizedStringKey,
         systemImage: String,
         prominence: SourceActionProminence = .neutral,
+        isLoading: Bool = false,
         isDisabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(width: 18)
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(sourceActionForeground(for: prominence))
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .frame(width: 18, height: 18)
+                }
                 Text(title)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
@@ -336,7 +455,7 @@ struct SourcesView: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
-        .opacity(isDisabled ? 0.55 : 1)
+        .opacity(isDisabled && !isLoading ? 0.55 : 1)
     }
 
     private func sourceActionForeground(for prominence: SourceActionProminence) -> Color {
@@ -365,6 +484,232 @@ struct SourcesView: View {
 
     private var sources: [MusicSource] {
         sourceStore.sources
+    }
+
+    private func playableSongs(for source: MusicSource) -> [Song] {
+        library.visibleSongs
+            .filter { $0.sourceID == source.id }
+            .filteredPlayable()
+    }
+
+    private func presentCacheConfirmation(for source: MusicSource, songs: [Song]) {
+        cacheAlert = .confirm(SourceCacheRequest(
+            source: source,
+            songs: songs,
+            estimate: sourceCacheEstimate(for: songs)
+        ))
+    }
+
+    private func sourceCacheEstimate(for songs: [Song]) -> SourceCacheEstimate {
+        var remainingCount = 0
+        var alreadyCachedCount = 0
+        var knownBytes: Int64 = 0
+        var unknownCount = 0
+        var remainingSongIDs = Set<String>()
+
+        for song in songs {
+            switch sourceManager.offlineAudioSnapshot(for: song).state {
+            case .cached, .pinned:
+                alreadyCachedCount += 1
+            case .notCached, .downloading, .failed:
+                remainingCount += 1
+                remainingSongIDs.insert(song.id)
+                if song.fileSize > 0 {
+                    knownBytes += song.fileSize
+                } else {
+                    unknownCount += 1
+                }
+            }
+        }
+
+        return SourceCacheEstimate(
+            totalCount: songs.count,
+            remainingCount: remainingCount,
+            alreadyCachedCount: alreadyCachedCount,
+            knownBytes: knownBytes,
+            unknownCount: unknownCount,
+            remainingSongIDs: remainingSongIDs
+        )
+    }
+
+    private func startCaching(_ request: SourceCacheRequest) {
+        let run = SourceCacheRun(
+            sourceID: request.source.id,
+            sourceName: request.source.name,
+            songs: request.songs,
+            estimate: request.estimate
+        )
+        activeCacheRun = run
+
+        Task { @MainActor in
+            let result = await sourceManager.downloadForOfflineBatch(songs: request.songs)
+            guard activeCacheRun?.id == run.id else { return }
+            activeCacheRun = nil
+            cacheAlert = .completed(SourceCacheCompletion(
+                sourceName: request.source.name,
+                result: result
+            ))
+        }
+    }
+
+    private func sourceCacheProgress(for source: MusicSource, songs: [Song]) -> SourceCacheProgressState? {
+        if let run = activeCacheRun, run.sourceID == source.id {
+            return sourceCacheProgress(songs: run.songs, estimate: run.estimate)
+        }
+
+        guard songs.contains(where: { sourceManager.offlineAudioSnapshot(for: $0).isDownloading }) else {
+            return nil
+        }
+
+        return sourceCacheProgress(songs: songs, estimate: sourceCacheEstimate(for: songs))
+    }
+
+    private func sourceCacheProgress(songs: [Song], estimate: SourceCacheEstimate) -> SourceCacheProgressState {
+        var handledCount = 0
+        var completedCount = 0
+        var failedCount = 0
+        var downloadedKnownBytes: Int64 = 0
+
+        for song in songs {
+            let snapshot = sourceManager.offlineAudioSnapshot(for: song)
+            switch snapshot.state {
+            case .cached, .pinned:
+                handledCount += 1
+                completedCount += 1
+                if estimate.remainingSongIDs.contains(song.id) {
+                    downloadedKnownBytes += snapshot.byteCount ?? max(song.fileSize, 0)
+                }
+            case .failed:
+                handledCount += 1
+                failedCount += 1
+            case .downloading:
+                if estimate.remainingSongIDs.contains(song.id),
+                   song.fileSize > 0,
+                   let progress = snapshot.progress {
+                    downloadedKnownBytes += Int64(Double(song.fileSize) * min(1, max(0, progress)))
+                }
+            case .notCached:
+                break
+            }
+        }
+
+        return SourceCacheProgressState(
+            handledCount: handledCount,
+            completedCount: completedCount,
+            failedCount: failedCount,
+            totalCount: estimate.totalCount,
+            downloadedKnownBytes: downloadedKnownBytes,
+            estimatedKnownBytes: estimate.knownBytes,
+            unknownCount: estimate.unknownCount
+        )
+    }
+
+    private func sourceCacheProgressView(_ progress: SourceCacheProgressState) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ProgressView(value: progress.fraction)
+                .tint(.accentColor)
+            HStack {
+                Text(sourceCacheProgressMessage(for: progress))
+                    .lineLimit(1)
+                Spacer()
+                Text("\(progress.completedCount)/\(progress.totalCount)")
+                    .monospacedDigit()
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func sourceCacheProgressMessage(for progress: SourceCacheProgressState) -> String {
+        let downloadedSize = cacheSizeDescription(knownBytes: progress.downloadedKnownBytes, unknownCount: 0)
+        let remainingSize = cacheSizeDescription(knownBytes: progress.remainingKnownBytes, unknownCount: progress.unknownCount)
+        if progress.failedCount > 0 {
+            return String(
+                format: String(localized: "source_cache_progress_with_failed_format"),
+                downloadedSize,
+                remainingSize,
+                progress.failedCount
+            )
+        }
+        return String(
+            format: String(localized: "source_cache_progress_format"),
+            downloadedSize,
+            remainingSize
+        )
+    }
+
+    private func cacheConfirmationMessage(for request: SourceCacheRequest) -> String {
+        let size = cacheSizeDescription(
+            knownBytes: request.estimate.knownBytes,
+            unknownCount: request.estimate.unknownCount
+        )
+
+        if request.estimate.alreadyCachedCount > 0 {
+            return String(
+                format: String(localized: "source_cache_all_message_with_cached_format"),
+                request.source.name,
+                request.estimate.totalCount,
+                size,
+                request.estimate.alreadyCachedCount
+            )
+        }
+
+        return String(
+            format: String(localized: "source_cache_all_message_format"),
+            request.source.name,
+            request.estimate.totalCount,
+            size
+        )
+    }
+
+    private func cacheCompletionTitle(for completion: SourceCacheCompletion) -> String {
+        if completion.result.succeeded {
+            return String(localized: "source_cache_success_title")
+        }
+        if completion.result.completedCount == 0 {
+            return String(localized: "source_cache_failed_title")
+        }
+        return String(localized: "source_cache_partial_title")
+    }
+
+    private func cacheCompletionMessage(for completion: SourceCacheCompletion) -> String {
+        let size = cacheSizeDescription(knownBytes: completion.result.byteCount, unknownCount: 0)
+        if completion.result.succeeded {
+            return String(
+                format: String(localized: "source_cache_success_message_format"),
+                completion.sourceName,
+                completion.result.completedCount,
+                completion.result.requestedCount,
+                size
+            )
+        }
+
+        return String(
+            format: String(localized: "source_cache_partial_message_format"),
+            completion.sourceName,
+            completion.result.completedCount,
+            completion.result.requestedCount,
+            completion.result.failedCount,
+            size
+        )
+    }
+
+    private func cacheSizeDescription(knownBytes: Int64, unknownCount: Int) -> String {
+        let knownSize = ByteCountFormatter.string(fromByteCount: knownBytes, countStyle: .file)
+        if knownBytes <= 0, unknownCount > 0 {
+            return String(
+                format: String(localized: "source_cache_size_unknown_only_format"),
+                unknownCount
+            )
+        }
+        if unknownCount > 0 {
+            return String(
+                format: String(localized: "source_cache_size_known_plus_unknown_format"),
+                knownSize,
+                unknownCount
+            )
+        }
+        return knownSize
     }
 
     @ViewBuilder

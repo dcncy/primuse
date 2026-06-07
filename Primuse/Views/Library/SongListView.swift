@@ -1197,10 +1197,14 @@ struct SongListView: View {
     }
 
     private func playSong(_ song: Song) {
-        let queue = cachedSortedSongs.filteredPlayable()
-        guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
-        player.setQueue(queue, startAt: index)
-        Task { await player.play(song: song) }
+        let visibleQueue = filteredSongs
+        guard let index = visibleQueue.firstIndex(where: { $0.id == song.id }) else { return }
+
+        let queue = Array(visibleQueue[index...]) + Array(visibleQueue[..<index])
+        guard let first = queue.first else { return }
+        plog("🎶 SongList setQueue visible=\(visibleQueue.count) queue=\(queue.count) start='\(first.title)'")
+        player.setQueue(queue, startAt: 0)
+        Task { await player.play(song: first) }
     }
 }
 

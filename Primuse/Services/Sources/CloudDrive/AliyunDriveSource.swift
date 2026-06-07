@@ -3,7 +3,7 @@ import Foundation
 import PrimuseKit
 
 /// 阿里云盘 Source — PDS API
-actor AliyunDriveSource: MusicSourceConnector, OAuthCloudSource {
+actor AliyunDriveSource: MusicSourceConnector, OAuthCloudSource, RemoteFileDisplayNameProviding {
     let sourceID: String
     nonisolated let supportsSidecarWriting = true   // 刮削歌词/封面写回阿里云盘同目录
     private let helper: CloudDriveHelper
@@ -172,6 +172,31 @@ actor AliyunDriveSource: MusicSourceConnector, OAuthCloudSource {
     func streamData(for path: String) async throws -> AsyncThrowingStream<Data, Error> {
         _ = try await localURL(for: path)
         return helper.streamFromCache(path: path)
+    }
+
+    func displayName(for path: String) async throws -> String? {
+        let token = try await getToken()
+        if driveId == nil {
+            if let tokens = await helper.tokenManager.getTokens(), let id = tokens.extra?["drive_id"] {
+                driveId = id
+            } else {
+                driveId = try await fetchDriveId()
+            }
+        }
+        guard let driveId else { throw CloudDriveError.notAuthenticated }
+        let body = try JSONSerialization.data(withJSONObject: ["drive_id": driveId, "file_id": path])
+        let (data, http) = try await helper.makeAuthorizedRequest(
+            url: URL(string: "\(Self.apiBase)/adrive/v1.0/openFile/get")!,
+            method: "POST",
+            body: body,
+            contentType: "application/json",
+            accessToken: token
+        )
+        guard http.statusCode == 200 else {
+            throw CloudDriveError.apiError(http.statusCode, "Aliyun file name lookup")
+        }
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        return json["name"] as? String
     }
 
     func scanAudioFiles(from path: String) async throws -> AsyncThrowingStream<RemoteFileItem, Error> {

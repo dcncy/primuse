@@ -121,7 +121,6 @@ final class MusicScraperService {
                     let songID = updatedSong.id
                     Task.detached(priority: .utility) {
                         do {
-                            plog("📝 Sidecar: getting auxiliary connector for '\(songForWrite.title)' source=\(songForWrite.sourceID)")
                             let writeResult = try await MusicScraperService.writeSidecarWithTimeout(
                                 seconds: sidecarSettings.timeout,
                                 sourceManager: sourceManager,
@@ -130,20 +129,18 @@ final class MusicScraperService {
                             )
                             plog("📝 Sidecar: result cover=\(writeResult.coverWritten) lyrics=\(writeResult.lyricsWritten) errors=\(writeResult.errors)")
 
-                            // Update Song refs to point to sidecar paths on source
-                            let songDir = (songForWrite.filePath as NSString).deletingLastPathComponent
-                            let baseNameNoExt = ((songForWrite.filePath as NSString).lastPathComponent as NSString).deletingPathExtension
                             var needsUpdate = false
                             var refSong = songForWrite
 
                             if writeResult.coverWritten {
-                                let coverPath = (songDir as NSString).appendingPathComponent("\(baseNameNoExt)-cover.jpg")
-                                refSong.coverArtFileName = coverPath
+                                if let coverPath = Self.sidecarReferencePath(for: songForWrite, suffix: "-cover.jpg") {
+                                    refSong.coverArtFileName = coverPath
+                                    needsUpdate = true
+                                }
                                 // sidecar 已落盘 —— 现在回写 hash cache 作为可信 mirror
                                 if let coverData {
                                     await MetadataAssetStore.shared.cacheCover(coverData, forSongID: songID)
                                 }
-                                needsUpdate = true
                             }
                             if writeResult.lyricsWritten, let lyricsLines {
                                 // 不让 song.lyricsFileName 指向 NAS .lrc —— .lrc
@@ -175,6 +172,61 @@ final class MusicScraperService {
             }
         }
         return (updatedSong, result.coverData, result.lyricsLines)
+    }
+
+    func suggestedScrapeTitle(for song: Song) async -> String {
+        await resolvedScrapeFallbackTitle(for: song)
+    }
+
+    func suggestedSearchQuery(for song: Song) async -> String {
+        let title = await suggestedScrapeTitle(for: song)
+        return Self.searchQuery(title: title, artist: song.artistName)
+    }
+
+    func suggestedSidecarBaseName(for song: Song) async -> String {
+        let local = Self.sidecarBaseName(for: song)
+        guard Self.shouldUseOpaqueSidecarIdentity(for: song) else {
+            return local
+        }
+
+        guard let remoteName = try? await sourceManager.remoteDisplayName(for: song) else {
+            return local
+        }
+        let remoteBaseName = (remoteName as NSString)
+            .deletingPathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return remoteBaseName.isEmpty ? local : remoteBaseName
+    }
+
+    nonisolated static func searchQuery(title: String, artist: String?) -> String {
+        var query = ScraperManager.searchTitle(title, artist: artist)
+        if let artist,
+           !artist.isEmpty,
+           ScraperManager.shouldAppendArtist(to: query, artist: artist) {
+            query += " \(artist)"
+        }
+        return query
+    }
+
+    nonisolated static func sidecarBaseName(for song: Song) -> String {
+        let base = pathBaseName(for: song)
+        if !base.isEmpty { return base }
+
+        let title = song.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? song.id : title
+    }
+
+    nonisolated static func sidecarReferencePath(for song: Song, suffix: String) -> String? {
+        guard shouldUseOpaqueSidecarIdentity(for: song) == false else {
+            // OneDrive / Google Drive / Aliyun store Song.filePath as an
+            // opaque item id. Their connector writes the sidecar beside the
+            // real upstream file, but the generated "{id}-cover.jpg" path is
+            // not readable later. Keep the local hash cache as the library ref.
+            return nil
+        }
+
+        let songDir = (song.filePath as NSString).deletingLastPathComponent
+        return (songDir as NSString).appendingPathComponent("\(sidecarBaseName(for: song))\(suffix)")
     }
 
     func enqueueBackgroundEnrichment(for songs: [Song], in library: MusicLibrary) {
@@ -310,19 +362,17 @@ final class MusicScraperService {
                                         coverData: coverData, lyricsLines: lyricsLines
                                     )
 
-                                    // Update Song refs to point to sidecar paths on source
-                                    let songDir = (songForWrite.filePath as NSString).deletingLastPathComponent
-                                    let baseNameNoExt = ((songForWrite.filePath as NSString).lastPathComponent as NSString).deletingPathExtension
                                     var needsUpdate = false
                                     var refSong = songForWrite
 
                                     if writeResult.coverWritten {
-                                        let coverPath = (songDir as NSString).appendingPathComponent("\(baseNameNoExt)-cover.jpg")
-                                        refSong.coverArtFileName = coverPath
+                                        if let coverPath = Self.sidecarReferencePath(for: songForWrite, suffix: "-cover.jpg") {
+                                            refSong.coverArtFileName = coverPath
+                                            needsUpdate = true
+                                        }
                                         if let coverData {
                                             await MetadataAssetStore.shared.cacheCover(coverData, forSongID: songID)
                                         }
-                                        needsUpdate = true
                                     }
                                     if writeResult.lyricsWritten, let lyricsLines {
                                         // 同上: 不指向 NAS .lrc, 字级数据只在
@@ -493,14 +543,16 @@ final class MusicScraperService {
         // trustedSource: false —— scrape 路径下 online 结果可能错配,
         // 不让 loadMetadata 直接写 hash cache。等 sidecar 写到 source
         // 成功后再回写 cache（在 scrapeSingle / startScraping 的 Task 里做）。
-        // fallbackTitle 用 song.filePath 的原始文件名 (NAS 真实名), 不让
-        // loadMetadata 在嵌入元数据缺失时退化到 cache 的 sanitized 名
-        let originalFileBaseName = ((song.filePath as NSString).lastPathComponent as NSString).deletingPathExtension
+        // fallbackTitle 决定在线刮削 query。NAS / 本地源的 filePath 是真实路径,
+        // 适合取 basename; OneDrive / Google Drive / Aliyun 等云盘的 filePath
+        // 是 opaque item id, 必须回退到 scan 阶段保存的 song.title(真实文件名),
+        // 否则会拿 uuid/id 搜歌词和封面导致错配。
+        let fallbackTitle = await resolvedScrapeFallbackTitle(for: song)
         let metadata = await metadataService.loadMetadata(
             for: fileURL,
             cacheKey: storeAssets ? song.id : nil,
             trustedSource: false,
-            fallbackTitle: originalFileBaseName
+            fallbackTitle: fallbackTitle
         )
         let merged = mergedSong(
             song,
@@ -597,6 +649,116 @@ final class MusicScraperService {
         return needsTitle || needsArtist || needsAlbum || needsYear || needsGenre || needsCover || needsLyrics
     }
 
+    private func resolvedScrapeFallbackTitle(for song: Song) async -> String {
+        let local = Self.scrapeFallbackTitle(for: song)
+        guard Self.shouldResolveRemoteDisplayName(for: song, candidate: local) else {
+            return local
+        }
+
+        guard let remoteName = try? await sourceManager.remoteDisplayName(for: song) else {
+            return local
+        }
+        let remoteBaseName = (remoteName as NSString)
+            .deletingPathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !remoteBaseName.isEmpty else { return local }
+
+        let pathBaseName = Self.pathBaseName(for: song)
+        return remoteBaseName == pathBaseName ? local : remoteBaseName
+    }
+
+    nonisolated static func scrapeFallbackTitle(for song: Song) -> String {
+        let songTitle = song.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pathLastComponent = Self.pathLastComponent(for: song)
+        let pathBaseName = Self.pathBaseName(for: song)
+
+        guard !songTitle.isEmpty else { return pathBaseName }
+        guard !pathBaseName.isEmpty else { return songTitle }
+
+        if shouldPreferSongTitleForScrapeFallback(
+            song: song,
+            pathLastComponent: pathLastComponent,
+            pathBaseName: pathBaseName
+        ) {
+            return songTitle
+        }
+
+        return pathBaseName
+    }
+
+    private nonisolated static func shouldResolveRemoteDisplayName(for song: Song, candidate: String) -> Bool {
+        let pathLastComponent = Self.pathLastComponent(for: song)
+        let pathBaseName = Self.pathBaseName(for: song)
+        let pathExtension = (pathLastComponent as NSString)
+            .pathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let pathLooksOpaque = pathExtension.isEmpty || AudioFormat.from(fileExtension: pathExtension) == nil
+        guard pathLooksOpaque else { return false }
+
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty
+            || trimmed == pathBaseName
+            || trimmed == pathLastComponent
+            || trimmed == song.id
+            || looksLikeOpaqueSearchText(trimmed)
+    }
+
+    private nonisolated static func shouldUseOpaqueSidecarIdentity(for song: Song) -> Bool {
+        shouldResolveRemoteDisplayName(for: song, candidate: sidecarBaseName(for: song))
+    }
+
+    private nonisolated static func pathLastComponent(for song: Song) -> String {
+        (song.filePath as NSString).lastPathComponent
+    }
+
+    private nonisolated static func pathBaseName(for song: Song) -> String {
+        (pathLastComponent(for: song) as NSString)
+            .deletingPathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private nonisolated static func shouldPreferSongTitleForScrapeFallback(
+        song: Song,
+        pathLastComponent: String,
+        pathBaseName: String
+    ) -> Bool {
+        let pathExtension = (pathLastComponent as NSString)
+            .pathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let expectedExtension = song.fileFormat.rawValue.lowercased()
+
+        // Cloud-drive identifiers (OneDrive item IDs, Google Drive IDs,
+        // Aliyun file IDs) usually have no audio extension. A real audio
+        // file path almost always does, so keep the scanned display title
+        // as the query source in this case.
+        if pathExtension.isEmpty { return true }
+
+        // If the path has an extension but it is not an audio extension,
+        // treat the basename as an identifier-ish token instead of a title.
+        if AudioFormat.from(fileExtension: pathExtension) == nil,
+           pathExtension != expectedExtension {
+            return true
+        }
+
+        if pathBaseName == song.id { return true }
+        return false
+    }
+
+    private nonisolated static func looksLikeOpaqueSearchText(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 16 else { return false }
+
+        let scalars = trimmed.unicodeScalars
+        let opaqueAllowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-!{}")
+        guard scalars.allSatisfy({ opaqueAllowed.contains($0) }) else { return false }
+
+        let digits = scalars.filter { CharacterSet.decimalDigits.contains($0) }.count
+        let separators = scalars.filter { $0 == "_" || $0 == "-" || $0 == "!" }.count
+        return digits >= 6 || separators >= 2 || trimmed.count >= 24
+    }
+
     /// 服务端源专用的严格「只补空缺」合并 —— 只填 nil/空 的
     /// artist/album/year/genre/track/disc。标题、时长、采样率等服务端权威字段
     /// 一律不动; 封面/歌词也不碰(由服务端提供)。
@@ -670,14 +832,18 @@ final class MusicScraperService {
     ) async throws -> SidecarWriteService.WriteResult {
         try await withThrowingTaskGroup(of: SidecarWriteService.WriteResult.self) { group in
             group.addTask {
-                let connector = try await sourceManager.auxiliaryConnector(for: song)
+                let connector = try await sourceManager.sidecarWriteConnector(for: song)
                 plog("📝 Sidecar: writing sidecars for '\(song.title)' filePath=\(song.filePath)")
-                return await SidecarWriteService.shared.writeSidecars(
+                let writeResult = await SidecarWriteService.shared.writeSidecars(
                     for: song,
                     using: connector,
                     coverData: coverData,
                     lyricsLines: lyricsLines
                 )
+                if writeResult.coverWritten || writeResult.lyricsWritten {
+                    await sourceManager.invalidateDownloadCacheAfterSidecarWrite(for: song)
+                }
+                return writeResult
             }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(max(0.1, seconds) * 1_000_000_000))

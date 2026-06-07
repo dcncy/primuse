@@ -170,6 +170,14 @@ protocol ServerLyricsConnector: MusicSourceConnector {
     func fetchServerLyrics(for path: String) async -> String?
 }
 
+/// Implemented by connectors whose `Song.filePath` is an opaque provider
+/// identifier rather than a human-readable path. Scraping can ask for the
+/// real upstream filename when old rows have already persisted the opaque id
+/// as `Song.title`.
+protocol RemoteFileDisplayNameProviding: MusicSourceConnector {
+    func displayName(for path: String) async throws -> String?
+}
+
 /// Implemented by cloud connectors whose identity is rooted in an OAuth
 /// account (Baidu / Aliyun / Dropbox / OneDrive / Google Drive). Lets the
 /// upper layer ask "which user does this token belong to" so multiple

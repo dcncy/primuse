@@ -20,6 +20,186 @@ struct SongFileDeletionResult: Sendable {
     }
 }
 
+struct OfflineDownloadBatchResult: Sendable {
+    let requestedCount: Int
+    let completedCount: Int
+    let failedCount: Int
+    let inProgressCount: Int
+    let byteCount: Int64
+
+    var succeeded: Bool {
+        requestedCount > 0 && completedCount == requestedCount && failedCount == 0 && inProgressCount == 0
+    }
+}
+
+private struct OfflineDownloadSongResult: Sendable {
+    let snapshot: OfflineAudioCacheSnapshot
+    let fallbackByteCount: Int64
+}
+
+private struct OfflineDownloadTaskRecord {
+    let id: UUID
+    let task: Task<Void, Never>
+}
+
+private final class OfflineDirectDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let partial: URL
+    private let initialBytes: Int64
+    private let expectedTotalBytes: Int64?
+    private let onProgress: @Sendable (Int64, Int64?) -> Void
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<HTTPURLResponse, Error>?
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+    private var handle: FileHandle?
+    private var response: HTTPURLResponse?
+    private var downloadedBytes: Int64
+    private var totalBytes: Int64?
+    private var isFinished = false
+    private var lastProgressAt = Date.distantPast
+
+    init(
+        partial: URL,
+        initialBytes: Int64,
+        expectedTotalBytes: Int64?,
+        onProgress: @escaping @Sendable (Int64, Int64?) -> Void
+    ) {
+        self.partial = partial
+        self.initialBytes = initialBytes
+        self.expectedTotalBytes = expectedTotalBytes
+        self.onProgress = onProgress
+        self.downloadedBytes = initialBytes
+        self.totalBytes = expectedTotalBytes
+    }
+
+    func run(request: URLRequest, configuration: URLSessionConfiguration) async throws -> HTTPURLResponse {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<HTTPURLResponse, Error>) in
+                lock.lock()
+                continuation = cont
+                let session = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
+                self.session = session
+                let task = session.dataTask(with: request)
+                self.task = task
+                lock.unlock()
+                task.resume()
+            }
+        } onCancel: { [weak self] in
+            self?.task?.cancel()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let http = response as? HTTPURLResponse else {
+            finish(throwing: SourceError.connectionFailed("Offline download returned a non-HTTP response"))
+            completionHandler(.cancel)
+            return
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            finish(throwing: CloudDriveError.apiError(http.statusCode, "Offline direct download failed"))
+            completionHandler(.cancel)
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: partial.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if !FileManager.default.fileExists(atPath: partial.path) {
+                FileManager.default.createFile(atPath: partial.path, contents: nil)
+            }
+            let handle = try FileHandle(forWritingTo: partial)
+            if initialBytes > 0, http.statusCode == 206 {
+                try handle.seekToEnd()
+                downloadedBytes = initialBytes
+            } else {
+                try handle.truncate(atOffset: 0)
+                downloadedBytes = 0
+            }
+            self.handle = handle
+            self.response = http
+            totalBytes = totalBytes(from: http, fallbackBodyBytes: response.expectedContentLength)
+            onProgress(downloadedBytes, totalBytes)
+            completionHandler(.allow)
+        } catch {
+            finish(throwing: error)
+            completionHandler(.cancel)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        do {
+            try handle?.write(contentsOf: data)
+            downloadedBytes += Int64(data.count)
+            let now = Date()
+            if downloadedBytes >= totalBytes ?? Int64.max || now.timeIntervalSince(lastProgressAt) >= 0.25 {
+                lastProgressAt = now
+                onProgress(downloadedBytes, totalBytes)
+            }
+        } catch {
+            finish(throwing: error)
+            dataTask.cancel()
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        try? handle?.close()
+        handle = nil
+        session.finishTasksAndInvalidate()
+        if let error {
+            finish(throwing: error)
+        } else if let response {
+            onProgress(downloadedBytes, totalBytes)
+            finish(returning: response)
+        } else {
+            finish(throwing: SourceError.connectionFailed("Offline download completed without a response"))
+        }
+    }
+
+    private func totalBytes(from response: HTTPURLResponse, fallbackBodyBytes: Int64) -> Int64? {
+        if let total = Self.totalBytesFromContentRange(response.value(forHTTPHeaderField: "Content-Range")) {
+            return total
+        }
+        if fallbackBodyBytes > 0 {
+            return downloadedBytes + fallbackBodyBytes
+        }
+        return expectedTotalBytes
+    }
+
+    private static func totalBytesFromContentRange(_ header: String?) -> Int64? {
+        guard let header, let slash = header.lastIndex(of: "/") else { return nil }
+        let value = header[header.index(after: slash)...]
+        guard value != "*" else { return nil }
+        return Int64(value)
+    }
+
+    private func finish(returning response: HTTPURLResponse) {
+        finish { $0.resume(returning: response) }
+    }
+
+    private func finish(throwing error: Error) {
+        finish { $0.resume(throwing: error) }
+    }
+
+    private func finish(_ resume: (CheckedContinuation<HTTPURLResponse, Error>) -> Void) {
+        lock.lock()
+        guard !isFinished, let continuation else {
+            lock.unlock()
+            return
+        }
+        isFinished = true
+        self.continuation = nil
+        lock.unlock()
+        resume(continuation)
+    }
+}
+
 enum SourceDiagnosticStatus: Sendable {
     case passed
     case warning
@@ -82,6 +262,7 @@ final class SourceManager {
     private var connectors: [String: any MusicSourceConnector] = [:]
     private let sourcesProvider: @Sendable () async throws -> [MusicSource]
     private(set) var offlineAudioSnapshots: [String: OfflineAudioCacheSnapshot] = [:]
+    private var offlineDownloadTasks: [String: OfflineDownloadTaskRecord] = [:]
 
     init(database: LibraryDatabase) {
         self.sourcesProvider = {
@@ -812,6 +993,8 @@ final class SourceManager {
     // MARK: - Audio Cache
 
     private static let audioCacheDirName = "primuse_audio_cache"
+    private static let offlineBatchConcurrency = 2
+    private static let directDownloadUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
     private func audioCacheDirectory(for sourceID: String) -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -890,28 +1073,112 @@ final class SourceManager {
     }
 
     func downloadForOffline(song: Song) {
-        guard offlineAudioSnapshots[song.id]?.isDownloading != true else { return }
-        Task { [weak self] in
-            await self?.performOfflineDownload(song)
-        }
+        _ = offlineDownloadTask(for: song)
     }
 
     func downloadForOffline(songs: [Song]) {
         Task { [weak self] in
-            for song in songs.filteredPlayable() {
-                guard !Task.isCancelled else { break }
-                await self?.performOfflineDownload(song)
-            }
+            _ = await self?.downloadForOfflineBatch(songs: songs)
         }
     }
 
+    func downloadForOfflineBatch(songs: [Song]) async -> OfflineDownloadBatchResult {
+        let playableSongs = songs.filteredPlayable()
+        var completedCount = 0
+        var failedCount = 0
+        var inProgressCount = 0
+        var byteCount: Int64 = 0
+        let maxConcurrent = min(Self.offlineBatchConcurrency, max(playableSongs.count, 1))
+
+        plog("⬇️ Offline batch start songs=\(playableSongs.count) concurrency=\(maxConcurrent)")
+
+        await withTaskGroup(of: OfflineDownloadSongResult.self) { group in
+            var nextIndex = 0
+
+            func enqueueNext() {
+                guard nextIndex < playableSongs.count else { return }
+                let song = playableSongs[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    await self.waitForOfflineDownload(song)
+                    return OfflineDownloadSongResult(
+                        snapshot: await self.offlineAudioSnapshot(for: song),
+                        fallbackByteCount: max(song.fileSize, 0)
+                    )
+                }
+            }
+
+            for _ in 0..<maxConcurrent { enqueueNext() }
+
+            while let result = await group.next() {
+                let snapshot = result.snapshot
+                switch snapshot.state {
+                case .cached, .pinned:
+                    completedCount += 1
+                    byteCount += snapshot.byteCount ?? result.fallbackByteCount
+                case .failed:
+                    failedCount += 1
+                case .downloading:
+                    inProgressCount += 1
+                case .notCached:
+                    failedCount += 1
+                }
+
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    continue
+                }
+                enqueueNext()
+            }
+        }
+
+        plog("⬇️ Offline batch done requested=\(playableSongs.count) completed=\(completedCount) failed=\(failedCount) inProgress=\(inProgressCount) bytes=\(byteCount / 1024 / 1024)MB")
+
+        return OfflineDownloadBatchResult(
+            requestedCount: playableSongs.count,
+            completedCount: completedCount,
+            failedCount: failedCount,
+            inProgressCount: inProgressCount,
+            byteCount: byteCount
+        )
+    }
+
     func removeOfflineDownload(song: Song) {
+        offlineDownloadTasks[song.id]?.task.cancel()
+        offlineDownloadTasks[song.id] = nil
         deleteAudioCache(for: song)
         offlineAudioSnapshots[song.id] = .notCached
     }
 
+    private func waitForOfflineDownload(_ song: Song) async {
+        let task = offlineDownloadTask(for: song)
+        await task.value
+    }
+
+    private func offlineDownloadTask(for song: Song) -> Task<Void, Never> {
+        if let record = offlineDownloadTasks[song.id] {
+            plog("↩️ Offline: join existing download '\(song.title)'")
+            return record.task
+        }
+
+        let runID = UUID()
+        let songID = song.id
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performOfflineDownload(song)
+            self.finishOfflineDownloadTask(songID: songID, runID: runID)
+        }
+        offlineDownloadTasks[songID] = OfflineDownloadTaskRecord(id: runID, task: task)
+        return task
+    }
+
+    private func finishOfflineDownloadTask(songID: String, runID: UUID) {
+        guard offlineDownloadTasks[songID]?.id == runID else { return }
+        offlineDownloadTasks[songID] = nil
+    }
+
     private func performOfflineDownload(_ song: Song) async {
-        guard offlineAudioSnapshots[song.id]?.isDownloading != true else { return }
+        let startedAt = Date()
         let relativePath = audioCacheRelativePath(for: song)
         let target = cacheURL(for: song)
 
@@ -923,6 +1190,7 @@ final class SourceManager {
         )
 
         do {
+            try Task.checkCancellation()
             if FileManager.default.fileExists(atPath: target.path) {
                 let size = fileSize(at: target)
                 await AudioCacheManager.shared.pin(path: relativePath, byteCount: size)
@@ -945,7 +1213,17 @@ final class SourceManager {
             try? FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
             await AudioCacheManager.shared.evictIfNeeded(reserveBytes: max(song.fileSize, 10_485_760))
 
-            if source.supportsRangeStreaming, song.fileSize > 0 {
+            if let oneDrive = connector as? OneDriveSource {
+                do {
+                    let directURL = try await oneDrive.publicDownloadURL(path: song.filePath)
+                    try await downloadOfflineFromDirectURL(directURL, song: song, target: target)
+                } catch {
+                    await oneDrive.invalidateCachedDownloadURL(path: song.filePath)
+                    plog("↩️ Offline direct retry with fresh OneDrive URL for '\(song.title)': \(error.localizedDescription)")
+                    let directURL = try await oneDrive.publicDownloadURL(path: song.filePath, forceRefresh: true)
+                    try await downloadOfflineFromDirectURL(directURL, song: song, target: target)
+                }
+            } else if source.supportsRangeStreaming, song.fileSize > 0 {
                 try await downloadOfflineByRanges(song: song, connector: connector, target: target)
             } else if let streamURL = try await connector.streamingURL(for: song.filePath) {
                 try await downloadOfflineFromURL(streamURL, song: song, target: target)
@@ -954,6 +1232,7 @@ final class SourceManager {
                 try copyOfflineFile(from: localURL, to: target)
             }
 
+            try Task.checkCancellation()
             let size = fileSize(at: target)
             await AudioCacheManager.shared.markDownloaded(path: relativePath, byteCount: size, pinned: true)
             offlineAudioSnapshots[song.id] = OfflineAudioCacheSnapshot(
@@ -962,16 +1241,22 @@ final class SourceManager {
                 byteCount: size,
                 errorMessage: nil
             )
-            plog("✅ Offline: '\(song.title)' downloaded and pinned")
+            plog(String(format: "✅ Offline: '%@' downloaded and pinned size=%lldKB elapsed=%.1fs", song.title, (size ?? 0) / 1024, Date().timeIntervalSince(startedAt)))
         } catch {
-            try? FileManager.default.removeItem(at: URL(fileURLWithPath: target.path + ".offline"))
+            if Task.isCancelled {
+                offlineAudioSnapshots[song.id] = .notCached
+                plog(String(format: "↩️ Offline download cancelled for '%@' after %.1fs", song.title, Date().timeIntervalSince(startedAt)))
+                return
+            }
+            let partial = URL(fileURLWithPath: target.path + ".offline")
+            let partialSize = byteSize(at: partial)
             offlineAudioSnapshots[song.id] = OfflineAudioCacheSnapshot(
                 state: .failed,
                 progress: nil,
-                byteCount: nil,
+                byteCount: partialSize > 0 ? partialSize : nil,
                 errorMessage: error.localizedDescription
             )
-            plog("⚠️ Offline download failed for '\(song.title)': \(error.localizedDescription)")
+            plog(String(format: "⚠️ Offline download failed for '%@' after %.1fs partial=%lldKB: %@", song.title, Date().timeIntervalSince(startedAt), partialSize / 1024, error.localizedDescription))
         }
     }
 
@@ -981,11 +1266,31 @@ final class SourceManager {
         target: URL
     ) async throws {
         let partial = URL(fileURLWithPath: target.path + ".offline")
-        try? FileManager.default.removeItem(at: partial)
-        FileManager.default.createFile(atPath: partial.path, contents: nil)
+        let existingSize = byteSize(at: partial)
+        if existingSize >= song.fileSize, song.fileSize > 0 {
+            try? FileManager.default.removeItem(at: target)
+            try FileManager.default.moveItem(at: partial, to: target)
+            return
+        }
+        if existingSize > song.fileSize {
+            try? FileManager.default.removeItem(at: partial)
+        }
+        if !FileManager.default.fileExists(atPath: partial.path) {
+            FileManager.default.createFile(atPath: partial.path, contents: nil)
+        }
         let handle = try FileHandle(forWritingTo: partial)
         let chunkSize: Int64 = 2 * 1024 * 1024
-        var offset: Int64 = 0
+        var offset: Int64 = max(0, min(byteSize(at: partial), song.fileSize))
+        if offset > 0 {
+            plog("↩️ Offline resume '\(song.title)' from \(offset / 1024)KB / \(song.fileSize / 1024)KB")
+        }
+        try handle.seek(toOffset: UInt64(offset))
+        offlineAudioSnapshots[song.id] = OfflineAudioCacheSnapshot(
+            state: .downloading,
+            progress: song.fileSize > 0 ? min(0.99, Double(offset) / Double(song.fileSize)) : nil,
+            byteCount: song.fileSize,
+            errorMessage: nil
+        )
 
         do {
             while offset < song.fileSize {
@@ -1008,9 +1313,72 @@ final class SourceManager {
             try FileManager.default.moveItem(at: partial, to: target)
         } catch {
             try? handle.close()
-            try? FileManager.default.removeItem(at: partial)
             throw error
         }
+    }
+
+    private func downloadOfflineFromDirectURL(_ url: URL, song: Song, target: URL) async throws {
+        let partial = URL(fileURLWithPath: target.path + ".offline")
+        let existingSize = byteSize(at: partial)
+        if existingSize >= song.fileSize, song.fileSize > 0 {
+            try? FileManager.default.removeItem(at: target)
+            try FileManager.default.moveItem(at: partial, to: target)
+            return
+        }
+        if existingSize > song.fileSize, song.fileSize > 0 {
+            try? FileManager.default.removeItem(at: partial)
+        }
+
+        let resumeOffset = max(0, min(byteSize(at: partial), max(song.fileSize, 0)))
+        if resumeOffset > 0 {
+            plog("↩️ Offline direct resume '\(song.title)' from \(resumeOffset / 1024)KB / \(song.fileSize / 1024)KB")
+        } else {
+            plog("⬇️ Offline direct download '\(song.title)' via \(url.host ?? "?")")
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 60
+        request.setValue(Self.directDownloadUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        if resumeOffset > 0 {
+            request.setValue("bytes=\(resumeOffset)-", forHTTPHeaderField: "Range")
+        }
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 60 * 60
+        let songID = song.id
+        let expectedTotal = song.fileSize > 0 ? song.fileSize : nil
+        let delegate = OfflineDirectDownloadDelegate(
+            partial: partial,
+            initialBytes: resumeOffset,
+            expectedTotalBytes: expectedTotal
+        ) { [weak self] downloadedBytes, totalBytes in
+            Task { @MainActor [weak self] in
+                let total = totalBytes ?? expectedTotal
+                self?.offlineAudioSnapshots[songID] = OfflineAudioCacheSnapshot(
+                    state: .downloading,
+                    progress: total.map { $0 > 0 ? min(0.99, Double(downloadedBytes) / Double($0)) : 0 },
+                    byteCount: total,
+                    errorMessage: nil
+                )
+            }
+        }
+
+        let startedAt = Date()
+        let response = try await delegate.run(request: request, configuration: config)
+        guard response.statusCode == 200 || response.statusCode == 206 else {
+            throw CloudDriveError.apiError(response.statusCode, "Offline direct download failed")
+        }
+
+        let finalSize = byteSize(at: partial)
+        if song.fileSize > 0, finalSize < song.fileSize {
+            throw SourceError.connectionFailed("Offline direct download incomplete: \(finalSize)/\(song.fileSize)")
+        }
+        try? FileManager.default.removeItem(at: target)
+        try FileManager.default.moveItem(at: partial, to: target)
+        plog(String(format: "✅ Offline direct download '%@' size=%lldKB elapsed=%.1fs", song.title, finalSize / 1024, Date().timeIntervalSince(startedAt)))
     }
 
     private func downloadOfflineFromURL(_ url: URL, song: Song, target: URL) async throws {
@@ -1041,6 +1409,13 @@ final class SourceManager {
         guard let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey]),
               let size = values.totalFileAllocatedSize else { return nil }
         return Int64(size)
+    }
+
+    private func byteSize(at url: URL) -> Int64 {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int64 else {
+            return 0
+        }
+        return size
     }
 
     @discardableResult
@@ -1138,8 +1513,9 @@ final class SourceManager {
 
     /// 给「存储管理」页用的统计 —— 把 audio cache 拆成三类:
     /// - completed: 完整下完的歌曲 (rename 成 final 名), 受 2GB LRU 控制
-    /// - partial: `.partial` / `.partial.prewarmed` 半成品 (用户跳过 /
-    ///   prewarm 完没听), 启动时 7 天清一次, 也可以这里手动一键清
+    /// - partial: `.partial` / `.partial.prewarmed` / `.offline` 半成品
+    ///   (用户跳过 / prewarm 完没听 / 离线下载中断), 启动时 7 天清一次,
+    ///   也可以这里手动一键清
     /// - orphaned: 子目录里的文件, 但 sourceID 已经不在 sources 表里
     ///   (用户删过源 / source ID 变更), 没人会再访问, 全是垃圾
     struct AudioCacheBreakdown {
@@ -1214,6 +1590,8 @@ final class SourceManager {
                 if name.hasSuffix(".partial.prewarmed") {
                     // marker 本身, 算到 prewarm 类
                     result.prewarmSeedBytes += size
+                } else if name.hasSuffix(".offline") {
+                    result.partialBytes += size
                 } else if name.hasSuffix(".partial") {
                     let markerPath = fileURL.path + CloudPlaybackSource.prewarmMarkerSuffix
                     if activeSessionPaths.contains(fileURL.path) {
@@ -1247,7 +1625,7 @@ final class SourceManager {
         }
     }
 
-    /// 一键清掉所有 `.partial` 半成品 (无视 mtime, 等价于用户主动决定
+    /// 一键清掉所有 `.partial` / `.offline` 半成品 (无视 mtime, 等价于用户主动决定
     /// 「不要任何半下载文件了」)。正在 streaming 的歌会立即变成 cache miss
     /// 重新下, 但不会丢功能。
     @discardableResult
@@ -1262,7 +1640,7 @@ final class SourceManager {
         var partials: [(URL, Int64)] = []
         while let fileURL = enumerator.nextObject() as? URL {
             let name = fileURL.lastPathComponent
-            guard name.hasSuffix(".partial") || name.hasSuffix(".partial.prewarmed") else { continue }
+            guard name.hasSuffix(".partial") || name.hasSuffix(".partial.prewarmed") || name.hasSuffix(".offline") else { continue }
             let size = Int64((try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
             partials.append((fileURL, size))
         }
@@ -1330,6 +1708,7 @@ final class SourceManager {
         let partial = URL(fileURLWithPath: url.path + ".partial")
         try? FileManager.default.removeItem(at: partial)
         try? FileManager.default.removeItem(at: URL(fileURLWithPath: partial.path + CloudPlaybackSource.prewarmMarkerSuffix))
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + ".offline"))
     }
 
     func deleteSourceCaches(sourceID: String) {
@@ -1817,6 +2196,14 @@ final class SourceManager {
         return conn
     }
 
+    func remoteDisplayName(for song: Song) async throws -> String? {
+        let conn = try await connectorForSong(song)
+        guard let provider = conn as? RemoteFileDisplayNameProviding else { return nil }
+        let name = try await provider.displayName(for: song.filePath)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return name?.isEmpty == false ? name : nil
+    }
+
     /// Lyrics / cover / scrape 都直接复用 playback connector(cached pool)。
     /// 之前用独立 instance"避免 actor blocking",但实测 connector 内 fetchRange
     /// 全是 await 点(让出 actor), 多个调用交错执行不会真 serial block。
@@ -1830,6 +2217,27 @@ final class SourceManager {
         let conn = connector(for: source)  // cache: true, 复用
         try await conn.connect()  // idempotent on isLoggedIn
         return conn
+    }
+
+    /// Sidecar 写回不复用播放/缓存 connector。OneDrive 等云盘 connector
+    /// 内部会缓存直链和维护 actor 状态, 上传 sidecar 时复用同一个实例容易把
+    /// 正在播放/离线缓存的 range 请求拖慢或卡住。
+    func sidecarWriteConnector(for song: Song) async throws -> any MusicSourceConnector {
+        let sources = try await sourcesProvider()
+        guard let source = sources.first(where: { $0.id == song.sourceID }) else {
+            throw SourceError.fileNotFound("Source not found for song: \(song.title)")
+        }
+        let conn = connector(for: source, cache: false)
+        try await conn.connect()
+        return conn
+    }
+
+    func invalidateDownloadCacheAfterSidecarWrite(for song: Song) async {
+        guard let conn = try? await connectorForSong(song),
+              let oneDrive = conn as? OneDriveSource else {
+            return
+        }
+        await oneDrive.invalidateCachedDownloadURL(path: song.filePath)
     }
 
     /// 把一次播放回报给"服务端曲库源"(Subsonic/Navidrome 等)。

@@ -372,6 +372,15 @@ private final class State: @unchecked Sendable {
     /// — Baidu's anti-abuse then rate-limits the account globally.
     /// Cleared on the next successful serve.
     private var fetchDisabled: Bool = false
+    /// Set when AudioPlayerService finalizes the stream on stop / track
+    /// change. Decoder reads arriving after that point belong to the old
+    /// source and should fail fast instead of starting stale OneDrive Range
+    /// work that can block the next track's serialized connection.
+    private var closed: Bool = false
+    /// Foreground fetch Tasks currently bridging async connector reads into
+    /// SFB's synchronous read callback. Timeouts and track changes cancel
+    /// these so old cloud requests do not keep running behind the player.
+    private var foregroundFetchTasks: [UUID: Task<Void, Never>] = [:]
 
     /// 调试用: 记录从首次 serve 到现在的累积 fetch 次数和耗时。
     /// 方便诊断"卡顿 N 秒"是几次 fetch 累加的。
@@ -448,6 +457,14 @@ private final class State: @unchecked Sendable {
         errorOut: AutoreleasingUnsafeMutablePointer<NSError?>?
     ) -> Data? {
         if offset >= totalLength { return Data() }
+        if isClosed() {
+            errorOut?.pointee = NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(ECANCELED),
+                userInfo: [NSLocalizedDescriptionKey: "Cloud stream session closed"]
+            )
+            return nil
+        }
         let endOffset = min(offset + length, totalLength)
 
         let served: Data?
@@ -560,14 +577,32 @@ private final class State: @unchecked Sendable {
             let result = FetchResultBox()
             let semaphore = DispatchSemaphore(value: 0)
             let startedAt = Date()
-            Task { [connectorFetch] in
-                do { result.data = try await connectorFetch(chunkStart, want) }
-                catch { result.error = error }
-                semaphore.signal()
+            let fetchTask = Task<Void, Never> { [connectorFetch] in
+                defer { semaphore.signal() }
+                do {
+                    if Task.isCancelled {
+                        result.error = CancellationError()
+                        return
+                    }
+                    result.data = try await connectorFetch(chunkStart, want)
+                } catch {
+                    result.error = error
+                }
+            }
+            guard let fetchID = registerForegroundFetch(fetchTask) else {
+                fetchTask.cancel()
+                errorOut?.pointee = NSError(
+                    domain: NSPOSIXErrorDomain,
+                    code: Int(ECANCELED),
+                    userInfo: [NSLocalizedDescriptionKey: "Cloud stream session closed"]
+                )
+                return nil
             }
             let timeoutResult = semaphore.wait(timeout: .now() + .seconds(30))
+            releaseForegroundFetch(id: fetchID)
             let elapsed = Date().timeIntervalSince(startedAt)
             if timeoutResult == .timedOut {
+                fetchTask.cancel()
                 lock.lock(); fetchDisabled = true; lock.unlock()
                 plog(String(format: "⚠️ Cloud stream '%@' fetch timeout chunkStart=%lld len=%lld after %.1fs",
                             label, chunkStart, want, elapsed))
@@ -580,6 +615,15 @@ private final class State: @unchecked Sendable {
             }
 
             if let error = result.error {
+                if error is CancellationError {
+                    lock.lock(); fetchDisabled = true; lock.unlock()
+                    errorOut?.pointee = NSError(
+                        domain: NSPOSIXErrorDomain,
+                        code: Int(ECANCELED),
+                        userInfo: [NSLocalizedDescriptionKey: "Cloud fetch cancelled"]
+                    )
+                    return nil
+                }
                 // Disable further prefetches — see fetchDisabled doc.
                 lock.lock(); fetchDisabled = true; lock.unlock()
                 plog(String(format: "⚠️ Cloud stream '%@' fetch failed chunkStart=%lld len=%lld after %.2fs: %@",
@@ -684,6 +728,7 @@ private final class State: @unchecked Sendable {
                 do {
                     let data = try await connectorFetch(nextChunkStart, want)
                     guard !data.isEmpty else { return }
+                    guard !self.isClosed() else { return }
                     self.writeToCache(offset: nextChunkStart, data: data)
                 } catch {
                     // Disable the prefetch path until a user-facing serve
@@ -706,6 +751,7 @@ private final class State: @unchecked Sendable {
         // Don't prefetch when the last serve failed — letting prefetch
         // continue would re-trigger the same failure dozens of times
         // while the user-facing serve waits on its own retry path.
+        if closed { return false }
         if fetchDisabled { return false }
         if prefetchInFlight.contains(offset) { return false }
         if isRangeCovered(offset: offset, endOffset: endOffset) { return false }
@@ -723,6 +769,37 @@ private final class State: @unchecked Sendable {
         lock.lock()
         fetchDisabled = true
         lock.unlock()
+    }
+
+    private func isClosed() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed
+    }
+
+    private func registerForegroundFetch(_ task: Task<Void, Never>) -> UUID? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { return nil }
+        let id = UUID()
+        foregroundFetchTasks[id] = task
+        return id
+    }
+
+    private func releaseForegroundFetch(id: UUID) {
+        lock.lock()
+        foregroundFetchTasks[id] = nil
+        lock.unlock()
+    }
+
+    private func closeAndCancelForegroundFetches() -> [Task<Void, Never>] {
+        lock.lock()
+        closed = true
+        fetchDisabled = true
+        let tasks = Array(foregroundFetchTasks.values)
+        foregroundFetchTasks.removeAll()
+        lock.unlock()
+        return tasks
     }
 
     /// 把 cacheHit 累计字段加锁更新成原子动作。serve 多入口都要计数, 抽出
@@ -897,6 +974,7 @@ private final class State: @unchecked Sendable {
         // 本首歌的 fetch / cache / prefetch 表现。emitSessionSummary 内部
         // dedupe, 多次调用只输出一次。
         emitSessionSummary()
+        closeAndCancelForegroundFetches().forEach { $0.cancel() }
         // Audio Cache 关闭时 streaming 文件只放在 NSTemporaryDirectory 供
         // 本次 SFB 解码读取。不要在用户切歌/停止后继续补齐临时文件, 否则
         // 会把"边播边取"退化成后台整首下载。

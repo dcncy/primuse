@@ -2,7 +2,7 @@ import Foundation
 import PrimuseKit
 
 /// OneDrive Source — Microsoft Graph API
-actor OneDriveSource: MusicSourceConnector, OAuthCloudSource {
+actor OneDriveSource: MusicSourceConnector, OAuthCloudSource, RemoteFileDisplayNameProviding {
     let sourceID: String
     nonisolated let supportsSidecarWriting = true   // 刮削的歌词/封面写回 OneDrive(上传 sidecar)
     private let helper: CloudDriveHelper
@@ -129,8 +129,29 @@ actor OneDriveSource: MusicSourceConnector, OAuthCloudSource {
     /// 暴露预授权下载直链,供大文件「整文件渐进下载」绕开逐 chunk Range。
     /// OneDrive 服务端对大文件的分段 Range 会挂死(冷文件 hydration),但整文件直接
     /// 下载很快 —— 大文件改走 StreamingDownloadDecoder 一次性渐进下载。
-    func publicDownloadURL(path: String) async throws -> URL {
-        try await getDownloadURL(for: path)
+    func publicDownloadURL(path: String, forceRefresh: Bool = false) async throws -> URL {
+        if forceRefresh {
+            invalidateDownloadURL(for: path)
+        }
+        return try await getDownloadURL(for: path)
+    }
+
+    func invalidateCachedDownloadURL(path: String) {
+        invalidateDownloadURL(for: path)
+        plog("☁️ OneDrive downloadUrl invalidated for item=\(path.prefix(24))…")
+    }
+
+    func displayName(for path: String) async throws -> String? {
+        let token = try await getToken()
+        let (data, http) = try await helper.makeAuthorizedRequest(
+            url: URL(string: "\(Self.graphBase)/me/drive/items/\(path)?$select=name")!,
+            accessToken: token
+        )
+        guard http.statusCode == 200 else {
+            throw CloudDriveError.apiError(http.statusCode, "OneDrive item name lookup")
+        }
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        return json["name"] as? String
     }
 
     /// 把刮削的 sidecar(歌词 .lrc / 封面 -cover.jpg)上传回 OneDrive,放源歌曲同目录、
@@ -166,6 +187,7 @@ actor OneDriveSource: MusicSourceConnector, OAuthCloudSource {
         guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw CloudDriveError.apiError((resp as? HTTPURLResponse)?.statusCode ?? 0, "sidecar upload failed")
         }
+        invalidateDownloadURL(for: itemID)
         plog("📁 OneDrive sidecar uploaded: \(sidecarName)")
     }
 

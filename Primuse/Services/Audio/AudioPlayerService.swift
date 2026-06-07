@@ -2051,9 +2051,19 @@ final class AudioPlayerService {
     }
 
     func setQueue(_ songs: [Song], startAt index: Int = 0) {
+        guard !songs.isEmpty else {
+            plog("🎶 setQueue empty — clearing queue")
+            clearQueue()
+            return
+        }
+
         queueGeneration += 1
         queueEntries = songs.map { QueueEntry(song: $0) }
-        currentIndex = min(index, songs.count - 1)
+        currentIndex = max(0, min(index, songs.count - 1))
+        let currentTitle = queueEntries[currentIndex].song.title
+        let firstTitle = queueEntries.first?.song.title ?? "-"
+        let lastTitle = queueEntries.last?.song.title ?? "-"
+        plog("🎶 setQueue count=\(songs.count) startIndex=\(currentIndex) current='\(currentTitle)' first='\(firstTitle)' last='\(lastTitle)'")
         // Drop any pre-built next round — the queue itself changed, so
         // prior shuffle plans (and their indices into the old queue)
         // are stale and would index out-of-bounds on wrap.

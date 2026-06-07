@@ -2,7 +2,7 @@ import Foundation
 import PrimuseKit
 
 /// Google Drive Source — Drive API v3
-actor GoogleDriveSource: MusicSourceConnector, OAuthCloudSource {
+actor GoogleDriveSource: MusicSourceConnector, OAuthCloudSource, RemoteFileDisplayNameProviding {
     let sourceID: String
     nonisolated let supportsSidecarWriting = true   // 刮削歌词/封面写回 Google Drive 同目录
     private let helper: CloudDriveHelper
@@ -144,6 +144,18 @@ actor GoogleDriveSource: MusicSourceConnector, OAuthCloudSource {
     func streamData(for path: String) async throws -> AsyncThrowingStream<Data, Error> {
         _ = try await localURL(for: path)
         return helper.streamFromCache(path: path)
+    }
+
+    func displayName(for path: String) async throws -> String? {
+        let token = try await getToken()
+        var components = URLComponents(string: "\(Self.apiBase)/files/\(path)")!
+        components.queryItems = [.init(name: "fields", value: "name")]
+        let (data, http) = try await helper.makeAuthorizedRequest(url: components.url!, accessToken: token)
+        guard http.statusCode == 200 else {
+            throw CloudDriveError.apiError(http.statusCode, "Google Drive file name lookup")
+        }
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        return json["name"] as? String
     }
 
     func scanAudioFiles(from path: String) async throws -> AsyncThrowingStream<RemoteFileItem, Error> {

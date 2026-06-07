@@ -157,7 +157,9 @@ struct SongRowView: View {
                             Label(String(localized: "similar_songs"), systemImage: "sparkles")
                         }
 
-                        offlineActionButton(snapshot: offline)
+                        if supportsOfflineAudioCache {
+                            offlineActionButtons(snapshot: offline)
+                        }
 
                         Button {
                             showSongInfo = true
@@ -247,7 +249,9 @@ struct SongRowView: View {
                     Label(String(localized: "similar_songs"), systemImage: "sparkles")
                 }
 
-                offlineActionButton(snapshot: offline)
+                if supportsOfflineAudioCache {
+                    offlineActionButtons(snapshot: offline)
+                }
 
                 Button {
                     showSongInfo = true
@@ -311,8 +315,12 @@ struct SongRowView: View {
         }
     }
 
+    private var supportsOfflineAudioCache: Bool {
+        song.sourceID != AppleMusicLibraryService.systemSourceID
+    }
+
     @ViewBuilder
-    private func offlineActionButton(snapshot: OfflineAudioCacheSnapshot) -> some View {
+    private func offlineActionButtons(snapshot: OfflineAudioCacheSnapshot) -> some View {
         switch snapshot.state {
         case .downloading:
             Button {} label: {
@@ -323,7 +331,7 @@ struct SongRowView: View {
             Button(role: .destructive) {
                 sourceManager.removeOfflineDownload(song: song)
             } label: {
-                Label(String(localized: "offline_remove_download"), systemImage: "trash")
+                Label(String(localized: "offline_remove_song_cache"), systemImage: "trash")
             }
         case .cached:
             Button {
@@ -331,17 +339,29 @@ struct SongRowView: View {
             } label: {
                 Label(String(localized: "offline_keep_cached"), systemImage: "pin")
             }
+
+            Button(role: .destructive) {
+                sourceManager.removeOfflineDownload(song: song)
+            } label: {
+                Label(String(localized: "offline_remove_cached_file"), systemImage: "trash")
+            }
         case .failed:
             Button {
                 sourceManager.downloadForOffline(song: song)
             } label: {
                 Label(String(localized: "offline_retry_download"), systemImage: "arrow.clockwise")
             }
+
+            Button(role: .destructive) {
+                sourceManager.removeOfflineDownload(song: song)
+            } label: {
+                Label(String(localized: "offline_clear_failed_download"), systemImage: "trash")
+            }
         case .notCached:
             Button {
                 sourceManager.downloadForOffline(song: song)
             } label: {
-                Label(String(localized: "offline_download"), systemImage: "arrow.down.circle")
+                Label(String(localized: "offline_cache_song"), systemImage: "arrow.down.circle")
             }
         }
     }
@@ -377,16 +397,21 @@ private struct OfflineAudioStatusBadge: View {
                 .frame(width: 20, height: 20)
                 .accessibilityLabel("offline_downloading")
         case .pinned:
-            Image(systemName: "arrow.down.circle.fill")
+            Image(systemName: "checkmark.circle.fill")
                 .font(.callout)
-                .foregroundStyle(.tint)
+                .foregroundStyle(.green)
                 .accessibilityLabel("offline_available")
+        case .cached:
+            Image(systemName: "checkmark.circle")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("offline_cached")
         case .failed:
             Image(systemName: "exclamationmark.circle")
                 .font(.callout)
                 .foregroundStyle(.orange)
                 .accessibilityLabel("offline_download_failed")
-        case .cached, .notCached:
+        case .notCached:
             EmptyView()
         }
     }

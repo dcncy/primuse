@@ -517,7 +517,7 @@ targets:
         # Top Shelf 卡片点击经 primuse:// deep link 唤起 app(App.swift onOpenURL),
         # tvOS 必须在此注册该 scheme 才会把 URL 路由回来
         CFBundleURLTypes:
-          - CFBundleURLName: "com.welape.yuanyin.tv"
+          - CFBundleURLName: "com.welape.yuanyin"
             CFBundleURLSchemes:
               - primuse
     settings:
@@ -558,7 +558,9 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).TopShelfProvider
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.tv.topshelf
+        # 扩展 id 必须是「主 app id + 恰好一段」,主 app 现为 com.welape.yuanyin,
+        # 故用 com.welape.yuanyin.topshelf(.tv.topshelf 有两段会被拒 90347)。
+        PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin.topshelf
         SKIP_INSTALL: YES
         TVOS_DEPLOYMENT_TARGET: "17.0"
         CODE_SIGN_ENTITLEMENTS: Config/PrimuseTopShelf.entitlements

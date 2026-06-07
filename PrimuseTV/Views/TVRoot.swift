@@ -205,56 +205,63 @@ struct TVBottomBar: View {
 
     private var bar: some View {
         let np = store.nowPlaying
-        return Button(action: openPlayer) {
-            HStack(spacing: 24) {
-                TVArtworkView(coverKey: np.albumID, artist: np.artist, album: np.album,
-                              tint: np.tint, tint2: np.tint2, glyph: np.glyph, size: 62, radius: 8)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(np.title).font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white).lineLimit(1)
-                    Text("\(np.artist) · \(np.album)").font(.system(size: 16))
-                        .foregroundStyle(.white.opacity(0.62)).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                VStack(spacing: 6) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.16)).frame(height: 4)
-                            Capsule().fill(np.tint)
-                                .frame(width: geo.size.width * progress, height: 4)
+        return HStack(spacing: 16) {
+            Button(action: openPlayer) {
+                HStack(spacing: 24) {
+                    TVArtworkView(coverKey: np.albumID, artist: np.artist, album: np.album,
+                                  tint: np.tint, tint2: np.tint2, glyph: np.glyph, size: 62, radius: 8)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(np.title).font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white).lineLimit(1)
+                        Text("\(np.artist) · \(np.album)").font(.system(size: 16))
+                            .foregroundStyle(.white.opacity(0.62)).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    VStack(spacing: 6) {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(.white.opacity(0.16)).frame(height: 4)
+                                Capsule().fill(np.tint)
+                                    .frame(width: geo.size.width * progress, height: 4)
+                            }
                         }
+                        .frame(height: 4)
+                        HStack {
+                            Text(TVFmt.time(np.currentTime))
+                            Spacer()
+                            Text(TVFmt.time(np.duration))
+                        }
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
                     }
-                    .frame(height: 4)
-                    HStack {
-                        Text(TVFmt.time(np.currentTime))
-                        Spacer()
-                        Text(TVFmt.time(np.duration))
-                    }
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .frame(width: 460)
                 }
-                .frame(width: 580)
-                Text("打开播放器")
-                    .font(.system(size: 13, weight: .medium)).tracking(1)
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            .padding(.horizontal, TVSpace.pageH)
-            .frame(height: 96)
-            .frame(maxWidth: .infinity)
-            .background(
-                ZStack {
-                    LinearGradient(colors: [.clear, .black.opacity(0.6), .black.opacity(0.85)],
-                                   startPoint: .top, endPoint: .bottom)
-                    if focused { Color.white.opacity(0.06) }
+                .padding(.leading, TVSpace.pageH)
+                .padding(.trailing, 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 96)
+                .background(focused ? Color.white.opacity(0.06) : .clear)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(.white.opacity(focused ? 0.9 : 0)).frame(height: 3)
                 }
-            )
-            .overlay(alignment: .top) {
-                Rectangle().fill(.white.opacity(focused ? 0.9 : 0)).frame(height: 3)
             }
+            .buttonStyle(TVBareButtonStyle())
+            .focused($focused)
+            .focusEffectDisabled()
+
+            // 独立的播放/暂停 + 下一首键(在底部条直接控,不必进全屏播放页)。
+            TVRoundBtn(icon: store.isPlaying ? "pause.fill" : "play.fill", size: 56, primary: true) {
+                store.togglePlayPause()
+            }
+            TVRoundBtn(icon: "forward.fill", size: 48) { store.next() }
+                .padding(.trailing, TVSpace.pageH)
         }
-        .buttonStyle(TVBareButtonStyle())
-        .focused($focused)
-        .focusEffectDisabled()
+        .frame(height: 96)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(colors: [.clear, .black.opacity(0.6), .black.opacity(0.85)],
+                           startPoint: .top, endPoint: .bottom)
+        )
         .animation(.easeOut(duration: 0.18), value: focused)
     }
 

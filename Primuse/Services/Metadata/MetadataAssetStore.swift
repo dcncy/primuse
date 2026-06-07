@@ -27,7 +27,12 @@ actor MetadataAssetStore {
     private static let redirectPrefixData = Data("REDIRECT:".utf8)
 
     private init(fileManager: FileManager = .default) {
+        // tvOS 只允许写 Caches / tmp;Application Support 不可写(歌词/封面落不了盘)。
+        #if os(tvOS)
+        let appSupport = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        #else
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        #endif
         let rootDirectory = appSupport.appendingPathComponent("Primuse/MetadataAssets", isDirectory: true)
         artworkDirectory = rootDirectory.appendingPathComponent("artwork", isDirectory: true)
         lyricsDirectory = rootDirectory.appendingPathComponent("lyrics", isDirectory: true)

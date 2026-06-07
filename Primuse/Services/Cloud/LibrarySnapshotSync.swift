@@ -67,6 +67,12 @@ final class LibrarySnapshotSync: Sendable {
         if fm.fileExists(atPath: sourcesURL.path) {
             srcInfo = attachSnapshot(record, fileURL: sourcesURL, gzKey: "sourcesGz", assetKey: "sources")
         }
+        // 歌词:把本机已抓到的歌词(MetadataAssetStore 里的 .json)随快照传给 TV。
+        if let blob = Self.gatherLyricsBlob(),
+           let gz = try? (blob as NSData).compressed(using: .zlib) as Data, gz.count < Self.inlineGzLimit {
+            record["lyricsGz"] = gz as CKRecordValue
+            srcInfo += "; lyricsGz=\(gz.count)B"
+        }
         record["modifiedAt"] = Date() as CKRecordValue
         var ok = false
         do {
@@ -108,6 +114,7 @@ final class LibrarySnapshotSync: Sendable {
                 changed = true
             }
             _ = extractSnapshot(record, gzKey: "sourcesGz", assetKey: "sources", to: sourcesURL, fm: fm)
+            Self.restoreLyrics(from: record, fm: fm)
             plog("LibrarySnapshotSync: downloaded snapshot (library=\(changed))")
             return changed
         } catch {
@@ -120,6 +127,39 @@ final class LibrarySnapshotSync: Sendable {
 
     /// 内联阈值:压缩后小于此值就内联进 CKRecord(单字段/整记录上限 1MB,留余量)。
     private static let inlineGzLimit = 800_000
+
+    /// 收集本机 MetadataAssetStore 的全部歌词文件 → {文件名: base64} 的 JSON。
+    private static func gatherLyricsBlob() -> Data? {
+        let dir = MetadataAssetStore.shared.lyricsDirectoryURL
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil) else { return nil }
+        var blob: [String: String] = [:]
+        for f in files where !f.hasDirectoryPath {
+            if let data = try? Data(contentsOf: f), !data.isEmpty {
+                blob[f.lastPathComponent] = data.base64EncodedString()
+            }
+        }
+        guard !blob.isEmpty else { return nil }
+        return try? JSONSerialization.data(withJSONObject: blob)
+    }
+
+    /// tvOS:把快照里的歌词文件还原到本机 MetadataAssetStore(文件名不变,
+    /// cachedLyrics(forSongID:) 即可按同名读回)。
+    private static func restoreLyrics(from record: CKRecord, fm: FileManager) {
+        guard let gzField = record["lyricsGz"] as? Data,
+              let raw = try? (Data(gzField) as NSData).decompressed(using: .zlib) as Data,
+              let blob = (try? JSONSerialization.jsonObject(with: raw)) as? [String: String] else { return }
+        let dir = MetadataAssetStore.shared.lyricsDirectoryURL
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        var n = 0
+        for (name, b64) in blob {
+            if let data = Data(base64Encoded: b64) {
+                try? data.write(to: dir.appendingPathComponent(name))
+                n += 1
+            }
+        }
+        plog("LibrarySnapshotSync: restored \(n) lyrics files")
+    }
 
     /// 把 `fileURL` 的内容压缩后内联进 record;过大则回退 CKAsset。返回简要说明供日志。
     @discardableResult

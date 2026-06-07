@@ -14,8 +14,10 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    # 全平台唯一版本号来源:iOS / macOS / tvOS / watchOS 及各扩展统一继承这里,
+    # 各 target 不再单独覆盖,发版只改这一处,避免漏改导致版本不一致。
     MARKETING_VERSION: "1.6.0"
-    CURRENT_PROJECT_VERSION: "12"
+    CURRENT_PROJECT_VERSION: "13"
     DEVELOPMENT_TEAM: "2U97K3U27A"
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: YES
@@ -473,11 +475,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.welape.yuanyin
         CODE_SIGN_ENTITLEMENTS: Config/PrimuseMac.entitlements
         SWIFT_OBJC_BRIDGING_HEADER: Primuse/Primuse-Bridging-Header.h
-        # macOS 独立版本号 — Mac 是新平台首发,从 1.0.0 起步,
-        # 与 iOS 的 MARKETING_VERSION/CURRENT_PROJECT_VERSION 解耦
-        # (即使 bundle ID 相同,iOS 和 macOS 在 ASC 内仍是独立版本流)。
-        MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "2"
+        # 版本号统一继承顶部 settings.base(不再单独维护 macOS 版本流)。
 
   PrimuseTV:
     type: application
@@ -533,8 +531,6 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SWIFT_EMIT_LOC_STRINGS: YES
-        MARKETING_VERSION: "1.6.0"
-        CURRENT_PROJECT_VERSION: "12"
 
   # Apple TV「顶部内容展示」扩展:独立进程,经 App Group 读主 app 预取的曲库数据 + 封面
   PrimuseTopShelf:

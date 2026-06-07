@@ -1,3 +1,5 @@
+<p align="right"><strong>中文</strong> · <a href="README.en.md">English</a></p>
+
 # Primuse (猿音)
 
 原生 iOS / macOS / Apple TV 音乐播放器，支持从 NAS、媒体服务器、云盘及本地网络源串流播放，具备元数据刮削、歌词显示、跨设备同步和外部播放控制能力。

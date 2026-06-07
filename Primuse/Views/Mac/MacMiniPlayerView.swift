@@ -421,15 +421,20 @@ struct MacMiniPlayerView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 30)
                 } else {
+                    // currentIndex 在切歌/换队列瞬间可能越界, 先钳到合法区间,
+                    // 否则下面构造 Range 时 lowerBound > upperBound 会 trap。
+                    let count = player.queue.count
+                    let cur = min(max(player.currentIndex, 0), count - 1)
+
                     if let current = player.currentSong {
                         Text("now_playing")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        queueRow(index: player.currentIndex, song: current, isPlaying: true)
+                        queueRow(index: cur, song: current, isPlaying: true)
                             .padding(.bottom, 4)
                     }
 
-                    let upNext = (player.currentIndex + 1)..<player.queue.count
+                    let upNext = (cur + 1)..<count
                     if !upNext.isEmpty {
                         Text("up_next")
                             .font(.caption.weight(.semibold))
@@ -439,7 +444,7 @@ struct MacMiniPlayerView: View {
                             queueRow(index: idx)
                         }
                     }
-                    let played = 0..<player.currentIndex
+                    let played = 0..<cur
                     if !played.isEmpty {
                         Text("played")
                             .font(.caption.weight(.semibold))
@@ -461,39 +466,43 @@ struct MacMiniPlayerView: View {
         .scrollIndicators(.hidden)
     }
 
+    @ViewBuilder
     private func queueRow(index: Int, song overrideSong: Song? = nil, isPlaying: Bool = false) -> some View {
-        let song = overrideSong ?? player.queue[index]
-        return HStack(spacing: 9) {
-            CachedArtworkView(
-                coverRef: song.coverArtFileName,
-                songID: song.id,
-                size: 32, cornerRadius: 6,
-                sourceID: song.sourceID,
-                filePath: song.filePath
-            )
-            .overlay {
-                if isPlaying {
-                    Color.black.opacity(0.32)
-                        .clipShape(.rect(cornerRadius: 6))
-                    Image(systemName: "waveform")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
+        // LazyVStack 懒渲染时, 队列可能已被切歌/清空缩短, index 不再有效;
+        // 用 indices 判定而非直接下标, 避免越界 trap。
+        if let song = overrideSong ?? (player.queue.indices.contains(index) ? player.queue[index] : nil) {
+            HStack(spacing: 9) {
+                CachedArtworkView(
+                    coverRef: song.coverArtFileName,
+                    songID: song.id,
+                    size: 32, cornerRadius: 6,
+                    sourceID: song.sourceID,
+                    filePath: song.filePath
+                )
+                .overlay {
+                    if isPlaying {
+                        Color.black.opacity(0.32)
+                            .clipShape(.rect(cornerRadius: 6))
+                        Image(systemName: "waveform")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
                 }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(song.title).font(.caption).lineLimit(1)
+                    Text(song.artistName ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
             }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(song.title).font(.caption).lineLimit(1)
-                Text(song.artistName ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(isPlaying ? theme.accentColor.opacity(0.12) : Color.primary.opacity(0.04),
+                        in: .rect(cornerRadius: 8))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                player.currentIndex = index
+                Task { await player.play(song: song) }
             }
-            Spacer()
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(isPlaying ? theme.accentColor.opacity(0.12) : Color.primary.opacity(0.04),
-                    in: .rect(cornerRadius: 8))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            player.currentIndex = index
-            Task { await player.play(song: song) }
         }
     }
 

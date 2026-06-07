@@ -40,9 +40,14 @@ struct QueueView: View {
                     // ForEach lets SwiftUI animate every row's real
                     // position swap, and is also robust to the queue
                     // holding the same song multiple times.
-                    let upNextStart = player.currentIndex + 1
-                    if upNextStart < player.queueEntries.count {
-                        let upNextEntries = Array(player.queueEntries[upNextStart..<player.queueEntries.count])
+                    let queueEntries = player.queueEntries
+                    let currentIndex = queueEntries.isEmpty
+                        ? 0
+                        : min(max(player.currentIndex, 0), queueEntries.count - 1)
+
+                    let upNextStart = currentIndex + 1
+                    if upNextStart < queueEntries.count {
+                        let upNextEntries = Array(queueEntries[upNextStart..<queueEntries.count])
                         Section("up_next") {
                             ForEach(Array(upNextEntries.enumerated()), id: \.element.id) { offset, entry in
                                 SongRowView(
@@ -69,8 +74,8 @@ struct QueueView: View {
 
                     // Previously played. Same UUID-keyed identity for
                     // consistency, even without onMove.
-                    if player.currentIndex > 0 {
-                        let playedEntries = Array(player.queueEntries[0..<player.currentIndex])
+                    if currentIndex > 0 {
+                        let playedEntries = Array(queueEntries[0..<currentIndex])
                         Section("played") {
                             ForEach(Array(playedEntries.enumerated()), id: \.element.id) { offset, entry in
                                 SongRowView(

@@ -565,7 +565,9 @@ final class TVStore {
 
     func toggleShuffle() {
         shuffleEnabled.toggle()
-        guard shuffleEnabled, queue.count > queueIndex + 1 else { refreshUpNext(); return }
+        guard shuffleEnabled,
+              queue.indices.contains(queueIndex),
+              queue.count > queueIndex + 1 else { refreshUpNext(); return }
         // 只打乱「当前曲之后」的部分,当前曲不动。
         var tail = Array(queue[(queueIndex + 1)...])
         tail.shuffle()
@@ -593,14 +595,20 @@ final class TVStore {
     }
 
     private func refreshUpNext() {
-        queueUpNextIDs = queueIndex + 1 < queue.count ? Array(queue[(queueIndex + 1)...]) : []
+        guard queue.indices.contains(queueIndex),
+              queueIndex + 1 < queue.count else {
+            queueUpNextIDs = []
+            return
+        }
+        queueUpNextIDs = Array(queue[(queueIndex + 1)...])
     }
 
     func previous() {
         // 播过 3 秒先回到开头,否则切上一首。
         if currentTime > 3 { engine.seek(to: 0); return }
-        guard queueIndex - 1 >= 0, let s = song(queue[queueIndex - 1]) else { engine.seek(to: 0); return }
-        queueIndex -= 1
+        let previousIndex = queueIndex - 1
+        guard queue.indices.contains(previousIndex), let s = song(queue[previousIndex]) else { engine.seek(to: 0); return }
+        queueIndex = previousIndex
         startPlaying(s)
     }
 
@@ -629,7 +637,7 @@ final class TVStore {
             format: song.format, bitrate: song.bitrate, sampleRate: song.sampleRate, sourcePath: "")
         hasNowPlaying = true
         lyrics = []
-        queueUpNextIDs = queueIndex + 1 < queue.count ? Array(queue[(queueIndex + 1)...]) : []
+        refreshUpNext()
         Task { await coordinator.play(songID: song.id) }
     }
 

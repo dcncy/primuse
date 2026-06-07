@@ -43,7 +43,12 @@ struct MacQueuePanel: View {
         } else {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
-                    let playedIndices = 0..<player.currentIndex
+                    // currentIndex 在切歌/换队列瞬间可能越界, 钳到合法区间,
+                    // 否则下面构造 Range 时 lowerBound > upperBound 会 trap。
+                    let count = player.queue.count
+                    let cur = min(max(player.currentIndex, 0), count - 1)
+
+                    let playedIndices = 0..<cur
                     if !playedIndices.isEmpty {
                         queueSection(title: "played") {
                             ForEach(Array(playedIndices), id: \.self) { index in
@@ -54,11 +59,11 @@ struct MacQueuePanel: View {
 
                     if let current = player.currentSong {
                         queueSection(title: "now_playing", accent: true) {
-                            queueRow(song: current, index: player.currentIndex, isPlaying: true)
+                            queueRow(song: current, index: cur, isPlaying: true)
                         }
                     }
 
-                    let upNextIndices = (player.currentIndex + 1)..<player.queue.count
+                    let upNextIndices = (cur + 1)..<count
                     if !upNextIndices.isEmpty {
                         queueSection(title: "up_next") {
                             ForEach(Array(upNextIndices), id: \.self) { index in

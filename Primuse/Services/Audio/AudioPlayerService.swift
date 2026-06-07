@@ -2129,6 +2129,10 @@ final class AudioPlayerService {
     /// raw queue offsets, so a manual reorder makes those offsets
     /// point at the wrong songs unless we regenerate them.
     func moveQueueItems(fromOffsets source: IndexSet, toOffset destination: Int) {
+        guard !source.isEmpty,
+              source.allSatisfy({ queueEntries.indices.contains($0) }),
+              destination >= 0,
+              destination <= queueEntries.count else { return }
         queueGeneration += 1
         queueEntries.move(fromOffsets: source, toOffset: destination)
         pendingNextShuffleIndices = nil

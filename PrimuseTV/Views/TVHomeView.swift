@@ -84,10 +84,10 @@ struct TVHomeView: View {
                     .lineLimit(2).frame(maxWidth: 760, alignment: .leading)
                     .padding(.top, 14)
                 HStack(spacing: 16) {
-                    TVPillButton(title: "播放", systemImage: "play.fill", style: .solid,
-                                 action: { store.play(album: hero); openPlayer() })
-                    TVPillButton(title: "随机", systemImage: "shuffle",
-                                 action: { store.play(album: hero); openPlayer() })
+                    TVPillButton(title: "全部播放", systemImage: "play.fill", style: .solid,
+                                 action: { store.playAll(shuffle: false); openPlayer() })
+                    TVPillButton(title: "随机播放", systemImage: "shuffle",
+                                 action: { store.playAll(shuffle: true); openPlayer() })
                     TVPillButton(title: "喜欢", systemImage: "heart")
                 }
                 .padding(.top, 32)

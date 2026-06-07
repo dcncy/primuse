@@ -482,6 +482,17 @@ final class TVStore {
         startPlaying(first)
     }
 
+    /// 全部播放 / 随机播放整个可见曲库(库多为散曲、没有真正专辑,所以播放范围用整库)。
+    func playAll(shuffle: Bool) {
+        var ids = library.visibleSongs.map(\.id)
+        guard !ids.isEmpty else { return }
+        if shuffle { ids.shuffle() }
+        shuffleEnabled = shuffle
+        queue = ids
+        queueIndex = 0
+        if let first = song(ids[0]) { startPlaying(first) }
+    }
+
     func next() {
         // 手动下一首:忽略「单曲循环」;到队尾时「列表循环」则回到队首。
         if queueIndex + 1 < queue.count, let s = song(queue[queueIndex + 1]) {

@@ -35,6 +35,10 @@ struct TVNowPlayingView: View {
         let np = store.nowPlaying
         return ZStack {
             TVAmbientBackdrop(tint: np.tint, tint2: np.tint2, strength: 1)
+            // 暗色蒙层:浅色专辑底色下白字标题不再和背景同色看不清。
+            LinearGradient(colors: [.black.opacity(0.5), .black.opacity(0.28), .black.opacity(0.55)],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
 
             HStack(alignment: .top, spacing: 80) {
                 leftColumn.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -42,17 +46,6 @@ struct TVNowPlayingView: View {
                 lyricsColumn.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(.horizontal, 100).padding(.top, 80).padding(.bottom, 70)
-
-            VStack {
-                HStack(spacing: 18) {
-                    Spacer()
-                    TVRoundBtn(icon: "list.bullet", size: 64) { showQueue = true }
-                    TVRoundBtn(icon: "ellipsis", size: 64) { showOptions = true }
-                }
-                .focusSection()   // 让焦点能从左侧传输键跨到右上角队列/选项
-                Spacer()
-            }
-            .padding(.horizontal, 80).padding(.top, 60)
         }
     }
 
@@ -99,15 +92,18 @@ struct TVNowPlayingView: View {
     }
 
     private var transport: some View {
-        HStack(spacing: 22) {
+        HStack(spacing: 20) {
             Spacer()
-            TVRoundBtn(icon: "shuffle", size: 68, active: store.shuffleEnabled) { store.toggleShuffle() }
-            TVRoundBtn(icon: "backward.fill", size: 68) { store.previous() }
+            TVRoundBtn(icon: "shuffle", size: 64, active: store.shuffleEnabled) { store.toggleShuffle() }
+            TVRoundBtn(icon: "backward.fill", size: 64) { store.previous() }
             TVRoundBtn(icon: store.isPlaying ? "pause.fill" : "play.fill", size: 92,
                        primary: true) { store.togglePlayPause() }
-            TVRoundBtn(icon: "forward.fill", size: 68) { store.next() }
-            TVRoundBtn(icon: store.repeatMode == .one ? "repeat.1" : "repeat", size: 68,
+            TVRoundBtn(icon: "forward.fill", size: 64) { store.next() }
+            TVRoundBtn(icon: store.repeatMode == .one ? "repeat.1" : "repeat", size: 64,
                        active: store.repeatMode != .off) { store.cycleRepeatMode() }
+            // 队列 / 更多移到同一行——和左侧传输键焦点左右线性可达,不再困在右上角。
+            TVRoundBtn(icon: "list.bullet", size: 64) { showQueue = true }
+            TVRoundBtn(icon: "ellipsis", size: 64) { showOptions = true }
             Spacer()
         }
     }

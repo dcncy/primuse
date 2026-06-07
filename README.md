@@ -1,6 +1,6 @@
 # Primuse (猿音)
 
-原生 iOS / macOS 音乐播放器，支持从 NAS、媒体服务器、云盘及本地网络源串流播放，具备元数据刮削、歌词显示、跨设备同步和外部播放控制能力。
+原生 iOS / macOS / Apple TV 音乐播放器，支持从 NAS、媒体服务器、云盘及本地网络源串流播放，具备元数据刮削、歌词显示、跨设备同步和外部播放控制能力。
 
 > 🎉 **现已上架 App Store** — 在中国区 App Store 搜索「猿音」即可免费下载体验。
 
@@ -66,6 +66,36 @@
 - **多屏播放** — 外接屏 Now Playing 大封面与大字歌词
 
 其余多源串流、音质处理、元数据刮削、跨设备同步等能力与 iOS 一致，详见下方功能特性。
+
+## Apple TV 版
+
+在客厅大屏上播放整座曲库，与 iPhone / Mac 共享同一套音乐库、数据源与 iCloud 同步。
+
+<table>
+  <tr>
+    <td align="center"><img src="Docs/screenshots/tv/zh/home.png" width="420"/><br/>首页</td>
+    <td align="center"><img src="Docs/screenshots/tv/zh/nowplaying.png" width="420"/><br/>正在播放</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="Docs/screenshots/tv/zh/library.png" width="420"/><br/>资料库</td>
+    <td align="center"><img src="Docs/screenshots/tv/zh/playlists.png" width="420"/><br/>歌单</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="Docs/screenshots/tv/zh/search.png" width="420"/><br/>搜索</td>
+    <td></td>
+  </tr>
+</table>
+
+### Apple TV 专属能力
+
+- **大屏整库浏览** — 专辑 / 艺术家 / 歌单 / 歌曲一览，Siri Remote 流畅操控，支持一键全部播放 / 随机播放整库
+- **逐字歌词** — 满屏滚动的卡拉OK式歌词，支持原文 + 翻译，当前演唱行高亮
+- **顶部展示（Top Shelf）** — 主屏聚焦应用时展示最近播放与推荐
+- **多源直连** — NAS、自建服务器（Navidrome / Subsonic 等）、云盘可在 TV 上直接播放；部分源经 iPhone 中继
+- **多设备同步** — 曲库、歌单、数据源与 iPhone / Mac 经 iCloud 实时同步
+- **中英文界面** — 跟随系统语言自动切换
+
+其余多源串流、音质处理、跨设备同步等能力与 iOS 一致。
 
 ## 功能特性
 

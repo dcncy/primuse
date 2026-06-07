@@ -110,7 +110,8 @@ struct MenuBarPlayerView: View {
                 CachedArtworkView(
                     coverRef: song.coverArtFileName, songID: song.id,
                     size: 64, cornerRadius: 8,
-                    sourceID: song.sourceID, filePath: song.filePath
+                    sourceID: song.sourceID, filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
             } else {
                 RoundedRectangle(cornerRadius: 8)

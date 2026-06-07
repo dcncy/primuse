@@ -469,7 +469,8 @@ struct DuplicateSongsView: View {
                     size: 28,
                     cornerRadius: 5,
                     sourceID: group.bestSong.sourceID,
-                    filePath: group.bestSong.filePath
+                    filePath: group.bestSong.filePath,
+                    fileFormat: group.bestSong.fileFormat
                 )
 
                 Text(group.title)

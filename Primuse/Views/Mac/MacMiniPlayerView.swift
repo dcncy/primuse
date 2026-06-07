@@ -153,7 +153,8 @@ struct MacMiniPlayerView: View {
                 CachedArtworkView(
                     coverRef: song.coverArtFileName, songID: song.id,
                     size: coverSize, cornerRadius: cornerRadius,
-                    sourceID: song.sourceID, filePath: song.filePath
+                    sourceID: song.sourceID, filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
             } else {
                 RoundedRectangle(cornerRadius: cornerRadius)
@@ -477,7 +478,8 @@ struct MacMiniPlayerView: View {
                     songID: song.id,
                     size: 32, cornerRadius: 6,
                     sourceID: song.sourceID,
-                    filePath: song.filePath
+                    filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
                 .overlay {
                     if isPlaying {

@@ -449,7 +449,8 @@ struct SearchView: View {
                                       size: 80,
                                       cornerRadius: 40,
                                       sourceID: song.sourceID,
-                                      filePath: song.filePath)
+                                      filePath: song.filePath,
+                                      fileFormat: song.fileFormat)
                 } else if let album {
                     CachedArtworkView(albumID: album.id,
                                       albumTitle: album.title,
@@ -495,7 +496,8 @@ struct SearchView: View {
                                   size: 32,
                                   cornerRadius: 5,
                                   sourceID: result.song.sourceID,
-                                  filePath: result.song.filePath)
+                                  filePath: result.song.filePath,
+                                  fileFormat: result.song.fileFormat)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(result.song.title)
                         .font(.system(size: 12.5, weight: .medium))

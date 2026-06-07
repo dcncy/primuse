@@ -29,6 +29,10 @@ final class MetadataBackfillService {
     /// headers. If a particular file's metadata isn't in this slice we may
     /// need to retry with a tail-Range fetch (M4A with trailing moov).
     private static let headBytes: Int64 = 256 * 1024
+    /// If an MP3's ID3 tag says the APIC frame extends beyond `headBytes`,
+    /// fetch a larger head once for artwork. Keeps the normal duration
+    /// backfill cheap while still recovering common 300-800KB covers.
+    private static let maxID3ArtworkHeadBytes: Int = 2 * 1024 * 1024
 
     /// Tail-Range fetch size for M4A files where moov is at the end.
     private static let tailBytes: Int64 = 256 * 1024
@@ -44,6 +48,7 @@ final class MetadataBackfillService {
 
     private let library: MusicLibrary
     private let sourceManager: SourceManager
+    private let backfillableSourceIDs: () -> Set<String>
     private let metadataService = MetadataService()
     private let failedURL: URL
 
@@ -69,9 +74,14 @@ final class MetadataBackfillService {
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     #endif
 
-    init(library: MusicLibrary, sourceManager: SourceManager) {
+    init(
+        library: MusicLibrary,
+        sourceManager: SourceManager,
+        backfillableSourceIDs: @escaping () -> Set<String> = { [] }
+    ) {
         self.library = library
         self.sourceManager = sourceManager
+        self.backfillableSourceIDs = backfillableSourceIDs
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let directory = appSupport.appendingPathComponent("Primuse", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -227,6 +237,28 @@ final class MetadataBackfillService {
                 self.start()
             }
         }
+
+        NotificationCenter.default.addObserver(
+            forName: .primuseSourceDidSoftDelete,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self, let id = note.userInfo?["id"] as? String else { return }
+            MainActor.assumeIsolated {
+                self.discardWork(forSourceID: id)
+            }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .primuseSourceDidDelete,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self, let id = note.userInfo?["id"] as? String else { return }
+            MainActor.assumeIsolated {
+                self.discardWork(forSourceID: id)
+            }
+        }
     }
 
     /// Start (or resume) backfill. Idempotent — if a worker is already
@@ -260,7 +292,10 @@ final class MetadataBackfillService {
             // failedSongIDs. Surface both numbers so a "spinner stuck"
             // report can be triaged from the log without app-side
             // instrumentation.
-            let bareTotal = library.songs.lazy.filter { Self.isBareSong($0) }.count
+            let sourceIDs = backfillableSourceIDs()
+            let bareTotal = library.songs.lazy.filter {
+                sourceIDs.contains($0.sourceID) && Self.isBareSong($0)
+            }.count
             plog("📥 Backfill: skip (no eligible bare songs — total=\(library.songs.count) bare=\(bareTotal) failed=\(failedSongIDs.count))")
             return
         }
@@ -337,7 +372,20 @@ final class MetadataBackfillService {
         worker?.cancel()
         worker = nil
         isRunning = false
+        pendingCount = 0
         endBackgroundTaskIfHeld()
+    }
+
+    /// Drop queued work for a source that was disabled or removed. The
+    /// worker processes fixed snapshots, so without stopping it a deleted
+    /// 10K-song source can keep burning through stale rows until relaunch.
+    func discardWork(forSourceID sourceID: String) {
+        let ids = Set(library.songs.lazy.filter { $0.sourceID == sourceID }.map(\.id))
+        if !ids.isEmpty {
+            failedSongIDs.subtract(ids)
+            saveFailed()
+        }
+        stop()
     }
 
     /// Re-evaluate the queue every time the library changes (e.g. a fresh
@@ -380,8 +428,11 @@ final class MetadataBackfillService {
     /// `isRunning == false` but still has pending work that should keep
     /// BGProcessingTask scheduled.
     var hasPendingWork: Bool {
-        library.songs.contains { song in
-            !failedSongIDs.contains(song.id) && Self.isBareSong(song)
+        let sourceIDs = backfillableSourceIDs()
+        return library.songs.contains { song in
+            !failedSongIDs.contains(song.id)
+                && sourceIDs.contains(song.sourceID)
+                && Self.needsBackfill(song)
         }
     }
 
@@ -406,9 +457,11 @@ final class MetadataBackfillService {
     /// number matches the global storage page rather than counting
     /// songs that backfill has given up on.
     func remainingCount(forSource sourceID: String?) -> Int {
-        library.songs.lazy.filter { song in
+        let sourceIDs = backfillableSourceIDs()
+        return library.songs.lazy.filter { song in
             !self.failedSongIDs.contains(song.id) &&
-                Self.isBareSong(song) &&
+                sourceIDs.contains(song.sourceID) &&
+                Self.needsBackfill(song) &&
                 (sourceID == nil || song.sourceID == sourceID)
         }.count
     }
@@ -481,6 +534,7 @@ final class MetadataBackfillService {
         for (_, sourceSongs) in songsBySource {
             guard !Task.isCancelled else { return }
             guard let representative = sourceSongs.first else { continue }
+            guard isStillEligible(representative) else { continue }
             if let connector = try? await sourceManager.connectorForSong(representative) {
                 let paths = sourceSongs.map(\.filePath)
                 await connector.prefetchMetadata(paths: paths)
@@ -494,10 +548,12 @@ final class MetadataBackfillService {
         // 不需要锁。
         var iterator = snapshot.makeIterator()
         await withTaskGroup(of: (song: Song, outcome: BackfillOutcome).self) { group in
+            defer { group.cancelAll() }
             // Seed: 启动 workerConcurrency 个 task
             for _ in 0..<Self.workerConcurrency {
                 guard let song = iterator.next() else { break }
                 if shouldBlockForCellular() { return }
+                guard isStillEligible(song) else { continue }
                 group.addTask { [self] in (song, await self.processOne(song)) }
             }
 
@@ -506,7 +562,7 @@ final class MetadataBackfillService {
                 if Task.isCancelled { break }
 
                 processedCount += 1
-                if result.outcome.markFailed {
+                if result.outcome.markFailed, isStillEligible(result.song) {
                     failedSongIDs.insert(result.song.id)
                     saveFailed()
                 }
@@ -519,11 +575,13 @@ final class MetadataBackfillService {
                 let shouldFlush = pendingFlush.count >= Self.flushBatchSize
                     || Date().timeIntervalSince(lastFlushAt) >= Self.flushInterval
                 if shouldFlush, !pendingFlush.isEmpty {
-                    let batch = pendingFlush
+                    let batch = pendingFlush.filter(isStillEligible)
                     pendingFlush.removeAll(keepingCapacity: true)
                     lastFlushAt = Date()
-                    library.replaceSongs(batch)
-                    plog("📥 flushed \(batch.count) songs to library")
+                    if !batch.isEmpty {
+                        library.replaceSongs(batch)
+                        plog("📥 flushed \(batch.count) songs to library")
+                    }
                 }
 
                 // Cellular check between songs ── 切到 cellular 后停止派发新
@@ -535,6 +593,7 @@ final class MetadataBackfillService {
 
                 // 派发下一首给空闲 worker。
                 if let next = iterator.next() {
+                    guard isStillEligible(next) else { continue }
                     group.addTask { [self] in (next, await self.processOne(next)) }
                 }
             }
@@ -542,10 +601,12 @@ final class MetadataBackfillService {
 
         // Final flush
         if !pendingFlush.isEmpty {
-            let batch = pendingFlush
+            let batch = pendingFlush.filter(isStillEligible)
             pendingFlush.removeAll()
-            library.replaceSongs(batch)
-            plog("📥 final flush: \(batch.count) songs to library")
+            if !batch.isEmpty {
+                library.replaceSongs(batch)
+                plog("📥 final flush: \(batch.count) songs to library")
+            }
         }
     }
 
@@ -573,6 +634,9 @@ final class MetadataBackfillService {
     private func processOne(_ song: Song) async -> BackfillOutcome {
         let started = Date()
         do {
+            guard isStillEligible(song) else {
+                return BackfillOutcome(song: nil, markFailed: false)
+            }
             // Use the SHARED connector (not auxiliary). Backfill is sequential
             // and benefits massively from accumulated state on the single
             // BaiduPanSource actor: throttle clock, dlink cache, dir-listing
@@ -606,6 +670,24 @@ final class MetadataBackfillService {
                 song: song,
                 cacheKey: song.id
             )
+            if Self.needsEmbeddedArtworkBackfill(song),
+               metadata.coverArtFileName == nil,
+               let id3ByteCount = FileMetadataReader.id3TagByteCount(in: headData),
+               id3ByteCount > headData.count {
+                let expandedByteCount = min(id3ByteCount, Self.maxID3ArtworkHeadBytes)
+                if expandedByteCount > headData.count,
+                   let expandedHead = try? await connector.fetchRange(
+                    path: song.filePath,
+                    offset: 0,
+                    length: Int64(expandedByteCount)
+                   ) {
+                    metadata = await extractMetadata(
+                        from: expandedHead,
+                        song: song,
+                        cacheKey: song.id
+                    )
+                }
+            }
             if metadataLooksMissing(metadata) {
                 if let tailData = try? await connector.fetchRange(
                     path: song.filePath,
@@ -648,6 +730,8 @@ final class MetadataBackfillService {
                 metadata.bitRate = Int((Double(song.fileSize) * 8.0 / metadata.duration / 1000.0).rounded())
             }
             let merged = mergeSong(bare: song, metadata: metadata)
+            let artworkStillMissing = Self.needsEmbeddedArtworkBackfill(song)
+                && (merged.coverArtFileName?.isEmpty ?? true)
             let totalElapsed = Date().timeIntervalSince(started)
             // Include the parsed duration in the log line so an
             // infinite-loop case (pickNextBatch repeatedly handing back
@@ -656,9 +740,15 @@ final class MetadataBackfillService {
             // capture a usable duration despite metadataLooksMissing
             // returning false → bug in the parser or the gate.
             plog(String(format: "📥 Backfill: '%@' done in %.2fs (fetch %.2fs) duration=%.1fs", song.title, totalElapsed, fetchElapsed, merged.duration))
-            return BackfillOutcome(song: merged, markFailed: false)
+            if artworkStillMissing {
+                plog("📥 Backfill: '\(song.title)' has no parseable MP3 artwork; skipping future artwork-only retries")
+            }
+            return BackfillOutcome(song: merged, markFailed: artworkStillMissing)
         } catch {
             let elapsed = Date().timeIntervalSince(started)
+            if !isStillEligible(song) {
+                return BackfillOutcome(song: nil, markFailed: false)
+            }
             plog(String(format: "⚠️ Backfill failed for '%@' after %.2fs: %@", song.title, elapsed, error.localizedDescription))
             return BackfillOutcome(song: nil, markFailed: true)
         }
@@ -803,11 +893,30 @@ final class MetadataBackfillService {
     /// set are skipped. Limited to a batch so the queue doesn't grow
     /// unbounded for huge libraries.
     private func pickNextBatch() -> [Song] {
+        let sourceIDs = backfillableSourceIDs()
         let candidates = library.songs.lazy.filter { song in
             guard !self.failedSongIDs.contains(song.id) else { return false }
-            return Self.isBareSong(song)
+            guard !self.library.disabledSourceIDs.contains(song.sourceID) else { return false }
+            guard sourceIDs.contains(song.sourceID) else { return false }
+            return Self.needsBackfill(song)
         }
         return Array(candidates.prefix(500))
+    }
+
+    private func isStillEligible(_ song: Song) -> Bool {
+        guard !failedSongIDs.contains(song.id) else { return false }
+        guard !library.disabledSourceIDs.contains(song.sourceID) else { return false }
+        guard backfillableSourceIDs().contains(song.sourceID) else { return false }
+        guard let live = library.song(id: song.id), live.sourceID == song.sourceID else { return false }
+        return Self.needsBackfill(live)
+    }
+
+    private static func needsBackfill(_ song: Song) -> Bool {
+        isBareSong(song) || needsEmbeddedArtworkBackfill(song)
+    }
+
+    private static func needsEmbeddedArtworkBackfill(_ song: Song) -> Bool {
+        song.fileFormat == .mp3 && (song.coverArtFileName?.isEmpty ?? true)
     }
 
     // MARK: - Failed-set persistence

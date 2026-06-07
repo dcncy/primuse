@@ -192,7 +192,8 @@ struct MacNowPlayingView: View {
                         size: nil,
                         cornerRadius: coverRadius,
                         sourceID: song.sourceID,
-                        filePath: song.filePath
+                        filePath: song.filePath,
+                        fileFormat: song.fileFormat
                     )
                     .aspectRatio(1, contentMode: .fit)
                     .frame(width: coverSize, height: coverSize)

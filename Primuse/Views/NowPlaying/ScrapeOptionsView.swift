@@ -460,7 +460,8 @@ struct ScrapeOptionsView: View {
                                   size: 120,
                                   cornerRadius: 6,
                                   sourceID: song.sourceID,
-                                  filePath: song.filePath)
+                                  filePath: song.filePath,
+                                  fileFormat: song.fileFormat)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -776,7 +777,7 @@ struct ScrapeOptionsView: View {
         Form {
             Section {
                 HStack(spacing: 12) {
-                    CachedArtworkView(coverRef: song.coverArtFileName, songID: song.id, size: 56, cornerRadius: 8, sourceID: song.sourceID, filePath: song.filePath)
+                    CachedArtworkView(coverRef: song.coverArtFileName, songID: song.id, size: 56, cornerRadius: 8, sourceID: song.sourceID, filePath: song.filePath, fileFormat: song.fileFormat)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(song.title).font(.subheadline).fontWeight(.semibold).lineLimit(1)
                         Text(song.artistName ?? "").font(.caption).foregroundStyle(Color.primuseScrapeGray).lineLimit(1)
@@ -896,7 +897,7 @@ struct ScrapeOptionsView: View {
                                 HStack(spacing: 8) {
                                     // Current cover
                                     VStack(spacing: 2) {
-                                        CachedArtworkView(coverRef: song.coverArtFileName, songID: song.id, size: 56, cornerRadius: 6, sourceID: song.sourceID, filePath: song.filePath)
+                                        CachedArtworkView(coverRef: song.coverArtFileName, songID: song.id, size: 56, cornerRadius: 6, sourceID: song.sourceID, filePath: song.filePath, fileFormat: song.fileFormat)
                                         Text("current").font(.system(size: 9)).foregroundStyle(.secondary)
                                     }
                                     Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
@@ -908,7 +909,7 @@ struct ScrapeOptionsView: View {
                                                 .frame(width: 56, height: 56)
                                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                                         } else {
-                                            CachedArtworkView(coverRef: preview.updatedSong.coverArtFileName, songID: preview.updatedSong.id, size: 56, cornerRadius: 6, sourceID: song.sourceID, filePath: song.filePath)
+                                            CachedArtworkView(coverRef: preview.updatedSong.coverArtFileName, songID: preview.updatedSong.id, size: 56, cornerRadius: 6, sourceID: song.sourceID, filePath: song.filePath, fileFormat: song.fileFormat)
                                         }
                                         Text("new").font(.system(size: 9)).foregroundStyle(.green)
                                     }
@@ -1374,10 +1375,19 @@ struct ScrapeOptionsView: View {
             bitDepth: u.bitDepth ?? song.bitDepth,
             genre: (genreChanged && applyGenre) ? u.genre : song.genre,
             year: (yearChanged && applyYear) ? u.year : song.year,
+            lastModified: song.lastModified,
             dateAdded: song.dateAdded,
             coverArtFileName: coverFileName,
             lyricsFileName: lyricsFileName,
-            revision: song.revision
+            replayGainTrackGain: song.replayGainTrackGain,
+            replayGainTrackPeak: song.replayGainTrackPeak,
+            replayGainAlbumGain: song.replayGainAlbumGain,
+            replayGainAlbumPeak: song.replayGainAlbumPeak,
+            revision: song.revision,
+            titlePinyin: song.titlePinyin,
+            artistPinyin: song.artistPinyin,
+            albumPinyin: song.albumPinyin,
+            lyricsText: song.lyricsText
         )
 
         // 先 dismiss, 把 replaceSong (rebuildIndex/persistSnapshot/...)
@@ -1407,7 +1417,26 @@ struct ScrapeOptionsView: View {
                 MetadataAssetStore.shared.storeLyricsSync(lines, for: songID)
             }
 
-            lib.replaceSong(final)
+            let metadataChanged = final.title != song.title
+                || final.albumTitle != song.albumTitle
+                || final.artistName != song.artistName
+                || final.trackNumber != song.trackNumber
+                || final.discNumber != song.discNumber
+                || final.duration != song.duration
+                || final.bitRate != song.bitRate
+                || final.sampleRate != song.sampleRate
+                || final.bitDepth != song.bitDepth
+                || final.genre != song.genre
+                || final.year != song.year
+            if metadataChanged {
+                lib.replaceSong(final)
+            } else {
+                lib.updateAssetReferences(
+                    songID: final.id,
+                    coverRef: final.coverArtFileName,
+                    lyricsRef: final.lyricsFileName
+                )
+            }
             // 通知正在播放的 mac NowPlaying / mini player / 桌面歌词刷新歌词
             // (它们 onAppear 时只读了一次, 不重新订阅 song id 的话拿不到新歌词)。
             NotificationCenter.default.post(name: .primuseLyricsDidChange, object: final.id)
@@ -1453,15 +1482,13 @@ struct ScrapeOptionsView: View {
                                 if let data = coverData {
                                     await MetadataAssetStore.shared.cacheCover(data, forSongID: songID)
                                 }
-                                await MainActor.run {
-                                    CachedArtworkView.invalidateCache(for: songID)
-                                    if let coverPath = MusicScraperService.sidecarReferencePath(for: finalSnapshot, suffix: "-cover.jpg") {
-                                        var refSong = finalSnapshot
-                                        refSong.coverArtFileName = coverPath
-                                        lib.replaceSong(refSong)
-                                    }
-                                }
-                            }
+                    await MainActor.run {
+                        CachedArtworkView.invalidateCache(for: songID)
+                        if let coverPath = MusicScraperService.sidecarReferencePath(for: finalSnapshot, suffix: "-cover.jpg") {
+                            lib.updateAssetReferences(songID: finalSnapshot.id, coverRef: coverPath)
+                        }
+                    }
+                }
                             if !writeResult.errors.isEmpty {
                                 plog("⚠️ Sidecar write errors: \(writeResult.errors)")
                             }
@@ -1492,6 +1519,7 @@ struct ScrapeOptionsView: View {
         applyResult: @escaping @Sendable (SidecarWriteService.WriteResult) async -> Void
     ) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
+            defer { group.cancelAll() }
             group.addTask {
                 // Sidecar 写回使用独立 connector, 避免复用正在播放/离线缓存的
                 // 云盘 connector 状态。
@@ -1515,7 +1543,6 @@ struct ScrapeOptionsView: View {
             // 中断; 如果是 sleep 先完成 (即 30s 超时) → 第二个 task 被 cancelAll
             // 中断, throw 也被 group 抛给外层 catch。
             try await group.next()
-            group.cancelAll()
         }
     }
 

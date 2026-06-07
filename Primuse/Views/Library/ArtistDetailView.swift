@@ -217,7 +217,8 @@ struct ArtistDetailView: View {
                     size: 32,
                     cornerRadius: 4,
                     sourceID: song.sourceID,
-                    filePath: song.filePath
+                    filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
 
                 Text(song.title)
@@ -258,7 +259,8 @@ struct ArtistDetailView: View {
                 songID: song?.id ?? "",
                 cornerRadius: PMRadius.s,
                 sourceID: song?.sourceID,
-                filePath: song?.filePath
+                filePath: song?.filePath,
+                fileFormat: song?.fileFormat
             )
             .aspectRatio(1, contentMode: .fit)
             .shadow(color: .black.opacity(0.20), radius: 8, y: 4)

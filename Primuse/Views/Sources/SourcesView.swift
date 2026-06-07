@@ -766,8 +766,16 @@ struct SourcesView: View {
     }
 
     private func toggleSourceEnabled(_ source: MusicSource) {
-        updateSource(source.id) { $0.isEnabled.toggle() }
+        let current = currentSource(for: source)
+        let enabled = !current.isEnabled
+        if !enabled {
+            stopBackgroundWork(for: current.id)
+        }
+        updateSource(current.id) { $0.isEnabled = enabled }
         library.updateDisabledSourceIDs(disabledSourceIDs)
+        if enabled {
+            backfill.start()
+        }
     }
 
     private var disabledSourceIDs: Set<String> {
@@ -776,8 +784,7 @@ struct SourcesView: View {
 
     private func deleteSource(_ source: MusicSource) {
         // Cancel any active scan first — otherwise it keeps adding songs back
-        scanService.cancelScan(for: source.id)
-        scanService.removeCheckpoint(for: source.id)
+        stopBackgroundWork(for: source.id)
         library.removeSongsForSource(source.id)
         sourceStore.remove(id: source.id)
         scanService.removeSynologyAPI(for: source.id)
@@ -791,6 +798,12 @@ struct SourcesView: View {
             CloudDirectoryNameStore.deleteAll(for: source.id)
         }
         Task { await sourceManager.removeConnector(for: source.id) }
+    }
+
+    private func stopBackgroundWork(for sourceID: String) {
+        scanService.cancelScan(for: sourceID)
+        scanService.removeCheckpoint(for: sourceID)
+        backfill.discardWork(forSourceID: sourceID)
     }
 
     private func currentSource(for source: MusicSource) -> MusicSource {

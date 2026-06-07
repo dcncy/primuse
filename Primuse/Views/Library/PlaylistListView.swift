@@ -132,7 +132,8 @@ struct PlaylistListView: View {
                         size: 48,
                         cornerRadius: 8,
                         sourceID: song.sourceID,
-                        filePath: song.filePath
+                        filePath: song.filePath,
+                        fileFormat: song.fileFormat
                     )
                 } else {
                     StoredCoverArtView(fileName: nil, size: 48, cornerRadius: 8)

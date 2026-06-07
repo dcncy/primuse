@@ -54,6 +54,7 @@ struct ExternalDisplayNowPlayingView: View {
                     cornerRadius: 20,
                     sourceID: player.currentSong?.sourceID,
                     filePath: player.currentSong?.filePath,
+                    fileFormat: player.currentSong?.fileFormat,
                     revisionToken: player.coverRevision
                 )
                 .shadow(color: .black.opacity(0.40), radius: 48, y: 18)

@@ -135,6 +135,7 @@ enum FileMetadataReader {
             }
         }
 
+        applyID3Fallback(to: &metadata, url: url)
         applyFLACFallback(to: &metadata, url: url)
 
         // 注意: 不在这里用 url filename 兜底 title。
@@ -146,7 +147,230 @@ enum FileMetadataReader {
         return metadata
     }
 
+    private static let id3MetadataReadLimit = 4 * 1024 * 1024
     private static let flacMetadataReadLimit = 1024 * 1024
+
+    private static func applyID3Fallback(to metadata: inout Metadata, url: URL) {
+        guard metadata.coverArtData == nil,
+              let id3 = parseID3Metadata(from: readID3TagData(from: url)) else {
+            return
+        }
+        metadata.coverArtData = id3.coverArtData
+    }
+
+    static func id3TagByteCount(in data: Data) -> Int? {
+        guard data.count >= 10,
+              data[0] == 0x49, data[1] == 0x44, data[2] == 0x33 else {
+            return nil
+        }
+        let tagSize = readSyncSafeInt(data, at: 6)
+        let hasFooter = (data[5] & 0x10) != 0
+        return 10 + tagSize + (hasFooter ? 10 : 0)
+    }
+
+    private static func readID3TagData(from url: URL) -> Data {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return Data() }
+        defer { try? handle.close() }
+
+        guard let header = try? handle.read(upToCount: 10),
+              let tagByteCount = id3TagByteCount(in: header) else {
+            return Data()
+        }
+
+        let cappedByteCount = min(tagByteCount, id3MetadataReadLimit)
+        try? handle.seek(toOffset: 0)
+        return (try? handle.read(upToCount: cappedByteCount)) ?? Data()
+    }
+
+    private struct ID3NativeMetadata {
+        var coverArtData: Data?
+    }
+
+    private struct ID3Picture {
+        var type: Int
+        var data: Data
+    }
+
+    private static func parseID3Metadata(from data: Data) -> ID3NativeMetadata? {
+        guard data.count >= 10,
+              data[0] == 0x49, data[1] == 0x44, data[2] == 0x33 else {
+            return nil
+        }
+        let majorVersion = Int(data[3])
+        guard (2...4).contains(majorVersion),
+              let tagByteCount = id3TagByteCount(in: data) else {
+            return nil
+        }
+
+        let tagEnd = min(data.count, tagByteCount)
+        guard tagEnd > 10 else { return nil }
+
+        var tag = data.subdata(in: 10..<tagEnd)
+        if (data[5] & 0x80) != 0 {
+            tag = removeID3Unsynchronization(from: tag)
+        }
+
+        var cursor = id3ExtendedHeaderLength(in: tag, version: majorVersion, flags: data[5])
+        var pictures: [ID3Picture] = []
+
+        while cursor < tag.count {
+            if majorVersion == 2 {
+                guard cursor + 6 <= tag.count else { break }
+                guard let frameID = asciiString(tag, start: cursor, length: 3),
+                      !frameID.trimmingCharacters(in: CharacterSet(charactersIn: "\0")).isEmpty else {
+                    break
+                }
+                let frameSize = readUInt24BE(tag, at: cursor + 3)
+                cursor += 6
+                guard frameSize > 0, cursor + frameSize <= tag.count else { break }
+                let payload = tag.subdata(in: cursor..<(cursor + frameSize))
+                cursor += frameSize
+
+                if frameID == "PIC", let picture = parseID3PictureFrame(payload, isV22PIC: true) {
+                    pictures.append(picture)
+                }
+            } else {
+                guard cursor + 10 <= tag.count else { break }
+                guard let frameID = asciiString(tag, start: cursor, length: 4),
+                      !frameID.trimmingCharacters(in: CharacterSet(charactersIn: "\0")).isEmpty else {
+                    break
+                }
+                let frameSize = majorVersion == 4
+                    ? readSyncSafeInt(tag, at: cursor + 4)
+                    : readUInt32BE(tag, at: cursor + 4)
+                let formatFlags = tag[cursor + 9]
+                cursor += 10
+                guard frameSize > 0, cursor + frameSize <= tag.count else { break }
+
+                var payload = tag.subdata(in: cursor..<(cursor + frameSize))
+                cursor += frameSize
+
+                if majorVersion == 4, (formatFlags & 0x02) != 0 {
+                    payload = removeID3Unsynchronization(from: payload)
+                }
+
+                if frameID == "APIC", let picture = parseID3PictureFrame(payload, isV22PIC: false) {
+                    pictures.append(picture)
+                }
+            }
+        }
+
+        let preferred = pictures.first(where: { $0.type == 3 }) ?? pictures.first
+        guard let preferred else { return nil }
+        return ID3NativeMetadata(coverArtData: preferred.data)
+    }
+
+    private static func id3ExtendedHeaderLength(in tag: Data, version: Int, flags: UInt8) -> Int {
+        guard (flags & 0x40) != 0 else { return 0 }
+        if version == 3 {
+            guard tag.count >= 4 else { return tag.count }
+            return min(tag.count, 4 + readUInt32BE(tag, at: 0))
+        }
+        if version == 4 {
+            guard tag.count >= 4 else { return tag.count }
+            return min(tag.count, readSyncSafeInt(tag, at: 0))
+        }
+        return 0
+    }
+
+    private static func parseID3PictureFrame(_ payload: Data, isV22PIC: Bool) -> ID3Picture? {
+        guard payload.count > (isV22PIC ? 5 : 4) else { return nil }
+        let encoding = payload[0]
+        var cursor = 1
+
+        if isV22PIC {
+            cursor += 3 // image format, e.g. JPG/PNG
+        } else {
+            guard let mimeEnd = firstZeroByte(in: payload, from: cursor) else { return nil }
+            cursor = mimeEnd + 1
+        }
+
+        guard cursor < payload.count else { return nil }
+        let pictureType = Int(payload[cursor])
+        cursor += 1
+
+        guard let imageStart = encodedStringTerminatorEnd(in: payload, from: cursor, encoding: encoding),
+              imageStart < payload.count else {
+            return nil
+        }
+
+        let rawImage = payload.subdata(in: imageStart..<payload.count)
+        guard let imageData = normalizedEmbeddedImageData(rawImage) else { return nil }
+        return ID3Picture(type: pictureType, data: imageData)
+    }
+
+    private static func encodedStringTerminatorEnd(in data: Data, from start: Int, encoding: UInt8) -> Int? {
+        guard start <= data.count else { return nil }
+        if encoding == 1 || encoding == 2 {
+            guard start + 1 <= data.count else { return nil }
+            var i = start
+            while i + 1 < data.count {
+                if data[i] == 0, data[i + 1] == 0 {
+                    return i + 2
+                }
+                i += 1
+            }
+            return nil
+        }
+        guard let end = firstZeroByte(in: data, from: start) else { return nil }
+        return end + 1
+    }
+
+    private static func normalizedEmbeddedImageData(_ data: Data) -> Data? {
+        if isSupportedImageData(data) { return data }
+
+        for signature in embeddedImageSignatures {
+            if let range = data.range(of: signature, options: [], in: data.startIndex..<data.endIndex),
+               range.lowerBound < min(data.count, 64) {
+                let sliced = data.subdata(in: range.lowerBound..<data.endIndex)
+                if isSupportedImageData(sliced) { return sliced }
+            }
+        }
+        return nil
+    }
+
+    private static let embeddedImageSignatures: [Data] = [
+        Data([0xFF, 0xD8, 0xFF]), // JPEG
+        Data([0x89, 0x50, 0x4E, 0x47]), // PNG
+        Data("GIF8".utf8),
+        Data("RIFF".utf8),
+        Data("BM".utf8)
+    ]
+
+    private static func isSupportedImageData(_ data: Data) -> Bool {
+        guard data.count >= 4 else { return false }
+        if data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF { return true }
+        if data.count >= 8,
+           data[0] == 0x89, data[1] == 0x50, data[2] == 0x4E, data[3] == 0x47,
+           data[4] == 0x0D, data[5] == 0x0A, data[6] == 0x1A, data[7] == 0x0A { return true }
+        if asciiString(data, start: 0, length: 4) == "GIF8" { return true }
+        if data.count >= 12,
+           asciiString(data, start: 0, length: 4) == "RIFF",
+           asciiString(data, start: 8, length: 4) == "WEBP" { return true }
+        if data[0] == 0x42, data[1] == 0x4D { return true }
+        return false
+    }
+
+    private static func firstZeroByte(in data: Data, from start: Int) -> Int? {
+        guard start < data.count else { return nil }
+        return data[start..<data.count].firstIndex(of: 0)
+    }
+
+    private static func removeID3Unsynchronization(from data: Data) -> Data {
+        var result = Data()
+        result.reserveCapacity(data.count)
+        var i = 0
+        while i < data.count {
+            let byte = data[i]
+            result.append(byte)
+            if byte == 0xFF, i + 1 < data.count, data[i + 1] == 0 {
+                i += 2
+            } else {
+                i += 1
+            }
+        }
+        return result
+    }
 
     private static func applyFLACFallback(to metadata: inout Metadata, url: URL) {
         guard url.pathExtension.lowercased() == "flac",
@@ -367,6 +591,27 @@ enum FileMetadataReader {
         return (Int(data[offset]) << 16)
             | (Int(data[offset + 1]) << 8)
             | Int(data[offset + 2])
+    }
+
+    private static func readUInt32BE(_ data: Data, at offset: Int) -> Int {
+        guard offset + 4 <= data.count else { return 0 }
+        return (Int(data[offset]) << 24)
+            | (Int(data[offset + 1]) << 16)
+            | (Int(data[offset + 2]) << 8)
+            | Int(data[offset + 3])
+    }
+
+    private static func readSyncSafeInt(_ data: Data, at offset: Int) -> Int {
+        guard offset + 4 <= data.count else { return 0 }
+        return (Int(data[offset] & 0x7F) << 21)
+            | (Int(data[offset + 1] & 0x7F) << 14)
+            | (Int(data[offset + 2] & 0x7F) << 7)
+            | Int(data[offset + 3] & 0x7F)
+    }
+
+    private static func asciiString(_ data: Data, start: Int, length: Int) -> String? {
+        guard start >= 0, length >= 0, start + length <= data.count else { return nil }
+        return String(data: data.subdata(in: start..<(start + length)), encoding: .isoLatin1)
     }
 
     private static func readUInt32LE(_ data: Data, cursor: inout Int) -> Int? {

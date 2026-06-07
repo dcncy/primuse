@@ -537,6 +537,7 @@ struct NowPlayingAccessory: View {
                     cornerRadius: isInline ? 6 : 8,
                     sourceID: player.currentSong?.sourceID,
                     filePath: player.currentSong?.filePath,
+                    fileFormat: player.currentSong?.fileFormat,
                     revisionToken: player.coverRevision
                 )
                 .padding(.trailing, isInline ? 10 : 10)

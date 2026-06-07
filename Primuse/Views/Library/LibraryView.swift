@@ -237,7 +237,8 @@ struct LibraryView: View {
     private var recentItems: [RecentItem] {
         if !albums.isEmpty {
             return albums.prefix(6).map { album in
-                let firstSong = library.songs(forAlbum: album.id).first
+                let albumSongs = library.songs(forAlbum: album.id)
+                let firstSong = albumSongs.first { $0.coverArtFileName?.isEmpty == false } ?? albumSongs.first
                 return RecentItem(
                     id: album.id,
                     title: album.title,
@@ -246,6 +247,7 @@ struct LibraryView: View {
                     songID: firstSong?.id,
                     sourceID: firstSong?.sourceID,
                     filePath: firstSong?.filePath,
+                    fileFormat: firstSong?.fileFormat,
                     song: nil,
                     album: album
                 )
@@ -260,6 +262,7 @@ struct LibraryView: View {
                 songID: song.id,
                 sourceID: song.sourceID,
                 filePath: song.filePath,
+                fileFormat: song.fileFormat,
                 song: song,
                 album: nil
             )
@@ -456,6 +459,7 @@ struct RecentItem: Identifiable {
     let songID: String?
     let sourceID: String?
     let filePath: String?
+    let fileFormat: AudioFormat?
     let song: Song?
     let album: Album?
 }
@@ -466,7 +470,8 @@ struct RecentItemCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             CachedArtworkView(coverRef: item.coverFileName, songID: item.songID ?? "", cornerRadius: 8,
-                              sourceID: item.sourceID, filePath: item.filePath)
+                              sourceID: item.sourceID, filePath: item.filePath,
+                              fileFormat: item.fileFormat)
                 .aspectRatio(1, contentMode: .fit)
                 .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
 

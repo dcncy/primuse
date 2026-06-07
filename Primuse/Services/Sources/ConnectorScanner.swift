@@ -32,7 +32,7 @@ actor ConnectorScanner {
         startingCount: Int = 0
     ) -> AsyncThrowingStream<ScanUpdate, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     plog("🔍 ConnectorScanner.scan source=\(sourceID) dirs=\(directories)")
                     try await connector.connect()
@@ -74,10 +74,12 @@ actor ConnectorScanner {
 
                     if let songConnector = connector as? any SongScanningConnector {
                         for directory in dirs {
+                            try Task.checkCancellation()
                             do {
                                 let stream = try await songConnector.scanSongs(from: directory)
 
                                 for try await scannedSong in stream {
+                                    try Task.checkCancellation()
                                     encounteredPaths.insert(scannedSong.song.filePath)
                                     if let existing = existingByPath[scannedSong.song.filePath] {
                                         // Same path can either be the same file (skip) or
@@ -112,6 +114,8 @@ actor ConnectorScanner {
                                         )
                                     )
                                 }
+                            } catch is CancellationError {
+                                throw CancellationError()
                             } catch {
                                 hadDirectoryFailure = true
                                 plog("⚠️ Failed to scan directory \(directory): \(error)")
@@ -145,10 +149,12 @@ actor ConnectorScanner {
                     // via HTTP Range. This drops scan time from minutes (and 11GB
                     // of egress on a 2200-song cloud library) to seconds.
                     for directory in dirs {
+                        try Task.checkCancellation()
                         do {
                             let stream = try await connector.scanAudioFiles(from: directory)
 
                             for try await item in stream {
+                                try Task.checkCancellation()
                                 encounteredPaths.insert(item.path)
                                 let songID = hash("\(sourceID):\(item.path)")
 
@@ -210,6 +216,8 @@ actor ConnectorScanner {
                                     )
                                 }
                             }
+                        } catch is CancellationError {
+                            throw CancellationError()
                         } catch {
                             hadDirectoryFailure = true
                             plog("⚠️ Failed to scan directory \(directory): \(error)")
@@ -236,6 +244,9 @@ actor ConnectorScanner {
                 } catch {
                     continuation.finish(throwing: error)
                 }
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
             }
         }
     }

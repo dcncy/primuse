@@ -267,7 +267,8 @@ struct MacHomeView: View {
                 CachedArtworkView(
                     coverRef: song.coverArtFileName, songID: song.id,
                     cornerRadius: PMRadius.l,
-                    sourceID: song.sourceID, filePath: song.filePath
+                    sourceID: song.sourceID, filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
                 .aspectRatio(1, contentMode: .fit)
                 .shadow(color: .black.opacity(0.32), radius: 18, y: 8)
@@ -283,7 +284,8 @@ struct MacHomeView: View {
                         CachedArtworkView(
                             coverRef: song.coverArtFileName, songID: song.id,
                             cornerRadius: PMRadius.m,
-                            sourceID: song.sourceID, filePath: song.filePath
+                            sourceID: song.sourceID, filePath: song.filePath,
+                            fileFormat: song.fileFormat
                         )
                         .aspectRatio(1, contentMode: .fit)
                         .shadow(color: .black.opacity(0.22), radius: 6, y: 3)
@@ -626,14 +628,16 @@ struct MacHomeView: View {
     }
 
     private func albumCard(_ album: Album) -> some View {
-        let song = library.songs(forAlbum: album.id).first
+        let albumSongs = library.songs(forAlbum: album.id)
+        let song = albumSongs.first { $0.coverArtFileName?.isEmpty == false } ?? albumSongs.first
         return VStack(alignment: .leading, spacing: 8) {
             CachedArtworkView(
                 coverRef: song?.coverArtFileName,
                 songID: song?.id ?? "",
                 cornerRadius: PMRadius.m,
                 sourceID: song?.sourceID,
-                filePath: song?.filePath
+                filePath: song?.filePath,
+                fileFormat: song?.fileFormat
             )
             .aspectRatio(1, contentMode: .fit)
             .shadow(color: .black.opacity(0.22), radius: 8, y: 4)
@@ -683,7 +687,8 @@ struct MacHomeView: View {
                 songID: song.id,
                 size: 42, cornerRadius: PMRadius.s,
                 sourceID: song.sourceID,
-                filePath: song.filePath
+                filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title)

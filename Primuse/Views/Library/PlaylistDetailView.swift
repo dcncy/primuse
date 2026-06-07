@@ -62,6 +62,7 @@ struct PlaylistDetailView: View {
                         cornerRadius: 14,
                         sourceID: coverSong?.sourceID,
                         filePath: coverSong?.filePath,
+                        fileFormat: coverSong?.fileFormat,
                         placeholderIcon: coverPlaceholderIcon
                     )
 
@@ -429,7 +430,8 @@ struct PlaylistDetailView: View {
             CachedArtworkView(
                 coverRef: song.coverArtFileName, songID: song.id,
                 size: 28, cornerRadius: 4,
-                sourceID: song.sourceID, filePath: song.filePath
+                sourceID: song.sourceID, filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
             .frame(width: 32, alignment: .leading)
 
@@ -626,7 +628,8 @@ struct PlaylistReorderSheet: View {
                             size: 36,
                             cornerRadius: 5,
                             sourceID: song.sourceID,
-                            filePath: song.filePath
+                            filePath: song.filePath,
+                            fileFormat: song.fileFormat
                         )
                         VStack(alignment: .leading, spacing: 2) {
                             Text(song.title).font(.subheadline).lineLimit(1)
@@ -789,7 +792,8 @@ struct PlaylistReorderSheet: View {
                 size: 38,
                 cornerRadius: 5,
                 sourceID: song.sourceID,
-                filePath: song.filePath
+                filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
 
             VStack(alignment: .leading, spacing: 2) {

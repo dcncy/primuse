@@ -46,7 +46,8 @@ struct SongRowView: View {
     /// hand the player a track it can't render properly.
     private var isBare: Bool { !song.isPlayable }
     private var offlineSnapshot: OfflineAudioCacheSnapshot {
-        sourceManager.offlineAudioSnapshot(for: song)
+        guard supportsOfflineAudioCache else { return .notCached }
+        return sourceManager.offlineAudioSnapshot(for: song)
     }
 
     var body: some View {
@@ -60,7 +61,8 @@ struct SongRowView: View {
                     songID: song.id,
                     size: 44, cornerRadius: 6,
                     sourceID: song.sourceID,
-                    filePath: song.filePath
+                    filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
 
                 if isPlaying {
@@ -309,9 +311,6 @@ struct SongRowView: View {
             }
         } message: {
             Text(String(localized: "delete_song_message"))
-        }
-        .task(id: song.id) {
-            await sourceManager.refreshOfflineAudioSnapshot(for: song)
         }
     }
 
@@ -574,7 +573,8 @@ struct SimilarSongsSheet: View {
                 size: 44,
                 cornerRadius: 6,
                 sourceID: seed.sourceID,
-                filePath: seed.filePath
+                filePath: seed.filePath,
+                fileFormat: seed.fileFormat
             )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -631,7 +631,8 @@ private struct LastFmSimilarRow: View {
                 size: 44,
                 cornerRadius: 6,
                 sourceID: song.sourceID,
-                filePath: song.filePath
+                filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title).font(.subheadline).lineLimit(1)
@@ -661,7 +662,8 @@ private struct SimilarSongResultRow: View {
                 size: 44,
                 cornerRadius: 6,
                 sourceID: song.sourceID,
-                filePath: song.filePath
+                filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
 
             VStack(alignment: .leading, spacing: 2) {

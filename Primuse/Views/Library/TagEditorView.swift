@@ -277,7 +277,8 @@ struct TagEditorView: View {
                 size: size,
                 cornerRadius: 6,
                 sourceID: song.sourceID,
-                filePath: song.filePath
+                filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
         }
     }
@@ -424,7 +425,8 @@ struct TagEditorView: View {
                 size: 84,
                 cornerRadius: 8,
                 sourceID: song.sourceID,
-                filePath: song.filePath
+                filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
         }
     }

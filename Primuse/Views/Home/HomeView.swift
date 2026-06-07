@@ -220,9 +220,13 @@ struct HomeView: View {
         let songsByAlbum = Dictionary(grouping: library.visibleSongs) { $0.albumID ?? "" }
         return albums.map { album in
             let songs = songsByAlbum[album.id] ?? []
-            let artworkSong = songs.min { lhs, rhs in
-                (lhs.trackNumber ?? Int.max) < (rhs.trackNumber ?? Int.max)
-            } ?? songs.first
+            let orderedSongs = songs.sorted { lhs, rhs in
+                let leftTrack = lhs.trackNumber ?? Int.max
+                let rightTrack = rhs.trackNumber ?? Int.max
+                if leftTrack != rightTrack { return leftTrack < rightTrack }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            let artworkSong = orderedSongs.first { $0.coverArtFileName?.isEmpty == false } ?? orderedSongs.first
             return HomeAlbumTile(album: album, artworkSong: artworkSong)
         }
     }
@@ -336,7 +340,8 @@ struct HomeView: View {
                     songID: pick.id,
                     size: 96, cornerRadius: 12,
                     sourceID: pick.sourceID,
-                    filePath: pick.filePath
+                    filePath: pick.filePath,
+                    fileFormat: pick.fileFormat
                 )
                 .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
 
@@ -480,7 +485,8 @@ struct HomeView: View {
                     size: size,
                     cornerRadius: radius,
                     sourceID: song.sourceID,
-                    filePath: song.filePath
+                    filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
                 .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
                 .rotationEffect(.degrees(coverRotation(for: index)))
@@ -550,7 +556,8 @@ struct HomeView: View {
                                     songID: song.id,
                                     size: 140, cornerRadius: 8,
                                     sourceID: song.sourceID,
-                                    filePath: song.filePath
+                                    filePath: song.filePath,
+                                    fileFormat: song.fileFormat
                                 )
                                 .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
                                 Text(song.title).font(.caption).fontWeight(.medium).lineLimit(1)
@@ -595,7 +602,8 @@ struct HomeView: View {
                                     songID: song.id,
                                     size: 100, cornerRadius: 8,
                                     sourceID: song.sourceID,
-                                    filePath: song.filePath
+                                    filePath: song.filePath,
+                                    fileFormat: song.fileFormat
                                 )
                                 .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
                                 Text(song.title).font(.caption).fontWeight(.medium).lineLimit(1)
@@ -663,7 +671,8 @@ struct HomeView: View {
                 songID: albumSong?.id ?? "",
                 size: 56, cornerRadius: 6,
                 sourceID: albumSong?.sourceID,
-                filePath: albumSong?.filePath
+                filePath: albumSong?.filePath,
+                fileFormat: albumSong?.fileFormat
             )
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.title)

@@ -140,7 +140,8 @@ struct MacQueuePanel: View {
                 size: 32,
                 cornerRadius: 4,
                 sourceID: song.sourceID,
-                filePath: song.filePath
+                filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
 
             VStack(alignment: .leading, spacing: 1) {

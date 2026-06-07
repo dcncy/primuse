@@ -241,6 +241,21 @@ public enum MusicSourceType: String, Codable, Sendable, CaseIterable {
         category == .cloudDrive
     }
 
+    public var supportsRangeStreaming: Bool {
+        category == .cloudDrive
+            || self == .webdav
+            || self == .synology
+            || self == .qnap
+            || self == .ugreen
+            || self == .fnos
+            || self == .s3
+            || self == .smb
+            || self == .sftp
+            || self == .ftp
+            || self == .nfs
+            || isSubsonicFamily
+    }
+
     public var requiresOAuth: Bool {
         isCloudDrive
     }
@@ -443,6 +458,10 @@ public struct MusicSource: Codable, Identifiable, Hashable, Sendable {
         self.isDeleted = isDeleted
         self.deletedAt = deletedAt
         self.cloudAccountID = cloudAccountID
+    }
+
+    public var supportsRangeStreaming: Bool {
+        type.supportsRangeStreaming
     }
 
     public init(from decoder: Decoder) throws {

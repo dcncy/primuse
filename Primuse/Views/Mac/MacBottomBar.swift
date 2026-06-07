@@ -117,7 +117,8 @@ struct MacBottomBar: View {
                     songID: song.id,
                     size: 48, cornerRadius: 5,
                     sourceID: song.sourceID,
-                    filePath: song.filePath
+                    filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
             } else {
                 RoundedRectangle(cornerRadius: 5)

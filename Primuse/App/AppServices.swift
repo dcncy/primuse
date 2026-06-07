@@ -77,7 +77,9 @@ final class AppServices {
         #endif
         self.themeService = theme
         self.scanService = ScanService()
-        self.metadataBackfill = MetadataBackfillService(library: library, sourceManager: manager)
+        self.metadataBackfill = MetadataBackfillService(library: library, sourceManager: manager) {
+            Set(store.sources.filter(\.supportsRangeStreaming).map(\.id))
+        }
         self.lyricsTextBackfill = LyricsTextBackfillService(library: library)
         self.similarTracks = SimilarTracksService()
         self.updateChecker = AppUpdateChecker()

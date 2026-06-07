@@ -73,6 +73,11 @@ final class ScanService {
         scraperService: MusicScraperService? = nil
     ) {
         guard activeTasks[source.id] == nil else { return }
+        guard source.isEnabled, !source.isDeleted else {
+            removeCheckpoint(for: source.id)
+            scanStates[source.id] = nil
+            return
+        }
 
         // Media servers / Apple Music Library 都是自动全库扫描,没有"用户选
         // 目录"这一步,用 "/" 哨兵触发 connector.scanSongs(from: "/") 走全
@@ -115,7 +120,16 @@ final class ScanService {
                 endBackgroundTask(for: source.id)
             }
 
+            guard sourceCanContinue(source.id, sourceStore: sourceStore) else {
+                scanStates[source.id] = nil
+                return
+            }
+
             let preflight = await sourceManager.diagnose(source: source, directories: normalizedDirs)
+            guard sourceCanContinue(source.id, sourceStore: sourceStore) else {
+                scanStates[source.id] = nil
+                return
+            }
             if preflight.blockingFailure != nil {
                 scanStates[source.id] = ScanState(
                     isScanning: false,
@@ -355,6 +369,7 @@ final class ScanService {
             var lastFlushAt = Date()
             for try await update in stream {
                 try Task.checkCancellation()
+                try checkSourceStillEnabled(source.id, sourceStore: sourceStore)
                 scanStates[source.id]?.scannedCount = update.scannedCount
                 scanStates[source.id]?.totalCount = update.totalCount
                 scanStates[source.id]?.currentFile = update.currentFile
@@ -383,6 +398,7 @@ final class ScanService {
             }
 
             try Task.checkCancellation()
+            try checkSourceStillEnabled(source.id, sourceStore: sourceStore)
             // Synology doesn't go through CloudPlaybackSource — skip prewarm sweep.
             completeScan(
                 sourceID: source.id,
@@ -453,6 +469,7 @@ final class ScanService {
             var lastFlushAt = Date()
             for try await update in stream {
                 try Task.checkCancellation()
+                try checkSourceStillEnabled(source.id, sourceStore: sourceStore)
                 scanStates[source.id]?.scannedCount = update.scannedCount
                 scanStates[source.id]?.addedCount = update.addedCount
                 scanStates[source.id]?.totalCount = update.totalCount
@@ -486,6 +503,7 @@ final class ScanService {
             }
 
             try Task.checkCancellation()
+            try checkSourceStillEnabled(source.id, sourceStore: sourceStore)
             completeScan(
                 sourceID: source.id,
                 songs: lastSongs,
@@ -642,6 +660,18 @@ final class ScanService {
             return nil
         }
         return checkpoint
+    }
+
+    private func sourceCanContinue(_ sourceID: String, sourceStore: SourcesStore) -> Bool {
+        guard let live = sourceStore.source(id: sourceID) else { return false }
+        return live.isEnabled && !live.isDeleted
+    }
+
+    private func checkSourceStillEnabled(_ sourceID: String, sourceStore: SourcesStore) throws {
+        guard sourceCanContinue(sourceID, sourceStore: sourceStore) else {
+            removeCheckpoint(for: sourceID)
+            throw CancellationError()
+        }
     }
 
     private func decodeDirs(_ config: String?) -> [String] {

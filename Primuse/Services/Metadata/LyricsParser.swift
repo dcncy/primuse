@@ -4,8 +4,12 @@ import PrimuseKit
 enum LyricsParser {
     /// 行首时间戳（含行级 LRC 头）。Regex 字面量只读、纯函数，多线程读取安全。
     nonisolated(unsafe) private static let lineHeadPattern = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/
+    /// KRC/QRC 风格行头: `[lineStartMs,lineDurationMs]`
+    nonisolated(unsafe) private static let relativeLineHeadPattern = /^\[(\d+),(\d+)\]/
     /// A2 扩展字级标记 `<mm:ss.xx>`
     nonisolated(unsafe) private static let inlineWordPattern = /<(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?>/
+    /// KRC/QRC 风格字级标记 `<offsetMs,durationMs,0>`
+    nonisolated(unsafe) private static let relativeWordPattern = /<(\d+),(\d+)(?:,\d+)?>/
 
     /// 解析 LRC 内容。自动识别行级 (`[mm:ss.xx]text`) 与逐字 (`[mm:ss.xx]<mm:ss.xx>w<mm:ss.xx>w...`) 两种格式。
     static func parse(_ content: String) -> [LyricLine] {
@@ -14,7 +18,19 @@ enum LyricsParser {
         for raw in content.components(separatedBy: .newlines) {
             // 一行可能挂多个行首时间戳：`[00:01.23][00:45.67]text`，全部展开
             let heads = raw.matches(of: lineHeadPattern)
-            guard !heads.isEmpty else { continue }
+            if heads.isEmpty {
+                guard let head = raw.firstMatch(of: relativeLineHeadPattern) else { continue }
+                let lineStart = (Double(head.1) ?? 0) / 1000
+                let body = String(raw[head.range.upperBound...])
+                if let parsed = parseWordLevelLine(body: body, lineStart: lineStart) {
+                    lines.append(parsed)
+                } else {
+                    let text = body.trimmingCharacters(in: .whitespaces)
+                    guard !text.isEmpty else { continue }
+                    lines.append(LyricLine(timestamp: lineStart, text: text))
+                }
+                continue
+            }
 
             // 取最后一个行首时间戳之后的内容作为正文
             let bodyStart = heads.last!.range.upperBound
@@ -38,7 +54,9 @@ enum LyricsParser {
     /// 把行 body 解析为 syllables；不含字级标记时返回 nil。
     private static func parseWordLevelLine(body: String, lineStart: TimeInterval) -> LyricLine? {
         let marks = body.matches(of: inlineWordPattern)
-        guard !marks.isEmpty else { return nil }
+        guard !marks.isEmpty else {
+            return parseRelativeWordLevelLine(body: body, lineStart: lineStart)
+        }
 
         var syllables: [LyricSyllable] = []
         for (i, mark) in marks.enumerated() {
@@ -64,6 +82,51 @@ enum LyricsParser {
         // 后处理：每字 end = 下一字 start；最后一字若没有压轴时间戳，沿用 start（渲染时再兜底）
         for i in 0..<(syllables.count - 1) {
             syllables[i].end = max(syllables[i].end, syllables[i + 1].start)
+        }
+        if syllables.last!.end <= syllables.last!.start {
+            syllables[syllables.count - 1].end = syllables.last!.start + 0.4
+        }
+
+        let plain = syllables.map(\.text).joined()
+        let trimmed = plain.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        return LyricLine(timestamp: lineStart, text: plain, syllables: syllables)
+    }
+
+    /// Parse KRC/QRC-style word tags where each word uses a millisecond
+    /// offset relative to the line start: `<offsetMs,durationMs,0>word`.
+    private static func parseRelativeWordLevelLine(body: String, lineStart: TimeInterval) -> LyricLine? {
+        let marks = body.matches(of: relativeWordPattern)
+        guard !marks.isEmpty else { return nil }
+
+        var syllables: [LyricSyllable] = []
+        for (i, mark) in marks.enumerated() {
+            let offset = (Double(mark.1) ?? 0) / 1000
+            let duration = (Double(mark.2) ?? 0) / 1000
+            let start = lineStart + offset
+            let end = duration > 0 ? start + duration : start
+            let textStart = mark.range.upperBound
+            let textEnd = (i + 1 < marks.count) ? marks[i + 1].range.lowerBound : body.endIndex
+            let chunk = String(body[textStart..<textEnd])
+
+            if chunk.isEmpty {
+                if let last = syllables.last {
+                    syllables[syllables.count - 1] = LyricSyllable(
+                        text: last.text, start: last.start, end: max(last.end, end)
+                    )
+                }
+                continue
+            }
+            syllables.append(LyricSyllable(text: chunk, start: start, end: end))
+        }
+
+        guard !syllables.isEmpty else { return nil }
+
+        for i in 0..<(syllables.count - 1) {
+            if syllables[i].end <= syllables[i].start {
+                syllables[i].end = syllables[i + 1].start
+            }
         }
         if syllables.last!.end <= syllables.last!.start {
             syllables[syllables.count - 1].end = syllables.last!.start + 0.4

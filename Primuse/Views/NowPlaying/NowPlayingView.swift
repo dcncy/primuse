@@ -274,6 +274,7 @@ struct NowPlayingView: View {
                 size: artSize, cornerRadius: 16,
                 sourceID: player.currentSong?.sourceID,
                 filePath: player.currentSong?.filePath,
+                fileFormat: player.currentSong?.fileFormat,
                 revisionToken: player.coverRevision
             )
             .scaleEffect(player.isPlaying ? 1.0 : 0.92)
@@ -462,6 +463,7 @@ struct NowPlayingView: View {
                                     size: 44, cornerRadius: 6,
                                     sourceID: player.currentSong?.sourceID,
                                     filePath: player.currentSong?.filePath,
+                                    fileFormat: player.currentSong?.fileFormat,
                                     revisionToken: player.coverRevision
                                 )
 
@@ -525,6 +527,7 @@ struct NowPlayingView: View {
                             size: artSize, cornerRadius: 12,
                             sourceID: player.currentSong?.sourceID,
                             filePath: player.currentSong?.filePath,
+                            fileFormat: player.currentSong?.fileFormat,
                             revisionToken: player.coverRevision
                         )
                         .scaleEffect(player.isPlaying ? 1.0 : 0.9)
@@ -1302,7 +1305,8 @@ struct SongInfoSheet: View {
                     size: 120,
                     cornerRadius: 8,
                     sourceID: song.sourceID,
-                    filePath: song.filePath
+                    filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
                 .shadow(color: .black.opacity(0.20), radius: 12, y: 6)
 
@@ -1735,6 +1739,7 @@ struct LyricsScrollView: View {
     private static let lyricsActiveBaseSize: CGFloat = 28
     private static let lyricsInactiveBaseSize: CGFloat = 22
     private static let lyricsWordLevelBaseSize: CGFloat = 26
+    private static let lyricsHorizontalPadding: CGFloat = 24
 
     private var effectiveLyricsScale: Double {
         let combined = lyricsFontScale * Double(lyricsPinchScale)
@@ -1803,50 +1808,55 @@ struct LyricsScrollView: View {
     }
 
     private var lineLevelLyricsView: some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Spacer().frame(height: 20)
+        GeometryReader { geo in
+            let contentWidth = lyricContentWidth(in: geo.size.width)
 
-                    ForEach(Array(lyrics.enumerated()), id: \.element.id) { index, line in
-                        lyricsRow(line: line, index: index)
-                            .id(line.id)
-                            .onTapGesture { player.seek(to: line.timestamp) }
-                            .padding(.vertical, 2)
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Spacer().frame(height: 20)
+
+                        ForEach(Array(lyrics.enumerated()), id: \.element.id) { index, line in
+                            lyricsRow(line: line, index: index, availableWidth: contentWidth)
+                                .id(line.id)
+                                .onTapGesture { player.seek(to: line.timestamp) }
+                                .padding(.vertical, 2)
+                        }
+
+                        Spacer().frame(height: 80)
                     }
-
-                    Spacer().frame(height: 80)
+                    .frame(width: contentWidth, alignment: .topLeading)
+                    .padding(.horizontal, Self.lyricsHorizontalPadding)
                 }
-                .padding(.horizontal, 24)
-            }
-            .simultaneousGesture(
-                MagnifyGesture()
-                    .onChanged { value in
-                        isPinchingLyrics = true
-                        lyricsPinchScale = value.magnification
-                    }
-                    .onEnded { value in
-                        let next = lyricsFontScale * Double(value.magnification)
-                        lyricsFontScale = min(max(next, Self.lyricsMinScale), Self.lyricsMaxScale)
-                        lyricsPinchScale = 1.0
-                        isPinchingLyrics = false
-                    }
-            )
-            // 监听任意拖动手势 → 刷新 lastUserScrollTime, 让 onChange 里的 auto
+                .simultaneousGesture(
+                    MagnifyGesture()
+                        .onChanged { value in
+                            isPinchingLyrics = true
+                            lyricsPinchScale = value.magnification
+                        }
+                        .onEnded { value in
+                            let next = lyricsFontScale * Double(value.magnification)
+                            lyricsFontScale = min(max(next, Self.lyricsMinScale), Self.lyricsMaxScale)
+                            lyricsPinchScale = 1.0
+                            isPinchingLyrics = false
+                        }
+                )
+                // 监听任意拖动手势 → 刷新 lastUserScrollTime, 让 onChange 里的 auto
                 // scrollTo 暂时退让, 用户能往上往下浏览其他歌词。
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 4)
-                    .onChanged { _ in lastUserScrollTime = Date() }
-                    .onEnded { _ in lastUserScrollTime = Date() }
-            )
-            .onChange(of: currentLineIndex) { _, idx in
-                guard !isPinchingLyrics, idx < lyrics.count else { return }
-                // 用户手动滚动后 manualScrollGracePeriod 内不要把视图拽回当前行,
-                // 否则刚拖到想看的位置又被自动 scrollTo 弹回, 等同不能浏览。
-                guard Date().timeIntervalSince(lastUserScrollTime) >= Self.manualScrollGracePeriod
-                else { return }
-                withAnimation(.smooth(duration: 0.34, extraBounce: 0)) {
-                    proxy.scrollTo(lyrics[idx].id, anchor: .center)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 4)
+                        .onChanged { _ in lastUserScrollTime = Date() }
+                        .onEnded { _ in lastUserScrollTime = Date() }
+                )
+                .onChange(of: currentLineIndex) { _, idx in
+                    guard !isPinchingLyrics, idx < lyrics.count else { return }
+                    // 用户手动滚动后 manualScrollGracePeriod 内不要把视图拽回当前行,
+                    // 否则刚拖到想看的位置又被自动 scrollTo 弹回, 等同不能浏览。
+                    guard Date().timeIntervalSince(lastUserScrollTime) >= Self.manualScrollGracePeriod
+                    else { return }
+                    withAnimation(.smooth(duration: 0.34, extraBounce: 0)) {
+                        proxy.scrollTo(lyrics[idx].id, anchor: .center)
+                    }
                 }
             }
         }
@@ -1854,6 +1864,8 @@ struct LyricsScrollView: View {
 
     private var smoothWordLyricsView: some View {
         GeometryReader { geo in
+            let contentWidth = lyricContentWidth(in: geo.size.width)
+
             TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: false)) { ctx in
                 let now = player.interpolatedTime(at: ctx.date)
                 let autoOffset = smoothWordContentOffset(at: now, viewportHeight: geo.size.height)
@@ -1869,16 +1881,23 @@ struct LyricsScrollView: View {
                     wordLevelBadge
 
                     ForEach(Array(lyrics.enumerated()), id: \.element.id) { index, line in
-                        // 字级模式: row 整体明暗 / 缩放都用基于 now 的连续函数接管,
+                        // 字级模式: row 整体明暗 / 字号强调都用基于 now 的状态接管,
                         // 内部 foregroundStyle 全用 .white 实色 (dimmedByAmbient=true)。
                         // - opacity:  active 行 1.0, 远行 0.4 / 0.25; 用 wordLevelScrollLead /
                         //             Duration 同步窗口, 跟滚动一气呵成。
-                        // - scale:    active 行 1.06, 渐进过渡 ── 给"近大远小"的纵深感。
+                        // - scale:    只用于 row 内部字体大小, 外层保持 full width,
+                        //             避免放大后右侧裁切或每帧几何反馈。
                         let activity = rowVisualActivity(at: now, index: index)
-                        lyricsRow(line: line, index: index, dimmedByAmbient: true, timelineTime: now)
+                        lyricsRow(
+                            line: line,
+                            index: index,
+                            dimmedByAmbient: true,
+                            timelineTime: now,
+                            availableWidth: contentWidth,
+                            visualScale: CGFloat(activity.scale)
+                        )
                             .id(line.id)
                             .opacity(activity.opacity)
-                            .scaleEffect(activity.scale, anchor: line.voice == .secondary ? .trailing : .leading)
                             .onTapGesture { player.seek(to: line.timestamp) }
                             .padding(.vertical, 2)
                             .background(rowFrameReader(id: line.id))
@@ -1886,7 +1905,8 @@ struct LyricsScrollView: View {
 
                     Spacer().frame(height: 80)
                 }
-                .padding(.horizontal, 24)
+                .frame(width: contentWidth, alignment: .topLeading)
+                .padding(.horizontal, Self.lyricsHorizontalPadding)
                 .coordinateSpace(name: SmoothWordLyricsCoordinateSpace.name)
                 .offset(y: displayOffset)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -2024,19 +2044,28 @@ struct LyricsScrollView: View {
     /// 的连续 ambient opacity 接管, row 内部不要再按 isActive 离散切换颜色,
     /// 否则跟外层 .opacity multiply 会双重叠加 + 跳变。
     @ViewBuilder
-    private func lyricsRow(line: LyricLine, index: Int, dimmedByAmbient: Bool = false, timelineTime: TimeInterval? = nil) -> some View {
+    private func lyricsRow(
+        line: LyricLine,
+        index: Int,
+        dimmedByAmbient: Bool = false,
+        timelineTime: TimeInterval? = nil,
+        availableWidth: CGFloat,
+        visualScale: CGFloat = 1
+    ) -> some View {
         let isActive = index == currentLineIndex
         let baseSize = hasWordLevelLyrics
             ? Self.lyricsWordLevelBaseSize
             : isActive ? Self.lyricsActiveBaseSize : Self.lyricsInactiveBaseSize
-        let fontSize = baseSize * CGFloat(effectiveLyricsScale)
+        let fontSize = baseSize * CGFloat(effectiveLyricsScale) * max(visualScale, 1)
         // weight 在 dimmedByAmbient 模式下也固定 .semibold ── 字级模式 active 行
         // 已经有 syllable 扫光 + scale bounce 强调, weight 跳变只会增加视觉颗粒感。
         let weight: Font.Weight = dimmedByAmbient ? .semibold : (isActive ? .bold : .semibold)
         let alignment: HorizontalAlignment = line.voice == .secondary ? .trailing : .leading
+        let frameAlignment: Alignment = line.voice == .secondary ? .trailing : .leading
 
         VStack(alignment: alignment, spacing: 4) {
             singleLineContent(line: line, isActive: isActive, index: index, fontSize: fontSize, weight: weight, dimmedByAmbient: dimmedByAmbient, timelineTime: timelineTime)
+                .frame(width: availableWidth, alignment: frameAlignment)
 
             // 歌词翻译 — 在原文下面以略小的字号显示, 仅当启用且当前行有翻译。
             // 字号取原文的 0.65 + medium weight, 视觉上是 secondary。
@@ -2053,16 +2082,18 @@ struct LyricsScrollView: View {
                     // 长翻译在窄屏 / 大字号下要 wrap 多行。不加 fixedSize 时 SwiftUI
                     // 会优先单行 + 截断显示省略号。
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: availableWidth, alignment: frameAlignment)
             }
 
             if let bgs = line.background {
                 ForEach(bgs) { bg in
                     singleLineContent(line: bg, isActive: isActive, index: index, fontSize: fontSize * 0.7, weight: .medium, dimmedByAmbient: dimmedByAmbient, timelineTime: timelineTime)
                         .opacity(0.7)
+                        .frame(width: availableWidth, alignment: frameAlignment)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: line.voice == .secondary ? .trailing : .leading)
+        .frame(width: availableWidth, alignment: frameAlignment)
     }
 
     @ViewBuilder
@@ -2110,18 +2141,15 @@ struct LyricsScrollView: View {
         }
     }
 
-    /// 字级模式 row 的视觉状态 ── opacity 和 scale 都基于同一个 activity 0..1
-    /// 连续值派生, 保证两者节奏一致。
+    /// 字级模式 row 的视觉状态。
     private struct RowActivity {
         var opacity: Double
         var scale: Double
     }
 
-    /// 字级模式专用 ── 计算指定行的视觉激活度 (0..1, 0=远行, 1=正在唱), 然后
-    /// 一次性派生 opacity / scale。两者同节奏渐变, 行从 active → past 的过渡
-    /// 跟 scroll offset 在同一套时间窗口 (wordLevelScrollLead /
-    /// wordLevelScrollDuration) 内同步发生 ── 位置 / 颜色 / 缩放是一个事件的
-    /// 不同面, 不再有"先滑动后跳暗"的不协调感。
+    /// 字级模式专用 ── opacity 保留短过渡, 但 scale 使用离散 active 状态。
+    /// 如果每帧都改变字号 / 行宽, SwiftUI 的 geometry preference 会和自动滚动
+    /// 形成反馈循环; 行距抖动时主线程会被打满, 甚至触发 watchdog。
     private func rowVisualActivity(at now: TimeInterval, index: Int) -> RowActivity {
         guard index >= 0, index < lyrics.count else {
             return RowActivity(opacity: 0.4, scale: 1.0)
@@ -2163,9 +2191,9 @@ struct LyricsScrollView: View {
         // opacity: 两档 ── 非 active 0.4 / active 1.0。
         let opacity = 0.4 + 0.6 * activity
 
-        // scale: 非 active 1.0 / active 1.12 ── 比之前的 1.06 更夸张, 给"聚焦
-        // 灯光打在你身上"的强调感, 让 active 行更突出。
-        let scale = 1.0 + 0.12 * activity
+        // scale: 非 active 1.0 / active 1.12。这里故意不用连续 activity,
+        // 让布局只在当前行切换时变化, 不在 60Hz TimelineView 中每帧变化。
+        let scale = index == currentLineIndex ? 1.12 : 1.0
 
         return RowActivity(opacity: opacity, scale: scale)
     }
@@ -2173,6 +2201,10 @@ struct LyricsScrollView: View {
     private func smoothstep(_ t: Double) -> Double {
         let c = max(0, min(1, t))
         return c * c * (3 - 2 * c)
+    }
+
+    private func lyricContentWidth(in viewportWidth: CGFloat) -> CGFloat {
+        max(0, viewportWidth - Self.lyricsHorizontalPadding * 2)
     }
 
     private func shouldRenderWordTimeline(line: LyricLine, index: Int, isActive: Bool, dimmedByAmbient: Bool = false) -> Bool {

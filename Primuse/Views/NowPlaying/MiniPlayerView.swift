@@ -17,6 +17,7 @@ struct MiniPlayerView: View {
                     size: 40, cornerRadius: 8,
                     sourceID: player.currentSong?.sourceID,
                     filePath: player.currentSong?.filePath,
+                    fileFormat: player.currentSong?.fileFormat,
                     revisionToken: player.coverRevision
                 )
                     .padding(.trailing, 10)

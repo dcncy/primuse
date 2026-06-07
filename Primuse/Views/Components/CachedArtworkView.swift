@@ -31,6 +31,7 @@ struct CachedArtworkView: View {
     var cornerRadius: CGFloat = 12
     var sourceID: String? = nil
     var filePath: String? = nil
+    var fileFormat: AudioFormat? = nil
     /// For album/artist artwork fetched by ArtworkFetchService
     var albumID: String? = nil
     var albumTitle: String? = nil
@@ -58,6 +59,16 @@ struct CachedArtworkView: View {
         return cache
     }()
 
+    /// Remember recent failed loads so scrolling away and back does not keep
+    /// re-checking the same missing sidecar / source artwork.
+    nonisolated(unsafe) private static let failedLoadCache: NSCache<NSString, NSDate> = {
+        let cache = NSCache<NSString, NSDate>()
+        cache.countLimit = 1_000
+        return cache
+    }()
+
+    private static let failedLoadCacheTTL: TimeInterval = 5 * 60
+
     /// Deduplicates in-flight source fetches: multiple views requesting the same cover
     /// share a single network request instead of each fetching independently.
     private static let inFlightTracker = InFlightFetchTracker()
@@ -84,18 +95,21 @@ struct CachedArtworkView: View {
     // Backward compatible init — old call sites use coverFileName
     init(coverFileName: String?, size: CGFloat? = nil, cornerRadius: CGFloat = 12,
          sourceID: String? = nil, filePath: String? = nil,
+         fileFormat: AudioFormat? = nil,
          revisionToken: Int = 0) {
         self.coverRef = coverFileName
         self.size = size
         self.cornerRadius = cornerRadius
         self.sourceID = sourceID
         self.filePath = filePath
+        self.fileFormat = fileFormat
         self.revisionToken = revisionToken
     }
 
     // New init with explicit songID
     init(coverRef: String?, songID: String?, size: CGFloat? = nil, cornerRadius: CGFloat = 12,
          sourceID: String? = nil, filePath: String? = nil,
+         fileFormat: AudioFormat? = nil,
          placeholderIcon: String = "music.note",
          revisionToken: Int = 0) {
         self.coverRef = coverRef
@@ -104,6 +118,7 @@ struct CachedArtworkView: View {
         self.cornerRadius = cornerRadius
         self.sourceID = sourceID
         self.filePath = filePath
+        self.fileFormat = fileFormat
         self.placeholderIcon = placeholderIcon
         self.revisionToken = revisionToken
     }
@@ -216,7 +231,7 @@ struct CachedArtworkView: View {
 
     private var loadIdentity: String {
         let refIdentity = coverRef ?? ""
-        let sourceIdentity = "\(sourceID ?? "")|\(filePath ?? "")"
+        let sourceIdentity = "\(sourceID ?? "")|\(filePath ?? "")|\(fileFormat?.rawValue ?? "")"
         return "\(cacheKey)#ref\(refIdentity)#src\(sourceIdentity)#rev\(revisionToken)#inv\(cacheInvalidationRevision)"
     }
 
@@ -252,11 +267,18 @@ struct CachedArtworkView: View {
         }
 
         let cacheNSKey = key as NSString
+        let failureNSKey = identity as NSString
 
         // Tier 1: Memory cache — already decoded, hand it to the View directly.
         if let cached = Self.memoryCache.object(forKey: cacheNSKey) {
             loadedIdentity = identity
             image = cached
+            return
+        }
+
+        if Self.hasRecentFailure(for: failureNSKey) {
+            loadedIdentity = identity
+            if image != nil { image = nil }
             return
         }
 
@@ -272,6 +294,7 @@ struct CachedArtworkView: View {
         let capturedArtistName = artistName
         let capturedSourceID = sourceID
         let capturedFilePath = filePath
+        let capturedFileFormat = fileFormat
         let capturedSourceManager = sourceManager
 
         let decoded = await Self.loadAndDecode(
@@ -285,6 +308,7 @@ struct CachedArtworkView: View {
             artistName: capturedArtistName,
             sourceID: capturedSourceID,
             filePath: capturedFilePath,
+            fileFormat: capturedFileFormat,
             sourceManager: capturedSourceManager
         )
         guard !Task.isCancelled, loadIdentity == identity else { return }
@@ -294,6 +318,18 @@ struct CachedArtworkView: View {
         } else if image != nil {
             image = nil
         }
+        if decoded == nil {
+            Self.failedLoadCache.setObject(NSDate(), forKey: failureNSKey)
+        }
+    }
+
+    private static func hasRecentFailure(for key: NSString) -> Bool {
+        guard let failedAt = failedLoadCache.object(forKey: key) else { return false }
+        if abs(failedAt.timeIntervalSinceNow) < failedLoadCacheTTL {
+            return true
+        }
+        failedLoadCache.removeObject(forKey: key)
+        return false
     }
 
     // MARK: - Load + Decode (off-main)
@@ -312,6 +348,7 @@ struct CachedArtworkView: View {
         artistName: String?,
         sourceID: String?,
         filePath: String?,
+        fileFormat: AudioFormat?,
         sourceManager: SourceManager
     ) async -> PlatformImage? {
         let ignoredGenericFolderCover = shouldIgnoreGenericFolderCover(ref: ref, filePath: filePath)
@@ -358,6 +395,7 @@ struct CachedArtworkView: View {
                 songID: songID,
                 sourceID: sourceID,
                 filePath: filePath,
+                fileFormat: fileFormat,
                 sourceManager: sourceManager
             )
         }
@@ -427,6 +465,7 @@ struct CachedArtworkView: View {
     private static func loadFromSource(
         ref: String?, songID: String?,
         sourceID: String?, filePath: String?,
+        fileFormat: AudioFormat?,
         sourceManager: SourceManager
     ) async -> Data? {
         // Case 1: URL reference (media server API — already a full URL)
@@ -437,8 +476,9 @@ struct CachedArtworkView: View {
             return try? await session.data(from: url).0
         }
 
-        // Case 2: Sidecar path on source — get a streaming URL (no file download needed)
-        if let ref, ref.contains("/"), let sourceID {
+        // Case 2: Sidecar reference on source — get a streaming URL (no file download needed).
+        // Cloud drives may store opaque file IDs here, not just slashy paths.
+        if let ref, !ref.isEmpty, let sourceID {
             if let imageURL = await sourceManager.imageURL(for: ref, sourceID: sourceID) {
                 let config = URLSessionConfiguration.default
                 config.timeoutIntervalForRequest = 10
@@ -449,7 +489,10 @@ struct CachedArtworkView: View {
 
         // Case 3: No ref — try embedded extraction from locally cached audio file only
         if let sourceID, let filePath {
-            let dummySong = Song(id: "", title: "", fileFormat: .mp3, filePath: filePath,
+            let inferredFormat = fileFormat
+                ?? AudioFormat.from(fileExtension: (filePath as NSString).pathExtension)
+                ?? .mp3
+            let dummySong = Song(id: "", title: "", fileFormat: inferredFormat, filePath: filePath,
                                  sourceID: sourceID, fileSize: 0, dateAdded: Date())
             if let cachedURL = sourceManager.cachedURL(for: dummySong) {
                 let metadata = await FileMetadataReader.read(from: cachedURL)
@@ -504,11 +547,13 @@ struct CachedArtworkView: View {
             memoryCache.removeObject(forKey: "album_\(fileName)@\(bucket)" as NSString)
             memoryCache.removeObject(forKey: "artist_\(fileName)@\(bucket)" as NSString)
         }
+        failedLoadCache.removeAllObjects()
         postArtworkInvalidation(token: fileName)
     }
 
     static func clearMemoryCache() {
         memoryCache.removeAllObjects()
+        failedLoadCache.removeAllObjects()
         postArtworkInvalidation(token: nil, userInfo: ["all": true])
     }
 

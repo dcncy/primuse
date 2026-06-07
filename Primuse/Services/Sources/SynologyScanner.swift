@@ -30,64 +30,78 @@ actor SynologyScanner {
         startingCount: Int = 0
     ) -> AsyncThrowingStream<ScanUpdate, Error> {
         AsyncThrowingStream { continuation in
-            Task {
-                // Remove redundant child directories when a parent is already selected
-                let dirs = Self.deduplicateDirectories(directories)
+            let task = Task {
+                do {
+                    defer { cleanup() }
 
-                // Phase 1: Count total audio files
-                var totalCount = 0
-                for dir in dirs {
-                    totalCount += await countAudioFiles(in: dir)
-                }
+                    // Remove redundant child directories when a parent is already selected
+                    let dirs = Self.deduplicateDirectories(directories)
 
-                // Phase 2: Scan and extract metadata
-                var allSongs = existingSongs
-                let existingPaths = Set(existingSongs.map(\.filePath))
-                let initialCount = max(existingSongs.count, startingCount)
-                var count = totalCount > 0 ? min(initialCount, totalCount) : initialCount
-                var encounteredPaths: Set<String> = []
-                var hadDirectoryFailure = false
-
-                if !existingSongs.isEmpty {
-                    continuation.yield(
-                        ScanUpdate(scannedCount: count, totalCount: totalCount, currentFile: "", songs: allSongs)
-                    )
-                }
-
-                for dir in dirs {
-                    do {
-                        try await scanDirectory(
-                            path: dir, allSongs: &allSongs,
-                            count: &count, totalCount: totalCount,
-                            existingPaths: existingPaths,
-                            encounteredPaths: &encounteredPaths,
-                            continuation: continuation
-                        )
-                    } catch {
-                        hadDirectoryFailure = true
-                        // Log error but continue scanning remaining directories
-                        NSLog("⚠️ Failed to scan directory \(dir): \(error.localizedDescription)")
-                        continue
+                    // Phase 1: Count total audio files
+                    var totalCount = 0
+                    for dir in dirs {
+                        try Task.checkCancellation()
+                        totalCount += await countAudioFiles(in: dir)
                     }
-                }
 
-                if !hadDirectoryFailure {
-                    allSongs.removeAll { encounteredPaths.contains($0.filePath) == false }
-                    count = allSongs.count
-                }
+                    // Phase 2: Scan and extract metadata
+                    var allSongs = existingSongs
+                    let existingPaths = Set(existingSongs.map(\.filePath))
+                    let initialCount = max(existingSongs.count, startingCount)
+                    var count = totalCount > 0 ? min(initialCount, totalCount) : initialCount
+                    var encounteredPaths: Set<String> = []
+                    var hadDirectoryFailure = false
 
-                continuation.yield(ScanUpdate(scannedCount: count, totalCount: totalCount, currentFile: "", songs: allSongs))
-                continuation.finish()
-                cleanup()
+                    if !existingSongs.isEmpty {
+                        continuation.yield(
+                            ScanUpdate(scannedCount: count, totalCount: totalCount, currentFile: "", songs: allSongs)
+                        )
+                    }
+
+                    for dir in dirs {
+                        try Task.checkCancellation()
+                        do {
+                            try await scanDirectory(
+                                path: dir, allSongs: &allSongs,
+                                count: &count, totalCount: totalCount,
+                                existingPaths: existingPaths,
+                                encounteredPaths: &encounteredPaths,
+                                continuation: continuation
+                            )
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            hadDirectoryFailure = true
+                            // Log error but continue scanning remaining directories
+                            NSLog("⚠️ Failed to scan directory \(dir): \(error.localizedDescription)")
+                            continue
+                        }
+                    }
+
+                    if !hadDirectoryFailure {
+                        allSongs.removeAll { encounteredPaths.contains($0.filePath) == false }
+                        count = allSongs.count
+                    }
+
+                    continuation.yield(ScanUpdate(scannedCount: count, totalCount: totalCount, currentFile: "", songs: allSongs))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
             }
         }
     }
 
     /// Recursively count audio files without downloading metadata
     private func countAudioFiles(in path: String) async -> Int {
+        if Task.isCancelled { return 0 }
         guard let items = try? await api.listDirectory(path: path) else { return 0 }
         var count = 0
         for item in items {
+            if Task.isCancelled { return count }
             if item.isDirectory {
                 count += await countAudioFiles(in: item.path)
             } else {
@@ -107,6 +121,7 @@ actor SynologyScanner {
         encounteredPaths: inout Set<String>,
         continuation: AsyncThrowingStream<ScanUpdate, Error>.Continuation
     ) async throws {
+        try Task.checkCancellation()
         let items = try await api.listDirectory(path: path)
 
         // Build a set of filenames for sidecar detection
@@ -131,6 +146,7 @@ actor SynologyScanner {
         }
 
         for item in items {
+            try Task.checkCancellation()
             if item.isDirectory {
                 try await scanDirectory(
                     path: item.path, allSongs: &allSongs,

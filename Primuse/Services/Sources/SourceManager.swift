@@ -2400,23 +2400,6 @@ private extension SourceManager {
     }
 }
 
-private extension MusicSource {
-    var supportsRangeStreaming: Bool {
-        type.category == .cloudDrive
-            || type == .webdav
-            || type == .synology
-            || type == .qnap
-            || type == .ugreen
-            || type == .fnos
-            || type == .s3
-            || type == .smb
-            || type == .sftp
-            || type == .ftp
-            || type == .nfs
-            || type.isSubsonicFamily
-    }
-}
-
 extension Notification.Name {
     /// 一个音乐源的登录失败了 (密码错 / 2FA / 限流 / 网络挂)。
     /// userInfo: ["sourceID": String, "message": String]

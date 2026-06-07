@@ -407,7 +407,8 @@ struct SmartPlaylistEditorView: View {
                         size: 28,
                         cornerRadius: 5,
                         sourceID: song.sourceID,
-                        filePath: song.filePath
+                        filePath: song.filePath,
+                        fileFormat: song.fileFormat
                     )
                     .overlay {
                         RoundedRectangle(cornerRadius: 5, style: .continuous)

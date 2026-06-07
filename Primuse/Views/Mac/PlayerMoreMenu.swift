@@ -278,7 +278,8 @@ struct PlayerMoreMenu<MenuLabel: View>: View {
                 size: 42,
                 cornerRadius: 7,
                 sourceID: song.sourceID,
-                filePath: song.filePath
+                filePath: song.filePath,
+                fileFormat: song.fileFormat
             )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -796,7 +797,8 @@ struct MacSimilarSongsPopover: View {
                     size: 38,
                     cornerRadius: 6,
                     sourceID: row.song.sourceID,
-                    filePath: row.song.filePath
+                    filePath: row.song.filePath,
+                    fileFormat: row.song.fileFormat
                 )
 
                 VStack(alignment: .leading, spacing: 3) {

@@ -310,7 +310,8 @@ struct AlbumDetailView: View {
                 CachedArtworkView(
                     coverRef: song.coverArtFileName, songID: song.id,
                     size: 32, cornerRadius: PMRadius.xs,
-                    sourceID: song.sourceID, filePath: song.filePath
+                    sourceID: song.sourceID, filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
 
                 Text(song.title)

@@ -151,11 +151,11 @@ final class MusicScraperService {
                                 await MetadataAssetStore.shared.cacheLyrics(lyricsLines, forSongID: songID, force: true)
                             }
 
-                            if needsUpdate {
-                                await MainActor.run {
-                                    library.replaceSong(refSong)
-                                }
+                        if needsUpdate {
+                            await MainActor.run {
+                                library.updateAssetReferences(songID: refSong.id, coverRef: refSong.coverArtFileName)
                             }
+                        }
 
                             if !writeResult.errors.isEmpty {
                                 plog("⚠️ Sidecar write errors: \(writeResult.errors)")
@@ -383,7 +383,7 @@ final class MusicScraperService {
 
                                     if needsUpdate {
                                         await MainActor.run {
-                                            library.replaceSong(refSong)
+                                            library.updateAssetReferences(songID: refSong.id, coverRef: refSong.coverArtFileName)
                                         }
                                     }
 
@@ -831,6 +831,7 @@ final class MusicScraperService {
         lyricsLines: [LyricLine]?
     ) async throws -> SidecarWriteService.WriteResult {
         try await withThrowingTaskGroup(of: SidecarWriteService.WriteResult.self) { group in
+            defer { group.cancelAll() }
             group.addTask {
                 let connector = try await sourceManager.sidecarWriteConnector(for: song)
                 plog("📝 Sidecar: writing sidecars for '\(song.title)' filePath=\(song.filePath)")
@@ -853,7 +854,6 @@ final class MusicScraperService {
             guard let result = try await group.next() else {
                 throw CancellationError()
             }
-            group.cancelAll()
             return result
         }
     }

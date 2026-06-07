@@ -545,13 +545,19 @@ struct MacSourcesView: View {
     }
 
     private func setEnabled(_ source: MusicSource, _ enabled: Bool) {
+        if !enabled {
+            stopBackgroundWork(for: source.id)
+        }
         updateSource(source.id) { $0.isEnabled = enabled }
         library.updateDisabledSourceIDs(disabledSourceIDs)
+        if enabled {
+            backfill.start()
+        }
     }
 
     private func toggleSourceEnabled(_ source: MusicSource) {
-        updateSource(source.id) { $0.isEnabled.toggle() }
-        library.updateDisabledSourceIDs(disabledSourceIDs)
+        let current = currentSource(for: source)
+        setEnabled(current, !current.isEnabled)
     }
 
     private var disabledSourceIDs: Set<String> {
@@ -559,8 +565,7 @@ struct MacSourcesView: View {
     }
 
     private func deleteSource(_ source: MusicSource) {
-        scanService.cancelScan(for: source.id)
-        scanService.removeCheckpoint(for: source.id)
+        stopBackgroundWork(for: source.id)
         library.removeSongsForSource(source.id)
         sourceStore.remove(id: source.id)
         scanService.removeSynologyAPI(for: source.id)
@@ -576,6 +581,12 @@ struct MacSourcesView: View {
             CloudDirectoryNameStore.deleteAll(for: source.id)
         }
         Task { await sourceManager.removeConnector(for: source.id) }
+    }
+
+    private func stopBackgroundWork(for sourceID: String) {
+        scanService.cancelScan(for: sourceID)
+        scanService.removeCheckpoint(for: sourceID)
+        backfill.discardWork(forSourceID: sourceID)
     }
 
     private func runScan(_ source: MusicSource) {

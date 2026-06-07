@@ -496,7 +496,8 @@ struct SongListView: View {
                 CachedArtworkView(
                     coverRef: song.coverArtFileName, songID: song.id,
                     size: 28, cornerRadius: 4,
-                    sourceID: song.sourceID, filePath: song.filePath
+                    sourceID: song.sourceID, filePath: song.filePath,
+                    fileFormat: song.fileFormat
                 )
                 .frame(width: 32, alignment: .leading)
 
@@ -730,7 +731,8 @@ struct SongListView: View {
                         songID: song.id,
                         cornerRadius: 8,
                         sourceID: song.sourceID,
-                        filePath: song.filePath
+                        filePath: song.filePath,
+                        fileFormat: song.fileFormat
                     )
                     .aspectRatio(1, contentMode: .fit)
 

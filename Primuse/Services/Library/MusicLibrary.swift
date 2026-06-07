@@ -821,6 +821,37 @@ final class MusicLibrary {
         persistSnapshot()
     }
 
+    /// Update cached artwork / lyrics references without rebuilding album,
+    /// artist, playlist, and history indexes. Scraped sidecar assets only
+    /// change where UI loaders read media from; they don't affect grouping.
+    func updateAssetReferences(songID: String, coverRef: String? = nil, lyricsRef: String? = nil) {
+        guard let index = songs.firstIndex(where: { $0.id == songID }) else { return }
+        let oldCoverRef = songs[index].coverArtFileName
+        var changed = false
+
+        if coverRef != nil, songs[index].coverArtFileName != coverRef {
+            songs[index].coverArtFileName = coverRef
+            changed = true
+        }
+        if lyricsRef != nil, songs[index].lyricsFileName != lyricsRef {
+            songs[index].lyricsFileName = lyricsRef
+            changed = true
+        }
+        guard changed else { return }
+
+        if let visibleIndex = visibleSongs.firstIndex(where: { $0.id == songID }) {
+            visibleSongs[visibleIndex] = songs[index]
+        }
+        visibleSongByID[songID] = songs[index]
+        lastReplacedSong = songs[index]
+        lastReplacedSongIDs = [songID]
+        songReplacementToken = UUID()
+        if oldCoverRef != songs[index].coverArtFileName {
+            postArtworkInvalidation(songID: songID, oldRef: oldCoverRef, newRef: songs[index].coverArtFileName)
+        }
+        persistSnapshot()
+    }
+
     /// Add songs from a scan result and rebuild albums/artists.
     ///
     /// `notifyRemovals` 控制是否在发现"affected source 里有歌不在 incoming 里"
@@ -1025,12 +1056,20 @@ final class MusicLibrary {
 
     /// Remove all songs for a given source
     func removeSongsForSource(_ sourceID: String) {
+        let removedSongs = songs.filter { $0.sourceID == sourceID }
+        disabledSourceIDs.remove(sourceID)
+        guard !removedSongs.isEmpty else {
+            rebuildVisibleCache()
+            return
+        }
+
         songs.removeAll { $0.sourceID == sourceID }
         invalidateSearchCaches()
         cleanPlaylistEntries()
         cleanPlaybackHistoryEntries()
         rebuildIndex()
         persistSnapshot()
+        postSongsRemoved(removedSongs)
     }
 
     /// Look up the current Song by its stable id. Used by row views to

@@ -2940,6 +2940,7 @@ final class AudioPlayerService {
         let coverRef = currentSong?.coverArtFileName
         let capturedSourceID = currentSong?.sourceID
         let capturedFilePath = currentSong?.filePath
+        let capturedFileFormat = currentSong?.fileFormat
         let capturedSourceManager = sourceManager
 
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -2991,7 +2992,10 @@ final class AudioPlayerService {
             // Tier 4: embedded cover extraction from locally cached audio file
             if loadedImage == nil, let sourceID = capturedSourceID, let filePath = capturedFilePath,
                let sourceManager = capturedSourceManager {
-                let dummySong = Song(id: "", title: "", fileFormat: .mp3, filePath: filePath,
+                let inferredFormat = capturedFileFormat
+                    ?? AudioFormat.from(fileExtension: (filePath as NSString).pathExtension)
+                    ?? .mp3
+                let dummySong = Song(id: "", title: "", fileFormat: inferredFormat, filePath: filePath,
                                      sourceID: sourceID, fileSize: 0, dateAdded: Date())
                 if let cachedURL = await sourceManager.cachedURL(for: dummySong) {
                     let metadata = await FileMetadataReader.read(from: cachedURL)

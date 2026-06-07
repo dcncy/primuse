@@ -1,0 +1,13 @@
+/* 繁體中文（台灣） */
+
+"src.displayName.ugreen" = "綠聯 Ugreen";
+"src.displayName.fnos" = "飛牛 fnOS";
+"src.displayName.baiduPan" = "百度網盤";
+"src.displayName.aliyunDrive" = "阿里雲盤";
+"src.displayName.pan115" = "115 網盤";
+"src.displayName.pan123" = "123 雲盤";
+"src.subtitle.fnos" = "飛牛 OS";
+"src.subtitle.baiduPan" = "百度網盤 OAuth";
+"src.subtitle.aliyunDrive" = "阿里雲盤 PDS";
+"src.subtitle.pan115" = "115 開放平台 · 尚未開放";
+"src.subtitle.pan123" = "123 開放平台 · 尚未開放";

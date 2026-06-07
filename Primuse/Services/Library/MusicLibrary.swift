@@ -753,7 +753,9 @@ final class MusicLibrary {
                   let info = note.userInfo,
                   let songID = info["songID"] as? String,
                   let text = info["lyricsText"] as? String else { return }
-            self.scheduleLyricsTextFlush(songID: songID, lyricsText: text)
+            Task { @MainActor in
+                self.scheduleLyricsTextFlush(songID: songID, lyricsText: text)
+            }
         }
     }
 

@@ -95,7 +95,7 @@ struct TagEditorView: View {
                     Button(String(localized: "cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "save")) { save() }
+                    Button(String(localized: "save")) { Task { await save() } }
                         .disabled(!hasChanges)
                 }
             }
@@ -231,7 +231,7 @@ struct TagEditorView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    save()
+                    Task { await save() }
                 } label: {
                     Text("保存并写回")
                         .font(.system(size: 12, weight: .semibold))
@@ -513,7 +513,8 @@ struct TagEditorView: View {
             || dn != song.discNumber
     }
 
-    private func save() {
+    @MainActor
+    private func save() async {
         var updated = song
         updated.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if updated.title.isEmpty {
@@ -531,7 +532,7 @@ struct TagEditorView: View {
         // storeCover 内部 dedupe by content hash,同一张图重复存只占一份空间。
         if let coverData = pickedCoverData {
             let oldRef = song.coverArtFileName
-            if let newFileName = MetadataAssetStore.shared.storeCover(coverData, for: song.id) {
+            if let newFileName = await MetadataAssetStore.shared.storeCover(coverData, for: song.id) {
                 updated.coverArtFileName = newFileName
                 // 失效原 coverArtFileName 的渲染缓存,让 CachedArtworkView 在
                 // 下一次 read 时拿到新数据 (新文件名不会跟旧名同 hash,但保险)

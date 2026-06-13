@@ -27,7 +27,10 @@ import PrimuseKit
 /// (useful for support / debugging).
 @MainActor
 enum CloudAccountMigrationService {
-    static let migrationKey = "primuse.cloudAccountMigration.v1"
+    // v2: re-run once for everyone so the credential-free config dedup
+    // (phase 1.5) gets a chance to collapse duplicate OAuth mounts that the
+    // v1 run couldn't (e.g. a clean reinstall where tokens are gone).
+    static let migrationKey = "primuse.cloudAccountMigration.v2"
 
     static func runIfNeeded(
         sourcesStore: SourcesStore,
@@ -50,8 +53,10 @@ enum CloudAccountMigrationService {
         // attribution still runs on each retry, so single-account
         // users get cleanup immediately even when phase 1 is
         // incomplete.
-        if stats.failed == 0 {
+        if stats.failed == 0 && stats.examined > 0 {
             UserDefaults.standard.set(true, forKey: migrationKey)
+        } else if stats.examined == 0 {
+            plog("☁️ CloudAccountMigration: no OAuth sources yet (likely still syncing) — will retry next launch")
         } else {
             plog("☁️ CloudAccountMigration: \(stats.failed) source(s) couldn't identify — will retry next launch")
         }
@@ -62,6 +67,11 @@ enum CloudAccountMigrationService {
         var merged: Int = 0
         var songsRepointed: Int = 0
         var failed: Int = 0
+        /// How many OAuth sources this run actually looked at. 0 means the
+        /// sources haven't synced down yet — don't mark the migration
+        /// complete, or a clean reinstall would "finish" before CloudKit
+        /// delivers the duplicate mounts and never get to dedup them.
+        var examined: Int = 0
     }
 
     /// The actual migration body. Exposed (without the UserDefaults
@@ -75,6 +85,7 @@ enum CloudAccountMigrationService {
         var stats = Stats()
 
         let oauthSources = sourcesStore.sources.filter { $0.type.requiresOAuth }
+        stats.examined = oauthSources.count
         guard !oauthSources.isEmpty else { return stats }
 
         // (provider, accountUID) → array of source.id, ordered with the
@@ -87,6 +98,9 @@ enum CloudAccountMigrationService {
         // legacy shape: one user account, several stale duplicate
         // mounts whose tokens were overwritten by the freshest add).
         var unresolvedByProvider: [MusicSourceType: [MusicSource]] = [:]
+        // Every source that failed network identification (dead creds OR
+        // transient), for the credential-free config dedup below.
+        var unidentified: [MusicSource] = []
 
         for source in oauthSources {
             do {
@@ -102,6 +116,7 @@ enum CloudAccountMigrationService {
                 plog("☁️ Migration: source=\(source.id) (\(source.type.rawValue)) → uid=\(uid)")
             } catch {
                 stats.failed += 1
+                unidentified.append(source)
                 // Only credentials that are *definitively* dead make a
                 // source a phase-2 attribution candidate. A pure network
                 // blip at launch (URLError, 5xx/timeout) must NOT count —
@@ -179,6 +194,53 @@ enum CloudAccountMigrationService {
             }
         }
 
+        // Phase 1.5: credential-free dedup. When *no* live credentials are
+        // available (the classic "clean reinstall → CloudKit pulls every
+        // historical OAuth mount back down, but the tokens are gone so none
+        // can identify over the network" shape), phases 1 & 2 can't help —
+        // grouped is empty so there's no keeper to attribute orphans to, and
+        // the duplicates all just show up in the list.
+        //
+        // But duplicate mounts of the same account share an identical set of
+        // scanned folder ids (cloud folder ids are globally unique and embed
+        // the drive/account id), so we can collapse *exact* config duplicates
+        // with zero network calls. This only merges sources whose scanned
+        // folders are byte-identical — never two distinct accounts (their
+        // folder ids differ), and never same-account-different-folder mounts
+        // (those wait for the credential path once the user re-authenticates).
+        var mergedAwayBySignature = Set<String>()
+        let bySignature = Dictionary(grouping: unidentified.compactMap { source -> (String, MusicSource)? in
+            guard let sig = accountConfigSignature(for: source) else { return nil }
+            return (sig, source)
+        }, by: { $0.0 }).mapValues { $0.map(\.1) }
+        for (_, dupes) in bySignature where dupes.count > 1 {
+            let keeper = dupes.max { ($0.lastScannedAt ?? .distantPast) < ($1.lastScannedAt ?? .distantPast) } ?? dupes[0]
+            let toMerge = dupes.filter { $0.id != keeper.id }
+            plog("☁️ Migration: phase 1.5 config-dedup — \(toMerge.count) exact-duplicate \(keeper.type.rawValue) mount(s) → keeper=\(keeper.id)")
+            let redundantIDs = Set(toMerge.map(\.id))
+            let affectedSongs = library.songs.filter { redundantIDs.contains($0.sourceID) }
+            if !affectedSongs.isEmpty {
+                let repointed = affectedSongs.map { song -> Song in
+                    var copy = song
+                    copy.sourceID = keeper.id
+                    return copy
+                }
+                library.replaceSongs(repointed)
+                stats.songsRepointed += affectedSongs.count
+            }
+            for source in toMerge {
+                sourcesStore.remove(id: source.id)
+                stats.merged += 1
+                mergedAwayBySignature.insert(source.id)
+            }
+        }
+        // Don't let phase 2 re-process sources we just merged away here.
+        if !mergedAwayBySignature.isEmpty {
+            for key in unresolvedByProvider.keys {
+                unresolvedByProvider[key]?.removeAll { mergedAwayBySignature.contains($0.id) }
+            }
+        }
+
         // Phase 2: best-effort fallback for sources whose tokens are
         // dead (the legacy "5 baidu sources, only the latest still
         // signed in" shape). When a provider has exactly one
@@ -232,6 +294,19 @@ enum CloudAccountMigrationService {
     /// Network / transient errors (URLError, `apiError` for 5xx/timeout,
     /// `rateLimited`, `invalidResponse`) deliberately return false — the
     /// source stays untouched and re-identifies on the next launch.
+    /// A credential-free account fingerprint: the source's scanned cloud
+    /// folder ids. These ids are globally unique per drive/account and embed
+    /// the account identity, so two OAuth mounts with byte-identical folder
+    /// sets are provably the same account — letting us dedup exact duplicates
+    /// even when no token is available to identify them over the network.
+    /// Returns nil for sources with no scanned folders yet (can't判定, so they
+    /// don't participate in this fallback dedup).
+    private static func accountConfigSignature(for source: MusicSource) -> String? {
+        let dirs = source.scannedDirectories.filter { !$0.isEmpty }
+        guard !dirs.isEmpty else { return nil }
+        return "\(source.type.rawValue)#\(dirs.sorted().joined(separator: "|"))"
+    }
+
     private static func isDeadCredentialError(_ error: Error) -> Bool {
         switch error {
         case CloudDriveError.notAuthenticated,

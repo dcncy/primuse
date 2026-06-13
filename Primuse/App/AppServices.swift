@@ -28,11 +28,6 @@ final class AppServices {
     let crashDiagnostics: CrashDiagnosticsService
     let duplicateCleanup: DuplicateCleanupService
 
-    #if os(iOS)
-    /// 持有 Live Activity 管理器 —— observation 驱动 start/update/end。必须强引用
-    /// 存活,否则 init 末尾实例化后立即释放,observation 也随之失效。
-    private var liveActivity: LiveActivityManager?
-    #endif
 
     private init() {
         // Class is @MainActor so this initializer is too — but the static
@@ -154,14 +149,9 @@ final class AppServices {
 
         wireIntentBridge()
         observeSpotlightReindex()
-
-        #if os(iOS)
-        // 接线 Live Activity:绑到播放器状态后,锁屏 / 灵动岛随播放自动 start /
-        // update / end。store 起来保活,否则 observation 跟着 manager 一起释放。
-        let liveActivity = LiveActivityManager()
-        liveActivity.start(observing: player)
-        self.liveActivity = liveActivity
-        #endif
+        // 注意: 不在这里接线 Live Activity。PrimuseActivityExtension 的灵动岛 /
+        // 锁屏布局仍是半成品(切歌不更新、杀进程后不消失),激活它比留作未启用
+        // 更糟。Live Activity 作为完整功能另行实现后再接线。
     }
 
     /// Spotlight 重建索引 ── 启动时跑一次, 之后只要 library 的

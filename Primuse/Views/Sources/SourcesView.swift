@@ -133,10 +133,13 @@ struct SourcesView: View {
                     )
                 }
             }
-            .confirmationDialog(
-                Text("delete"),
+            // 用 .alert(居中模态)而非 .confirmationDialog: 后者在 regular 尺寸
+            // 类下会渲染成 popover, 锚到本修饰符所在的顶层视图, 导致无论从哪一行
+            // 触发删除, 确认气泡都固定弹在列表顶部、不跟随被点的源。alert 不依赖
+            // 锚点, 各设备/尺寸类表现一致。
+            .alert(
+                "delete",
                 isPresented: deleteConfirmationBinding,
-                titleVisibility: .visible,
                 presenting: pendingDeleteSource
             ) { source in
                 Button(role: .destructive) {

@@ -26,25 +26,25 @@ extension EnvironmentValues {
 /// 设计稿里的 CSS variable 直译成 SwiftUI Color。所有半透明值都跟暗色 / 浅色模式相关。
 enum PMColor {
     // 文本
-    static let text       = dyn(dark: hex(0xF3EEE7),               light: hex(0x1F1C19))
-    static let textMuted  = dyn(dark: hex(0xF3EEE7).opacity(0.72), light: hex(0x1F1C19).opacity(0.66))
-    static let textFaint  = dyn(dark: hex(0xF3EEE7).opacity(0.50), light: hex(0x1F1C19).opacity(0.46))
+    static let text       = dyn(dark: hex(0xEEF0F2),               light: hex(0x1C1D1F))
+    static let textMuted  = dyn(dark: hex(0xEEF0F2).opacity(0.66), light: hex(0x1C1D1F).opacity(0.62))
+    static let textFaint  = dyn(dark: hex(0xEEF0F2).opacity(0.42), light: hex(0x1C1D1F).opacity(0.42))
 
-    // 背景
-    static let bg     = dyn(dark: hex(0x1A1715), light: hex(0xF6F4EF))
-    static let bgElev = dyn(dark: hex(0x2A2522), light: hex(0xFFFFFF))
-    static let bgDeep = dyn(dark: hex(0x0D0C0A), light: hex(0xE9E3DA))
+    // 背景 — 浅色为冷静中性灰 (贴 Apple Music / 系统设置白天), 深色为微冷石墨
+    static let bg     = dyn(dark: hex(0x161719), light: hex(0xF3F4F6))
+    static let bgElev = dyn(dark: hex(0x202226), light: hex(0xFFFFFF))
+    static let bgDeep = dyn(dark: hex(0x0C0D0E), light: hex(0xE7E8EC))
     /// 大播放器恒为暗底 (设计稿 AmbientBackdrop dark=true 用的 #0E0D0B), 不随系统浅色
     /// 变亮 —— 否则浅色模式下白色歌词 / 按钮在浅底上看不清。
     static let ambientDarkBase = hex(0x0E0D0B)
 
     // 侧栏 (玻璃半透 + 经典实色两套, 由 modifier 选择)
-    static let sidebarGlass   = dyn(dark: hex(0x0A0907).opacity(0.85), light: hex(0xEEE8DC).opacity(0.65))
-    static let sidebarClassic = dyn(dark: hex(0x0F0D0B),               light: hex(0xEBE5D9))
+    static let sidebarGlass   = dyn(dark: hex(0x0A0B0D).opacity(0.82), light: hex(0xE8EAEE).opacity(0.65))
+    static let sidebarClassic = dyn(dark: hex(0x0E0F11),               light: hex(0xE8EAEE))
 
     /// 底部播放栏玻璃模式的半透色 (设计稿 --pm-glass-fill): 盖在 NSVisualEffectView
     /// 模糊层上, 让底栏是"半透材质"而不是实色卡片, 跟窗口融为一体。
-    static let barGlassFill = dyn(dark: hex(0x3A342E).opacity(0.55), light: Color.white.opacity(0.55))
+    static let barGlassFill = dyn(dark: hex(0x282B30).opacity(0.58), light: Color.white.opacity(0.58))
 
     // 分割线
     static let divider       = dyn(dark: Color.white.opacity(0.10), light: Color.black.opacity(0.10))
@@ -54,12 +54,12 @@ enum PMColor {
     static let card       = dyn(dark: Color.white.opacity(0.06), light: hex(0xFFFFFF))
     static let cardBorder = dyn(dark: Color.white.opacity(0.10), light: Color.black.opacity(0.10))
 
-    // 状态色 (跨模式一致)
-    static let flac = hex(0x7ED187)
-    static let dsd  = hex(0xB89EEE)
-    static let ok   = hex(0x7ED187)
-    static let warn = hex(0xF0B078)
-    static let bad  = hex(0xFF7565)
+    // 状态色 — 浅色模式用更深、更饱和的变体, 保证在冷灰底上的可读对比度
+    static let flac = dyn(dark: hex(0x7ED187), light: hex(0x2E7A2E))
+    static let dsd  = dyn(dark: hex(0xB89EEE), light: hex(0x6A4DC8))
+    static let ok   = dyn(dark: hex(0x7ED187), light: hex(0x3D9A4D))
+    static let warn = dyn(dark: hex(0xF0B078), light: hex(0xC96442))
+    static let bad  = dyn(dark: hex(0xFF7565), light: hex(0xD94F3A))
 
     // 默认品牌色 (赤陶) — 用户没选时的回退, 也用在色板里"默认"项的固定展示。
     static let brandDefault = hex(0xC96442)

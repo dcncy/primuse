@@ -130,9 +130,9 @@ struct PMTitleBar: View {
 
     @ViewBuilder
     private var titlebarBackground: some View {
-        // 设计稿: TitleBar 背景 = var(--pm-bg) (浅色: #F6F4EF 米色, 深色: #1A1715) +
+        // 设计稿: TitleBar 背景 = var(--pm-bg) (浅色: #F3F4F6 冷中性灰, 深色: #161719) +
         // rgba(255,255,255,.04) 微亮覆盖, 跟整窗 bg 同色调。之前用 .headerView material
-        // 会去 blend 窗外内容, 在浅色系统上偏纯白, 跟整窗米色 bg 不一致, 顶部看着像「贴
+        // 会去 blend 窗外内容, 在浅色系统上偏纯白, 跟整窗中性灰 bg 不一致, 顶部看着像「贴
         // 了块白条」。直接用 PMColor.bg 实色就跟下面 detail 区无缝接上。
         if mode == .glass {
             ZStack {

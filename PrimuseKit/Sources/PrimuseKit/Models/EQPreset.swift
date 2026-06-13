@@ -20,10 +20,7 @@ public struct EQPreset: Codable, Identifiable, Hashable, Sendable {
     }
 
     public var localizedName: String {
-        if isBuiltIn {
-            return EQPreset.localizedNames[id] ?? name
-        }
-        return name
+        EQPreset.localizedNames[id] ?? name
     }
 
     private static let localizedNames: [String: String] = {
@@ -39,6 +36,7 @@ public struct EQPreset: Codable, Identifiable, Hashable, Sendable {
                 "classical": "古典",
                 "hiphop": "嘻哈",
                 "latenight": "深夜",
+                "custom": "自定义",
             ]
         }
         return [
@@ -52,8 +50,18 @@ public struct EQPreset: Codable, Identifiable, Hashable, Sendable {
             "classical": "Classical",
             "hiphop": "Hip-Hop",
             "latenight": "Late Night",
+            "custom": "Custom",
         ]
     }()
+
+    /// 用户手动拖出的曲线用这个 id;非内置,曲线值由 EqualizerService 持久化。
+    public static let customID = "custom"
+
+    public var isCustom: Bool { id == EQPreset.customID }
+
+    public static func custom(bands: [Float]) -> EQPreset {
+        EQPreset(id: customID, name: "Custom", bands: bands, isBuiltIn: false)
+    }
 
     public static let flat = EQPreset(
         id: "flat", name: "Flat",

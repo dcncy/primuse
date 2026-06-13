@@ -794,6 +794,7 @@ final class AudioPlayerService {
             try audioEngine.setUp()
             applySpatialAudioSettings()
             audioEffectsService.applySettings()
+            equalizerService.applySettings()
             guard let outputFormat = audioEngine.outputFormat else {
                 throw AudioDecoderError.decodingFailed("Audio engine not ready")
             }

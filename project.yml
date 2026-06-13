@@ -261,6 +261,8 @@ targets:
       # 的源文件。perform() 走 PrimuseIntentBridge (PrimuseKit 内), widget 进程
       # 里 bridge 为空, iOS 会唤醒主 app 走真实逻辑。
       - path: Primuse/Services/Intents/PrimuseAppIntents.swift
+    resources:
+      - path: PrimuseWidgetExtension/Resources
     dependencies:
       - target: PrimuseKit
       - package: GRDB
@@ -329,6 +331,8 @@ targets:
     sources:
       - path: PrimuseWatchWidgets
       - path: PrimuseWatchShared
+    resources:
+      - path: PrimuseWatchWidgets/Resources
     info:
       path: PrimuseWatchWidgets/Info.plist
       properties:
@@ -355,6 +359,8 @@ targets:
       - path: PrimuseActivityExtension
       # 同 PrimuseWidgetExtension: live activity 进程也需要 intent 类型符号。
       - path: Primuse/Services/Intents/PrimuseAppIntents.swift
+    resources:
+      - path: PrimuseActivityExtension/Resources
     dependencies:
       - target: PrimuseKit
       - sdk: WidgetKit.framework

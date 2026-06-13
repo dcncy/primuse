@@ -14,3 +14,242 @@
 "src.subtitle.aliyunDrive" = "Aliyun Drive PDS";
 "src.subtitle.pan115" = "115 오픈 플랫폼 · 출시 예정";
 "src.subtitle.pan123" = "123 오픈 플랫폼 · 출시 예정";
+
+// 위젯 및 제어 센터 확장
+"ext.widget.appName"                       = "Primuse";
+"ext.widget.unknownSong"                   = "알 수 없는 노래";
+"ext.widget.unknownArtist"                 = "알 수 없는 아티스트";
+"ext.widget.unknownAlbum"                  = "알 수 없는 앨범";
+"ext.widget.demo.track"                    = "데모 트랙";
+
+"ext.widget.nowPlaying.displayName"        = "재생 중";
+"ext.widget.nowPlaying.description"        = "현재 곡과 재생 진행 상황을 한눈에 확인하세요.";
+"ext.widget.nowPlaying.eyebrowFormat"      = "재생 중 · %@";
+"ext.widget.nowPlaying.playing"            = "재생 중";
+"ext.widget.nowPlaying.paused"             = "일시 정지됨";
+"ext.widget.nowPlaying.empty.title"        = "재생 중이 아님";
+"ext.widget.nowPlaying.empty.openShort"    = "Primuse를 열어 계속하기";
+"ext.widget.nowPlaying.empty.openMedium"   = "Primuse를 열어 이어서 재생하세요";
+"ext.widget.nowPlaying.empty.openLarge"    = "음악 소스를 연결하면 현재 곡과 재생 진행 상황이 여기에 표시됩니다.";
+"ext.widget.nowPlaying.empty.tapToPlay"    = "탭하여 재생 시작";
+"ext.widget.nowPlaying.empty.inline"       = "Primuse — 재생 중이 아님";
+
+"ext.widget.lyricsPreview.empty1"          = "가사 미리보기 없음";
+"ext.widget.lyricsPreview.empty2"          = "가사가 있는 곡을 재생하면";
+"ext.widget.lyricsPreview.empty3"          = "여기에 따라 표시됩니다";
+
+"ext.widget.lyrics.displayName"            = "가사";
+"ext.widget.lyrics.description"            = "재생 진행에 맞춰 현재 가사를 표시합니다.";
+"ext.widget.lyrics.empty.title"            = "가사 없음";
+"ext.widget.lyrics.empty.subtitle"         = "가사가 있는 곡을 재생하면 표시됩니다";
+
+"ext.widget.stats.displayName"             = "감상 통계";
+"ext.widget.stats.description"             = "최근 30일간의 재생 수와 가장 많이 들은 곡.";
+"ext.widget.stats.eyebrow"                 = "이번 달 감상";
+"ext.widget.stats.last30Days"              = "최근 30일";
+"ext.widget.stats.plays"                   = "회 재생";
+"ext.widget.stats.totalTime"               = "총 재생 시간";
+"ext.widget.stats.topThisMonth"            = "이번 달 최다 감상";
+
+"ext.widget.sources.displayName"           = "음악 소스";
+"ext.widget.sources.description"           = "각 음악 소스의 색인 상태 및 색인된 수.";
+"ext.widget.sources.eyebrow"               = "음악 소스";
+"ext.widget.sources.indexed"               = "곡 색인됨";
+
+"ext.widget.wrapped.displayName"           = "연간 리포트";
+"ext.widget.wrapped.description"           = "한 해 동안의 감상을 요약했습니다.";
+"ext.widget.wrapped.headline"             = "당신의 %@\n%d시간 감상";
+"ext.widget.wrapped.topArtist"             = "최다 감상 · %@";
+"ext.widget.wrapped.viewReport"            = "연간 리포트 보기";
+"ext.widget.wrapped.empty.title"           = "연간 데이터 생성 중";
+"ext.widget.wrapped.empty.subtitle"        = "더 많은 곡을 들으면 연간 리포트가 공개됩니다";
+
+"ext.widget.recent.displayName"            = "최근 재생";
+"ext.widget.recent.description"            = "최근 재생한 앨범을 홈 화면에 바로 배치하세요.";
+"ext.widget.recent.eyebrow"                = "최근 재생";
+"ext.widget.recent.empty.title"            = "최근 재생 없음";
+"ext.widget.recent.empty.short"            = "재생을 시작하면 표시됩니다";
+"ext.widget.recent.empty.medium"           = "재생을 시작하면 최근 앨범이 여기에 표시됩니다";
+"ext.widget.recent.empty.large"            = "최근 재생한 앨범이 홈 화면에 자동으로 동기화됩니다";
+
+"ext.control.play"                         = "재생";
+"ext.control.pause"                        = "일시 정지";
+"ext.control.shuffle"                      = "셔플 재생";
+"ext.control.next"                         = "다음";
+"ext.control.previous"                     = "이전";
+"ext.control.playPause.displayName"        = "Primuse 재생 / 일시 정지";
+"ext.control.playPause.description"        = "한 번의 탭으로 Primuse 재생을 제어하세요.";
+"ext.control.shuffle.displayName"          = "Primuse 셔플";
+"ext.control.shuffle.description"          = "전체 라이브러리를 섞어 재생합니다.";
+"ext.control.next.displayName"             = "Primuse 다음";
+"ext.control.next.description"             = "다음 곡으로 건너뜁니다.";
+"ext.control.previous.displayName"         = "Primuse 이전";
+"ext.control.previous.description"         = "이전 곡으로 돌아갑니다.";
+
+// watchOS app & complication
+"ext.watch.appName"                        = "Primuse";
+"ext.watch.complication.description"       = "지금 재생 중인 곡을 한눈에 확인하세요.";
+"ext.watch.demo.track"                     = "곡 제목";
+"ext.watch.demo.artist"                    = "아티스트";
+"ext.watch.nowPlaying.none"                = "재생 중인 곡 없음";
+"ext.watch.nowPlaying.empty.title"         = "아직 재생 중인 곡이 없습니다";
+"ext.watch.nowPlaying.empty.reachable"     = "iPhone에서 곡을 선택해 재생을 시작하세요";
+"ext.watch.nowPlaying.empty.unreachable"   = "iPhone 잠금을 해제하고 Primuse를 열어 주세요";
+"ext.watch.queue.title"                    = "다음 재생";
+"ext.watch.queue.empty.title"              = "대기열이 비어 있음";
+"ext.watch.queue.empty.subtitle"           = "iPhone에서 곡을 재생하면 여기에 대기열이 표시됩니다";
+"ext.watch.queue.truncationNotice"         = "전체 %2$d곡 중 처음 %1$d곡 표시";
+
+// tvOS app
+"ext.tv.unknownArtist"                     = "알 수 없는 아티스트";
+"ext.tv.nav.home"                          = "홈";
+"ext.tv.nav.library"                       = "보관함";
+"ext.tv.nav.playlists"                     = "재생목록";
+"ext.tv.nav.sources"                       = "소스";
+"ext.tv.nav.search"                        = "검색";
+"ext.tv.songsCount"                        = "%d곡";
+"ext.tv.minCount"                          = "%d분";
+"ext.tv.countOnly"                         = "%d개";
+
+// tvOS — Home
+"ext.tv.home.empty"                        = "아직 보관함이 없습니다";
+"ext.tv.home.recentlyPlayed"               = "최근 재생";
+"ext.tv.home.recentlyAdded"                = "최근 추가";
+"ext.tv.home.madeForYou"                   = "추천";
+"ext.tv.home.tonightsPick"                 = "오늘 밤 추천";
+"ext.tv.home.playAll"                      = "전체 재생";
+"ext.tv.home.shuffle"                      = "셔플";
+"ext.tv.home.love"                         = "좋아요";
+
+// tvOS — Library
+"ext.tv.library.eyebrow"                   = "보관함";
+"ext.tv.library.filter.all"                = "전체";
+"ext.tv.library.filter.artists"            = "아티스트";
+"ext.tv.library.filter.songs"              = "노래";
+"ext.tv.library.filter.playlists"          = "재생목록";
+"ext.tv.library.filter.smart"              = "스마트 재생목록";
+"ext.tv.library.title.albums"              = "앨범 · %d";
+"ext.tv.library.title.artists"             = "아티스트 · %d";
+"ext.tv.library.title.songs"               = "노래 · %@";
+"ext.tv.library.title.playlists"           = "재생목록 · %d";
+"ext.tv.library.title.smart"               = "스마트 재생목록 · %d";
+
+// tvOS — Playlists
+"ext.tv.playlists.eyebrow"                 = "재생목록";
+"ext.tv.playlists.title"                   = "내 재생목록 · %d";
+"ext.tv.playlists.smart"                   = "스마트";
+
+// tvOS — Search
+"ext.tv.search.eyebrow"                    = "검색";
+"ext.tv.search.placeholder"                = "노래, 앨범, 아티스트 검색";
+"ext.tv.search.hint"                       = "검색 필드를 선택하면 키보드가 열립니다. 음성 받아쓰기도 사용할 수 있습니다";
+"ext.tv.search.suggestions"                = "추천 검색어";
+"ext.tv.search.topResult"                  = "최상위 결과";
+"ext.tv.search.artistMeta"                 = "아티스트 · %d곡";
+"ext.tv.search.typeToSearch"               = "입력하여 보관함 검색";
+"ext.tv.search.songs"                      = "노래";
+"ext.tv.search.noMatch"                    = "일치하는 노래가 없습니다";
+
+// tvOS — Now Playing
+"ext.tv.nowPlaying.notPlaying"             = "재생 중 아님";
+"ext.tv.nowPlaying.pickASong"              = "보관함에서 노래를 선택해 시작하세요";
+"ext.tv.nowPlaying.eyebrow"                = "재생 중";
+"ext.tv.nowPlaying.noLyrics"               = "가사 없음";
+
+// tvOS — Queue
+"ext.tv.queue.nowPlaying"                  = "재생 중";
+"ext.tv.queue.upNext"                      = "다음 재생 · %d곡";
+
+// tvOS — Options
+"ext.tv.options.eyebrow"                   = "옵션";
+"ext.tv.options.loved"                     = "좋아함";
+"ext.tv.options.love"                      = "좋아요";
+"ext.tv.options.sleepActive"               = "수면 %d분";
+"ext.tv.options.sleepTimer"                = "수면 타이머";
+
+// tvOS — Settings
+"ext.tv.settings.notSynced"                = "아직 동기화되지 않음";
+"ext.tv.settings.libraryStat"              = "%1$@곡 · 앨범 %2$d장 · 아티스트 %3$d명";
+"ext.tv.settings.syncing"                  = "iCloud에서 동기화 중…";
+"ext.tv.settings.tapToPull"                = "탭하여 최신 보관함 가져오기";
+"ext.tv.settings.eyebrow"                  = "설정";
+"ext.tv.settings.general"                  = "일반";
+"ext.tv.settings.icloudSync"               = "iCloud 동기화";
+"ext.tv.settings.autoSync"                 = "실행 시 자동 동기화";
+"ext.tv.settings.library"                  = "보관함";
+"ext.tv.settings.playlists"                = "재생목록";
+"ext.tv.settings.sources"                  = "소스";
+"ext.tv.settings.about"                    = "Primuse 정보";
+"ext.tv.settings.remoteTips"               = "리모컨 팁";
+"ext.tv.settings.tip.touch.title"          = "터치 표면";
+"ext.tv.settings.tip.touch.body"           = "위 / 아래 / 왼쪽 / 오른쪽으로 쓸기 · 눌러서 선택";
+"ext.tv.settings.tip.menu.title"           = "메뉴 / 뒤로";
+"ext.tv.settings.tip.menu.body"            = "한 단계 뒤로";
+"ext.tv.settings.tip.tv.title"             = "TV 버튼";
+"ext.tv.settings.tip.tv.body"              = "Apple TV 홈으로 돌아가기";
+"ext.tv.settings.tip.search.title"         = "검색 필드";
+"ext.tv.settings.tip.search.body"          = "키보드를 표시 · 음성 받아쓰기 지원";
+"ext.tv.settings.noSnapshot"               = "보관함 스냅샷을 찾을 수 없음";
+"ext.tv.settings.synced"                   = "동기화됨 · %@곡";
+
+// tvOS — Sources
+"ext.tv.sources.eyebrow"                   = "음악 소스";
+"ext.tv.sources.title"                     = "음악 소스 · %d";
+"ext.tv.sources.emptyTitle"                = "아직 음악 소스가 없습니다";
+"ext.tv.sources.emptyBody"                 = "오른쪽 QR 코드를 스캔해 휴대폰에서 추가하거나, iPhone / Mac에서 추가하면 iCloud를 통해 동기화됩니다.";
+"ext.tv.sources.addSource"                 = "소스 추가";
+"ext.tv.sources.removeTitle"               = "소스를 제거하시겠습니까?";
+"ext.tv.sources.remove"                    = "제거";
+"ext.tv.sources.cancel"                    = "취소";
+"ext.tv.sources.removeBody"                = "「%@」이(가) Apple TV에서 제거됩니다. iPhone / Mac에서는 계속 유효합니다. 완전히 삭제하려면 휴대폰/컴퓨터에서 작업하세요.";
+"ext.tv.sources.testConnection"            = "연결 테스트";
+"ext.tv.sources.ok"                        = "확인";
+"ext.tv.sources.scanTitle"                 = "스캔하여 휴대폰에서 추가";
+"ext.tv.sources.scanBody1"                 = "iPhone 카메라로 이 코드를 스캔하면 Primuse의 「소스 추가」가 열려 NAS / 클라우드 드라이브 / Subsonic 등을 추가할 수 있습니다.";
+"ext.tv.sources.scanBody2"                 = "추가하면 iCloud를 통해 Apple TV에 자동으로 동기화됩니다. iPhone / Mac에서 직접 추가할 수도 있습니다.";
+"ext.tv.sources.typeSongs"                 = "%1$@ · %2$@곡";
+"ext.tv.sources.enable"                    = "사용";
+"ext.tv.sources.disable"                   = "사용 안 함";
+"ext.tv.sources.enterCredentials"          = "로그인 정보 입력";
+"ext.tv.sources.removeFromTV"              = "Apple TV에서 제거";
+"ext.tv.sources.tag.noCredentials"         = "인증 정보 없음";
+"ext.tv.sources.tag.needsRelay"            = "iPhone 중계 필요";
+"ext.tv.sources.tag.notOnTV"               = "TV 미지원";
+"ext.tv.sources.status.enabled"            = "사용 중";
+"ext.tv.sources.status.scanning"           = "스캔 중";
+"ext.tv.sources.status.authFailed"         = "인증 실패";
+"ext.tv.sources.status.disabled"           = "사용 안 함";
+"ext.tv.sources.cred.intro"                = "Apple TV에서 이 소스에 직접 로그인합니다. 인증 정보는 이 기기에만 저장되며(업로드 또는 동기화되지 않음) 휴대폰에서 동기화된 정보보다 우선합니다. 세션이 기기 간에 공유되지 않을 때 유용합니다.";
+"ext.tv.sources.cred.username"             = "사용자 이름";
+"ext.tv.sources.cred.password"             = "비밀번호";
+"ext.tv.sources.cred.saveEnable"           = "저장 후 사용";
+"ext.tv.sources.cred.clearLocal"           = "로컬 인증 정보 지우기";
+
+// tvOS — Components
+"ext.tv.components.emptySubtitle"          = "iPhone 또는 Mac에서 보관함을 동기화하면 여기에 음악이 표시됩니다";
+
+// tvOS — Playback / connection messages
+"ext.tv.playback.unsupported"              = "「%@」은(는) 아직 Apple TV에서 직접 재생할 수 없습니다 (휴대폰 / 컴퓨터 전용)";
+"ext.tv.playback.missingCredential"        = "「%@」의 로그인 정보가 없습니다 — 휴대폰에서 iCloud 키체인을 켜고 로그인하세요";
+"ext.tv.playback.songNotFound"             = "보관함에서 이 노래를 찾을 수 없습니다";
+"ext.tv.playback.authFailed"               = "인증에 실패했습니다. 휴대폰에서 이 음악 소스에 다시 로그인하세요";
+"ext.tv.playback.httpError"                = "서버가 HTTP %d을(를) 반환했습니다";
+"ext.tv.playback.cannotBuildURL"           = "재생 주소를 만들 수 없습니다";
+"ext.tv.playback.relayUnavailable"         = "이 소스는 iPhone 중계가 필요합니다 — 휴대폰에서 Primuse를 열어 둔 채 Apple TV와 같은 Wi-Fi에 연결하세요";
+"ext.tv.playback.failed"                   = "재생 실패";
+
+// tvOS — Test connection results
+"ext.tv.test.sourceNotFound"               = "음악 소스를 찾을 수 없습니다";
+"ext.tv.test.noSongs"                      = "이 소스에는 테스트할 노래가 보관함에 없습니다";
+"ext.tv.test.connectedPrefix"             = "연결됨 · ";
+"ext.tv.test.resolved"                     = "확인됨";
+"ext.tv.test.unsupported"                  = "「%@」은(는) Apple TV에서 직접 재생할 수 없습니다";
+"ext.tv.test.missingCredential"            = "로그인 정보가 없습니다 — 여기에 계정과 비밀번호를 입력하세요";
+"ext.tv.test.authFailed"                   = "인증에 실패했습니다 — 계정 또는 비밀번호가 올바르지 않습니다";
+"ext.tv.test.relayUnavailable"             = "iPhone 중계가 필요합니다 — 휴대폰에서 Primuse를 열어 둔 채 TV와 같은 Wi-Fi에 연결하세요";
+"ext.tv.test.failedPrefix"                 = "연결 실패 · ";
+
+// tvOS — Top Shelf
+"ext.tv.topShelf.recent"                   = "최근 재생";
+"ext.tv.topShelf.library"                  = "보관함";
+"ext.tv.test.resultBody"                   = "「%1$@」\n%2$@";

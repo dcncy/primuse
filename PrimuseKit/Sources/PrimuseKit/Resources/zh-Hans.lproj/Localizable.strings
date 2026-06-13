@@ -11,3 +11,242 @@
 "src.subtitle.aliyunDrive"   = "阿里云盘 PDS";
 "src.subtitle.pan115"        = "115 开放平台 · 暂未开放";
 "src.subtitle.pan123"        = "123 开放平台 · 暂未开放";
+
+// 小组件与控制中心扩展
+"ext.widget.appName"                       = "猿音";
+"ext.widget.unknownSong"                   = "未知歌曲";
+"ext.widget.unknownArtist"                 = "未知艺术家";
+"ext.widget.unknownAlbum"                  = "未知专辑";
+"ext.widget.demo.track"                    = "演示曲目";
+
+"ext.widget.nowPlaying.displayName"        = "正在播放";
+"ext.widget.nowPlaying.description"        = "快速查看当前歌曲和播放进度";
+"ext.widget.nowPlaying.eyebrowFormat"      = "正在播放 · %@";
+"ext.widget.nowPlaying.playing"            = "正在播放";
+"ext.widget.nowPlaying.paused"             = "已暂停";
+"ext.widget.nowPlaying.empty.title"        = "尚未播放";
+"ext.widget.nowPlaying.empty.openShort"    = "打开猿音继续";
+"ext.widget.nowPlaying.empty.openMedium"   = "打开猿音继续上次的旋律";
+"ext.widget.nowPlaying.empty.openLarge"    = "连接你的音乐源,这里会显示当前歌曲和播放进度。";
+"ext.widget.nowPlaying.empty.tapToPlay"    = "点击开始播放";
+"ext.widget.nowPlaying.empty.inline"       = "猿音 — 暂未播放";
+
+"ext.widget.lyricsPreview.empty1"          = "暂无歌词预览";
+"ext.widget.lyricsPreview.empty2"          = "播放含歌词的曲目后";
+"ext.widget.lyricsPreview.empty3"          = "这里会跟随更新";
+
+"ext.widget.lyrics.displayName"            = "歌词";
+"ext.widget.lyrics.description"            = "跟随播放进度显示当前歌词";
+"ext.widget.lyrics.empty.title"            = "暂无歌词";
+"ext.widget.lyrics.empty.subtitle"         = "播放带歌词的歌曲后显示";
+
+"ext.widget.stats.displayName"             = "听歌统计";
+"ext.widget.stats.description"             = "最近 30 天的播放量与最常听";
+"ext.widget.stats.eyebrow"                 = "本月听歌";
+"ext.widget.stats.last30Days"              = "过去 30 天";
+"ext.widget.stats.plays"                   = "首播放";
+"ext.widget.stats.totalTime"               = "总时长";
+"ext.widget.stats.topThisMonth"            = "本月最常听";
+
+"ext.widget.sources.displayName"           = "音乐源";
+"ext.widget.sources.description"           = "各音乐源的索引状态与已索引数量";
+"ext.widget.sources.eyebrow"               = "音乐源";
+"ext.widget.sources.indexed"               = "首已索引";
+
+"ext.widget.wrapped.displayName"           = "年度报告";
+"ext.widget.wrapped.description"           = "你的年度听歌总结";
+"ext.widget.wrapped.headline"             = "你的 %@\n已听 %d 小时";
+"ext.widget.wrapped.topArtist"             = "最常听 · %@";
+"ext.widget.wrapped.viewReport"            = "查看年度报告";
+"ext.widget.wrapped.empty.title"           = "年度数据生成中";
+"ext.widget.wrapped.empty.subtitle"        = "多听一些歌曲后揭晓你的年度报告";
+
+"ext.widget.recent.displayName"            = "最近播放";
+"ext.widget.recent.description"            = "把最近播放的专辑直接放到桌面上";
+"ext.widget.recent.eyebrow"                = "最近播放";
+"ext.widget.recent.empty.title"            = "暂无最近播放";
+"ext.widget.recent.empty.short"            = "开始播放后出现";
+"ext.widget.recent.empty.medium"           = "开始播放后,最近专辑会出现在这里";
+"ext.widget.recent.empty.large"            = "最近播放过的专辑会自动同步到桌面";
+
+"ext.control.play"                         = "播放";
+"ext.control.pause"                        = "暂停";
+"ext.control.shuffle"                      = "随机播放";
+"ext.control.next"                         = "下一首";
+"ext.control.previous"                     = "上一首";
+"ext.control.playPause.displayName"        = "猿音 播放 / 暂停";
+"ext.control.playPause.description"        = "一键控制猿音播放";
+"ext.control.shuffle.displayName"          = "猿音 随机播放";
+"ext.control.shuffle.description"          = "随机打散整库并开始播放";
+"ext.control.next.displayName"             = "猿音 下一首";
+"ext.control.next.description"             = "跳到下一首";
+"ext.control.previous.displayName"         = "猿音 上一首";
+"ext.control.previous.description"         = "回到上一首";
+
+// watchOS app & complication
+"ext.watch.appName"                        = "猿音";
+"ext.watch.complication.description"       = "快速看到正在播放的曲目";
+"ext.watch.demo.track"                     = "曲目名";
+"ext.watch.demo.artist"                    = "艺术家";
+"ext.watch.nowPlaying.none"                = "暂无播放";
+"ext.watch.nowPlaying.empty.title"         = "还没有播放";
+"ext.watch.nowPlaying.empty.reachable"     = "在 iPhone 上选一首歌开始播放";
+"ext.watch.nowPlaying.empty.unreachable"   = "请确认 iPhone 已解锁并打开猿音";
+"ext.watch.queue.title"                    = "播放列表";
+"ext.watch.queue.empty.title"              = "队列为空";
+"ext.watch.queue.empty.subtitle"           = "在 iPhone 上选歌播放后这里会显示队列";
+"ext.watch.queue.truncationNotice"         = "仅显示前 %d 首，共 %d 首";
+
+// tvOS app
+"ext.tv.unknownArtist"                     = "未知艺术家";
+"ext.tv.nav.home"                          = "首页";
+"ext.tv.nav.library"                       = "资料库";
+"ext.tv.nav.playlists"                     = "歌单";
+"ext.tv.nav.sources"                       = "音乐源";
+"ext.tv.nav.search"                        = "搜索";
+"ext.tv.songsCount"                        = "%d 首";
+"ext.tv.minCount"                          = "%d 分钟";
+"ext.tv.countOnly"                         = "%d 个";
+
+// tvOS — Home
+"ext.tv.home.empty"                        = "还没有曲库";
+"ext.tv.home.recentlyPlayed"               = "最近播放";
+"ext.tv.home.recentlyAdded"                = "最近添加专辑";
+"ext.tv.home.madeForYou"                   = "为你推荐";
+"ext.tv.home.tonightsPick"                 = "今晚听";
+"ext.tv.home.playAll"                      = "全部播放";
+"ext.tv.home.shuffle"                      = "随机播放";
+"ext.tv.home.love"                         = "喜欢";
+
+// tvOS — Library
+"ext.tv.library.eyebrow"                   = "资料库";
+"ext.tv.library.filter.all"                = "全部";
+"ext.tv.library.filter.artists"            = "艺术家";
+"ext.tv.library.filter.songs"              = "歌曲";
+"ext.tv.library.filter.playlists"          = "歌单";
+"ext.tv.library.filter.smart"              = "智能歌单";
+"ext.tv.library.title.albums"              = "专辑 · %d";
+"ext.tv.library.title.artists"             = "艺术家 · %d";
+"ext.tv.library.title.songs"               = "歌曲 · %@";
+"ext.tv.library.title.playlists"           = "歌单 · %d";
+"ext.tv.library.title.smart"               = "智能歌单 · %d";
+
+// tvOS — Playlists
+"ext.tv.playlists.eyebrow"                 = "歌单";
+"ext.tv.playlists.title"                   = "你的歌单 · %d";
+"ext.tv.playlists.smart"                   = "智能";
+
+// tvOS — Search
+"ext.tv.search.eyebrow"                    = "搜索";
+"ext.tv.search.placeholder"                = "搜索歌曲、专辑、艺术家";
+"ext.tv.search.hint"                       = "选中搜索框唤出系统键盘,可用语音听写输入";
+"ext.tv.search.suggestions"                = "建议";
+"ext.tv.search.topResult"                  = "顶部匹配";
+"ext.tv.search.artistMeta"                 = "艺术家 · %d 首";
+"ext.tv.search.typeToSearch"               = "输入以搜索曲库";
+"ext.tv.search.songs"                      = "歌曲";
+"ext.tv.search.noMatch"                    = "没有匹配的歌曲";
+
+// tvOS — Now Playing
+"ext.tv.nowPlaying.notPlaying"             = "未在播放";
+"ext.tv.nowPlaying.pickASong"              = "在资料库选一首歌开始";
+"ext.tv.nowPlaying.eyebrow"                = "正在播放";
+"ext.tv.nowPlaying.noLyrics"               = "暂无歌词";
+
+// tvOS — Queue
+"ext.tv.queue.nowPlaying"                  = "正在播放";
+"ext.tv.queue.upNext"                      = "接下来 · %d 首";
+
+// tvOS — Options
+"ext.tv.options.eyebrow"                   = "选项";
+"ext.tv.options.loved"                     = "已喜欢";
+"ext.tv.options.love"                      = "喜欢";
+"ext.tv.options.sleepActive"               = "睡眠 %d 分";
+"ext.tv.options.sleepTimer"                = "睡眠定时";
+
+// tvOS — Settings
+"ext.tv.settings.notSynced"                = "尚未同步";
+"ext.tv.settings.libraryStat"              = "%1$@ 首 · %2$d 张专辑 · %3$d 位艺术家";
+"ext.tv.settings.syncing"                  = "正在从 iCloud 同步…";
+"ext.tv.settings.tapToPull"                = "点按拉取最新曲库";
+"ext.tv.settings.eyebrow"                  = "设置";
+"ext.tv.settings.general"                  = "常用";
+"ext.tv.settings.icloudSync"               = "iCloud 同步";
+"ext.tv.settings.autoSync"                 = "启动时自动同步";
+"ext.tv.settings.library"                  = "曲库";
+"ext.tv.settings.playlists"                = "歌单";
+"ext.tv.settings.sources"                  = "音乐源";
+"ext.tv.settings.about"                    = "关于 Primuse";
+"ext.tv.settings.remoteTips"               = "遥控提示";
+"ext.tv.settings.tip.touch.title"          = "圆形触控板";
+"ext.tv.settings.tip.touch.body"           = "上 / 下 / 左 / 右移动焦点 · 按下选择";
+"ext.tv.settings.tip.menu.title"           = "Menu / 返回";
+"ext.tv.settings.tip.menu.body"            = "返回上一层";
+"ext.tv.settings.tip.tv.title"             = "TV 按钮";
+"ext.tv.settings.tip.tv.body"              = "回 Apple TV 主屏";
+"ext.tv.settings.tip.search.title"         = "搜索框";
+"ext.tv.settings.tip.search.body"          = "唤出系统键盘 · 支持语音听写";
+"ext.tv.settings.noSnapshot"               = "未找到曲库快照";
+"ext.tv.settings.synced"                   = "已同步 · %@ 首";
+
+// tvOS — Sources
+"ext.tv.sources.eyebrow"                   = "音乐源";
+"ext.tv.sources.title"                     = "音乐源 · %d 个";
+"ext.tv.sources.emptyTitle"                = "还没有音乐源";
+"ext.tv.sources.emptyBody"                 = "扫右侧二维码在手机上添加,或在 iPhone / Mac 上添加后经 iCloud 同步过来。";
+"ext.tv.sources.addSource"                 = "添加音乐源";
+"ext.tv.sources.removeTitle"               = "删除音乐源?";
+"ext.tv.sources.remove"                    = "删除";
+"ext.tv.sources.cancel"                    = "取消";
+"ext.tv.sources.removeBody"                = "「%@」将从 Apple TV 移除。它在 iPhone / Mac 上仍是权威方,彻底删除请在手机/电脑上操作。";
+"ext.tv.sources.testConnection"            = "测试连接";
+"ext.tv.sources.ok"                        = "好";
+"ext.tv.sources.scanTitle"                 = "扫码在手机上添加";
+"ext.tv.sources.scanBody1"                 = "用 iPhone 相机扫这个码,会打开 Primuse 到「添加音乐源」,可挨个添加 NAS / 云盘 / Subsonic 等。";
+"ext.tv.sources.scanBody2"                 = "添加后经 iCloud 自动同步到 Apple TV;也可直接在 iPhone / Mac 上添加。";
+"ext.tv.sources.typeSongs"                 = "%1$@ · %2$@ 首";
+"ext.tv.sources.enable"                    = "启用";
+"ext.tv.sources.disable"                   = "停用";
+"ext.tv.sources.enterCredentials"          = "输入登录凭据";
+"ext.tv.sources.removeFromTV"              = "从 Apple TV 移除";
+"ext.tv.sources.tag.noCredentials"         = "缺凭据";
+"ext.tv.sources.tag.needsRelay"            = "需 iPhone 中继";
+"ext.tv.sources.tag.notOnTV"               = "TV 不支持";
+"ext.tv.sources.status.enabled"            = "已启用";
+"ext.tv.sources.status.scanning"           = "扫描中";
+"ext.tv.sources.status.authFailed"         = "凭据失败";
+"ext.tv.sources.status.disabled"           = "已停用";
+"ext.tv.sources.cred.intro"                = "在 Apple TV 上直接为该源登录。凭据只存本机(不上传 / 不同步),并优先于从手机同步过来的凭据 —— 适合跨设备 session 不通用时。";
+"ext.tv.sources.cred.username"             = "用户名";
+"ext.tv.sources.cred.password"             = "密码";
+"ext.tv.sources.cred.saveEnable"           = "保存并启用";
+"ext.tv.sources.cred.clearLocal"           = "清除本地凭据";
+
+// tvOS — Components
+"ext.tv.components.emptySubtitle"          = "在 iPhone / Mac 上同步曲库后,这里会显示你的音乐";
+
+// tvOS — Playback / connection messages
+"ext.tv.playback.unsupported"              = "「%@」类型暂不支持在 Apple TV 直接播放(仅手机 / 电脑)";
+"ext.tv.playback.missingCredential"        = "缺少「%@」的登录凭据 —— 请确认手机已登录且开启 iCloud 钥匙串";
+"ext.tv.playback.songNotFound"             = "曲库中找不到这首歌";
+"ext.tv.playback.authFailed"               = "鉴权失败,请在手机上重新登录该音乐源";
+"ext.tv.playback.httpError"                = "服务器返回 HTTP %d";
+"ext.tv.playback.cannotBuildURL"           = "无法构造播放地址";
+"ext.tv.playback.relayUnavailable"         = "此来源需经 iPhone 中继播放——请在手机上保持 Primuse 打开、与 Apple TV 同一局域网";
+"ext.tv.playback.failed"                   = "播放失败";
+
+// tvOS — Test connection results
+"ext.tv.test.sourceNotFound"               = "找不到该音乐源";
+"ext.tv.test.noSongs"                      = "该源在曲库中暂无歌曲,无法测试解析";
+"ext.tv.test.connectedPrefix"             = "连接成功 · ";
+"ext.tv.test.resolved"                     = "已解析";
+"ext.tv.test.unsupported"                  = "类型「%@」在 Apple TV 上不支持播放";
+"ext.tv.test.missingCredential"            = "缺少登录凭据 —— 请在此输入账号密码";
+"ext.tv.test.authFailed"                   = "鉴权失败 —— 账号或密码不正确";
+"ext.tv.test.relayUnavailable"             = "需经 iPhone 中继 —— 请在手机上保持 Primuse 打开、与 TV 同一局域网";
+"ext.tv.test.failedPrefix"                 = "连接失败 · ";
+
+// tvOS — Top Shelf
+"ext.tv.topShelf.recent"                   = "最近播放";
+"ext.tv.topShelf.library"                  = "资料库";
+"ext.tv.test.resultBody"                   = "「%1$@」\n%2$@";

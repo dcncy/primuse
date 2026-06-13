@@ -14,3 +14,242 @@
 "src.subtitle.aliyunDrive" = "Aliyun Drive PDS";
 "src.subtitle.pan115" = "115 オープンプラットフォーム・近日公開";
 "src.subtitle.pan123" = "123 オープンプラットフォーム・近日公開";
+
+// ウィジェット・コントロールセンター拡張
+"ext.widget.appName"                       = "Primuse";
+"ext.widget.unknownSong"                   = "不明な曲";
+"ext.widget.unknownArtist"                 = "不明なアーティスト";
+"ext.widget.unknownAlbum"                  = "不明なアルバム";
+"ext.widget.demo.track"                    = "デモトラック";
+
+"ext.widget.nowPlaying.displayName"        = "再生中";
+"ext.widget.nowPlaying.description"        = "再生中の曲と進行状況をひと目で確認できます。";
+"ext.widget.nowPlaying.eyebrowFormat"      = "再生中 · %@";
+"ext.widget.nowPlaying.playing"            = "再生中";
+"ext.widget.nowPlaying.paused"             = "一時停止中";
+"ext.widget.nowPlaying.empty.title"        = "再生していません";
+"ext.widget.nowPlaying.empty.openShort"    = "Primuse を開いて続ける";
+"ext.widget.nowPlaying.empty.openMedium"   = "Primuse を開いて続きから再生しましょう";
+"ext.widget.nowPlaying.empty.openLarge"    = "音楽ソースを接続すると、再生中の曲と進行状況がここに表示されます。";
+"ext.widget.nowPlaying.empty.tapToPlay"    = "タップして再生を開始";
+"ext.widget.nowPlaying.empty.inline"       = "Primuse — 再生していません";
+
+"ext.widget.lyricsPreview.empty1"          = "歌詞プレビューはありません";
+"ext.widget.lyricsPreview.empty2"          = "歌詞付きの曲を再生すると";
+"ext.widget.lyricsPreview.empty3"          = "ここに合わせて表示されます";
+
+"ext.widget.lyrics.displayName"            = "歌詞";
+"ext.widget.lyrics.description"            = "再生の進行に合わせて歌詞を表示します。";
+"ext.widget.lyrics.empty.title"            = "歌詞がありません";
+"ext.widget.lyrics.empty.subtitle"         = "歌詞付きの曲を再生すると表示されます";
+
+"ext.widget.stats.displayName"             = "再生統計";
+"ext.widget.stats.description"             = "過去 30 日間の再生回数とよく聴いた曲。";
+"ext.widget.stats.eyebrow"                 = "今月の再生";
+"ext.widget.stats.last30Days"              = "過去 30 日間";
+"ext.widget.stats.plays"                   = "回再生";
+"ext.widget.stats.totalTime"               = "合計時間";
+"ext.widget.stats.topThisMonth"            = "今月よく聴いた曲";
+
+"ext.widget.sources.displayName"           = "音楽ソース";
+"ext.widget.sources.description"           = "各音楽ソースのインデックス状況とインデックス数。";
+"ext.widget.sources.eyebrow"               = "音楽ソース";
+"ext.widget.sources.indexed"               = "曲をインデックス済み";
+
+"ext.widget.wrapped.displayName"           = "年間レポート";
+"ext.widget.wrapped.description"           = "あなたの 1 年間の再生をまとめて。";
+"ext.widget.wrapped.headline"             = "あなたの %@\n%d 時間再生";
+"ext.widget.wrapped.topArtist"             = "よく聴いたアーティスト · %@";
+"ext.widget.wrapped.viewReport"            = "年間レポートを見る";
+"ext.widget.wrapped.empty.title"           = "年間データを作成中";
+"ext.widget.wrapped.empty.subtitle"        = "もっと曲を聴くと年間レポートが見られます";
+
+"ext.widget.recent.displayName"            = "最近再生した項目";
+"ext.widget.recent.description"            = "最近再生したアルバムをホーム画面に直接配置できます。";
+"ext.widget.recent.eyebrow"                = "最近再生した項目";
+"ext.widget.recent.empty.title"            = "最近の再生はありません";
+"ext.widget.recent.empty.short"            = "再生を始めると表示されます";
+"ext.widget.recent.empty.medium"           = "再生を始めると、最近のアルバムがここに表示されます";
+"ext.widget.recent.empty.large"            = "最近再生したアルバムは自動的にホーム画面に同期されます";
+
+"ext.control.play"                         = "再生";
+"ext.control.pause"                        = "一時停止";
+"ext.control.shuffle"                      = "シャッフル";
+"ext.control.next"                         = "次へ";
+"ext.control.previous"                     = "前へ";
+"ext.control.playPause.displayName"        = "Primuse 再生 / 一時停止";
+"ext.control.playPause.description"        = "ワンタップで Primuse の再生を操作します。";
+"ext.control.shuffle.displayName"          = "Primuse シャッフル";
+"ext.control.shuffle.description"          = "ライブラリ全体をシャッフルして再生します。";
+"ext.control.next.displayName"             = "Primuse 次へ";
+"ext.control.next.description"             = "次の曲へスキップします。";
+"ext.control.previous.displayName"         = "Primuse 前へ";
+"ext.control.previous.description"         = "前の曲に戻ります。";
+
+// watchOS app & complication
+"ext.watch.appName"                        = "Primuse";
+"ext.watch.complication.description"       = "再生中の曲をすばやく確認できます。";
+"ext.watch.demo.track"                     = "曲名";
+"ext.watch.demo.artist"                    = "アーティスト";
+"ext.watch.nowPlaying.none"                = "再生していません";
+"ext.watch.nowPlaying.empty.title"         = "まだ再生していません";
+"ext.watch.nowPlaying.empty.reachable"     = "iPhone で曲を選んで再生を始めましょう";
+"ext.watch.nowPlaying.empty.unreachable"   = "iPhone のロックを解除し Primuse を開いてください";
+"ext.watch.queue.title"                    = "再生キュー";
+"ext.watch.queue.empty.title"              = "キューが空です";
+"ext.watch.queue.empty.subtitle"           = "iPhone で曲を再生するとここにキューが表示されます";
+"ext.watch.queue.truncationNotice"         = "全 %2$d 曲中、先頭の %1$d 曲を表示";
+
+// tvOS app
+"ext.tv.unknownArtist"                     = "不明なアーティスト";
+"ext.tv.nav.home"                          = "ホーム";
+"ext.tv.nav.library"                       = "ライブラリ";
+"ext.tv.nav.playlists"                     = "プレイリスト";
+"ext.tv.nav.sources"                       = "ソース";
+"ext.tv.nav.search"                        = "検索";
+"ext.tv.songsCount"                        = "%d曲";
+"ext.tv.minCount"                          = "%d分";
+"ext.tv.countOnly"                         = "%d";
+
+// tvOS — Home
+"ext.tv.home.empty"                        = "ライブラリがありません";
+"ext.tv.home.recentlyPlayed"               = "最近再生した項目";
+"ext.tv.home.recentlyAdded"                = "最近追加した項目";
+"ext.tv.home.madeForYou"                   = "あなたへのおすすめ";
+"ext.tv.home.tonightsPick"                 = "今夜のおすすめ";
+"ext.tv.home.playAll"                      = "すべて再生";
+"ext.tv.home.shuffle"                      = "シャッフル";
+"ext.tv.home.love"                         = "お気に入り";
+
+// tvOS — Library
+"ext.tv.library.eyebrow"                   = "ライブラリ";
+"ext.tv.library.filter.all"                = "すべて";
+"ext.tv.library.filter.artists"            = "アーティスト";
+"ext.tv.library.filter.songs"              = "曲";
+"ext.tv.library.filter.playlists"          = "プレイリスト";
+"ext.tv.library.filter.smart"              = "スマートプレイリスト";
+"ext.tv.library.title.albums"              = "アルバム · %d";
+"ext.tv.library.title.artists"             = "アーティスト · %d";
+"ext.tv.library.title.songs"               = "曲 · %@";
+"ext.tv.library.title.playlists"           = "プレイリスト · %d";
+"ext.tv.library.title.smart"               = "スマートプレイリスト · %d";
+
+// tvOS — Playlists
+"ext.tv.playlists.eyebrow"                 = "プレイリスト";
+"ext.tv.playlists.title"                   = "あなたのプレイリスト · %d";
+"ext.tv.playlists.smart"                   = "スマート";
+
+// tvOS — Search
+"ext.tv.search.eyebrow"                    = "検索";
+"ext.tv.search.placeholder"                = "曲、アルバム、アーティストを検索";
+"ext.tv.search.hint"                       = "検索フィールドを選ぶとキーボードが開きます。音声入力も使えます";
+"ext.tv.search.suggestions"                = "候補";
+"ext.tv.search.topResult"                  = "上位の結果";
+"ext.tv.search.artistMeta"                 = "アーティスト · %d曲";
+"ext.tv.search.typeToSearch"               = "入力してライブラリを検索";
+"ext.tv.search.songs"                      = "曲";
+"ext.tv.search.noMatch"                    = "一致する曲がありません";
+
+// tvOS — Now Playing
+"ext.tv.nowPlaying.notPlaying"             = "再生していません";
+"ext.tv.nowPlaying.pickASong"              = "ライブラリから曲を選んで再生を始めましょう";
+"ext.tv.nowPlaying.eyebrow"                = "再生中";
+"ext.tv.nowPlaying.noLyrics"               = "歌詞がありません";
+
+// tvOS — Queue
+"ext.tv.queue.nowPlaying"                  = "再生中";
+"ext.tv.queue.upNext"                      = "次に再生 · %d曲";
+
+// tvOS — Options
+"ext.tv.options.eyebrow"                   = "オプション";
+"ext.tv.options.loved"                     = "お気に入り済み";
+"ext.tv.options.love"                      = "お気に入り";
+"ext.tv.options.sleepActive"               = "スリープ %d分";
+"ext.tv.options.sleepTimer"                = "スリープタイマー";
+
+// tvOS — Settings
+"ext.tv.settings.notSynced"                = "まだ同期されていません";
+"ext.tv.settings.libraryStat"              = "%1$@曲 · %2$dアルバム · %3$dアーティスト";
+"ext.tv.settings.syncing"                  = "iCloudから同期中…";
+"ext.tv.settings.tapToPull"                = "タップして最新のライブラリを取得";
+"ext.tv.settings.eyebrow"                  = "設定";
+"ext.tv.settings.general"                  = "一般";
+"ext.tv.settings.icloudSync"               = "iCloud同期";
+"ext.tv.settings.autoSync"                 = "起動時に自動同期";
+"ext.tv.settings.library"                  = "ライブラリ";
+"ext.tv.settings.playlists"                = "プレイリスト";
+"ext.tv.settings.sources"                  = "ソース";
+"ext.tv.settings.about"                    = "Primuseについて";
+"ext.tv.settings.remoteTips"               = "リモコンのヒント";
+"ext.tv.settings.tip.touch.title"          = "タッチ操作面";
+"ext.tv.settings.tip.touch.body"           = "上 / 下 / 左 / 右にスワイプ · 押して選択";
+"ext.tv.settings.tip.menu.title"           = "メニュー / 戻る";
+"ext.tv.settings.tip.menu.body"            = "1つ前の階層に戻る";
+"ext.tv.settings.tip.tv.title"             = "TVボタン";
+"ext.tv.settings.tip.tv.body"              = "Apple TVのホームに戻る";
+"ext.tv.settings.tip.search.title"         = "検索フィールド";
+"ext.tv.settings.tip.search.body"          = "キーボードを表示 · 音声入力に対応";
+"ext.tv.settings.noSnapshot"               = "ライブラリのスナップショットが見つかりません";
+"ext.tv.settings.synced"                   = "同期済み · %@曲";
+
+// tvOS — Sources
+"ext.tv.sources.eyebrow"                   = "音楽ソース";
+"ext.tv.sources.title"                     = "音楽ソース · %d";
+"ext.tv.sources.emptyTitle"                = "音楽ソースがまだありません";
+"ext.tv.sources.emptyBody"                 = "右のQRコードをスキャンしてスマートフォンから追加するか、iPhone / Macで追加するとiCloud経由で同期されます。";
+"ext.tv.sources.addSource"                 = "ソースを追加";
+"ext.tv.sources.removeTitle"               = "ソースを削除しますか？";
+"ext.tv.sources.remove"                    = "削除";
+"ext.tv.sources.cancel"                    = "キャンセル";
+"ext.tv.sources.removeBody"                = "「%@」をApple TVから削除します。iPhone / Mac では引き続き有効です。完全に削除するにはスマートフォン/パソコンで操作してください。";
+"ext.tv.sources.testConnection"            = "接続をテスト";
+"ext.tv.sources.ok"                        = "OK";
+"ext.tv.sources.scanTitle"                 = "スキャンしてスマートフォンで追加";
+"ext.tv.sources.scanBody1"                 = "このコードをiPhoneのカメラでスキャンするとPrimuseの「ソースを追加」が開き、NAS / クラウドストレージ / Subsonic などを追加できます。";
+"ext.tv.sources.scanBody2"                 = "追加するとiCloud経由でApple TVに自動同期されます。iPhone / Macで直接追加することもできます。";
+"ext.tv.sources.typeSongs"                 = "%1$@ · %2$@曲";
+"ext.tv.sources.enable"                    = "有効にする";
+"ext.tv.sources.disable"                   = "無効にする";
+"ext.tv.sources.enterCredentials"          = "ログイン情報を入力";
+"ext.tv.sources.removeFromTV"              = "Apple TVから削除";
+"ext.tv.sources.tag.noCredentials"         = "認証情報なし";
+"ext.tv.sources.tag.needsRelay"            = "iPhone中継が必要";
+"ext.tv.sources.tag.notOnTV"               = "TV非対応";
+"ext.tv.sources.status.enabled"            = "有効";
+"ext.tv.sources.status.scanning"           = "スキャン中";
+"ext.tv.sources.status.authFailed"         = "認証失敗";
+"ext.tv.sources.status.disabled"           = "無効";
+"ext.tv.sources.cred.intro"                = "このソースにApple TVで直接ログインします。認証情報はこのデバイスにのみ保存され（アップロードも同期もされません）、スマートフォンから同期された情報より優先されます。セッションがデバイス間で共有できない場合に便利です。";
+"ext.tv.sources.cred.username"             = "ユーザー名";
+"ext.tv.sources.cred.password"             = "パスワード";
+"ext.tv.sources.cred.saveEnable"           = "保存して有効化";
+"ext.tv.sources.cred.clearLocal"           = "ローカルの認証情報を消去";
+
+// tvOS — Components
+"ext.tv.components.emptySubtitle"          = "iPhoneまたはMacからライブラリを同期すると、ここに音楽が表示されます";
+
+// tvOS — Playback / connection messages
+"ext.tv.playback.unsupported"              = "「%@」はまだApple TVで直接再生できません（スマートフォン / パソコンのみ）";
+"ext.tv.playback.missingCredential"        = "「%@」のログイン情報がありません — スマートフォンでiCloudキーチェーンをオンにしてログインしてください";
+"ext.tv.playback.songNotFound"             = "ライブラリにこの曲が見つかりません";
+"ext.tv.playback.authFailed"               = "認証に失敗しました。スマートフォンでこの音楽ソースに再ログインしてください";
+"ext.tv.playback.httpError"                = "サーバーがHTTP %dを返しました";
+"ext.tv.playback.cannotBuildURL"           = "再生用のURLを作成できませんでした";
+"ext.tv.playback.relayUnavailable"         = "このソースはiPhone中継が必要です — スマートフォンでPrimuseを開いたまま、Apple TVと同じWi-Fiに接続してください";
+"ext.tv.playback.failed"                   = "再生に失敗しました";
+
+// tvOS — Test connection results
+"ext.tv.test.sourceNotFound"               = "音楽ソースが見つかりません";
+"ext.tv.test.noSongs"                      = "このソースにはテストできる曲がライブラリにありません";
+"ext.tv.test.connectedPrefix"             = "接続しました · ";
+"ext.tv.test.resolved"                     = "解決済み";
+"ext.tv.test.unsupported"                  = "「%@」はApple TVで直接再生できません";
+"ext.tv.test.missingCredential"            = "ログイン情報がありません — ここでアカウントとパスワードを入力してください";
+"ext.tv.test.authFailed"                   = "認証に失敗しました — アカウントまたはパスワードが正しくありません";
+"ext.tv.test.relayUnavailable"             = "iPhone中継が必要です — スマートフォンでPrimuseを開いたまま、TVと同じWi-Fiに接続してください";
+"ext.tv.test.failedPrefix"                 = "接続に失敗しました · ";
+
+// tvOS — Top Shelf
+"ext.tv.topShelf.recent"                   = "最近再生した項目";
+"ext.tv.topShelf.library"                  = "ライブラリ";
+"ext.tv.test.resultBody"                   = "「%1$@」\n%2$@";

@@ -12,3 +12,242 @@
 "src.subtitle.aliyunDrive"   = "Aliyun Drive PDS";
 "src.subtitle.pan115"        = "115 Open Platform · Coming soon";
 "src.subtitle.pan123"        = "123 Open Platform · Coming soon";
+
+// Widget & Control Center extensions
+"ext.widget.appName"                       = "Primuse";
+"ext.widget.unknownSong"                   = "Unknown Song";
+"ext.widget.unknownArtist"                 = "Unknown Artist";
+"ext.widget.unknownAlbum"                  = "Unknown Album";
+"ext.widget.demo.track"                    = "Demo Track";
+
+"ext.widget.nowPlaying.displayName"        = "Now Playing";
+"ext.widget.nowPlaying.description"        = "See the current song and playback progress at a glance.";
+"ext.widget.nowPlaying.eyebrowFormat"      = "Now Playing · %@";
+"ext.widget.nowPlaying.playing"            = "Now Playing";
+"ext.widget.nowPlaying.paused"             = "Paused";
+"ext.widget.nowPlaying.empty.title"        = "Nothing Playing";
+"ext.widget.nowPlaying.empty.openShort"    = "Open Primuse to continue";
+"ext.widget.nowPlaying.empty.openMedium"   = "Open Primuse to pick up where you left off";
+"ext.widget.nowPlaying.empty.openLarge"    = "Connect a music source and your current song and progress will show up here.";
+"ext.widget.nowPlaying.empty.tapToPlay"    = "Tap to start playing";
+"ext.widget.nowPlaying.empty.inline"       = "Primuse — Nothing playing";
+
+"ext.widget.lyricsPreview.empty1"          = "No lyrics preview";
+"ext.widget.lyricsPreview.empty2"          = "Play a track with lyrics";
+"ext.widget.lyricsPreview.empty3"          = "and they'll follow along here";
+
+"ext.widget.lyrics.displayName"            = "Lyrics";
+"ext.widget.lyrics.description"            = "Show the current lyrics in sync with playback.";
+"ext.widget.lyrics.empty.title"            = "No Lyrics";
+"ext.widget.lyrics.empty.subtitle"         = "Shown after you play a song with lyrics";
+
+"ext.widget.stats.displayName"             = "Listening Stats";
+"ext.widget.stats.description"             = "Your plays and top track over the last 30 days.";
+"ext.widget.stats.eyebrow"                 = "This Month";
+"ext.widget.stats.last30Days"              = "Last 30 days";
+"ext.widget.stats.plays"                   = "plays";
+"ext.widget.stats.totalTime"               = "total time";
+"ext.widget.stats.topThisMonth"            = "Top this month";
+
+"ext.widget.sources.displayName"           = "Music Sources";
+"ext.widget.sources.description"           = "Indexing status and indexed counts for each source.";
+"ext.widget.sources.eyebrow"               = "Sources";
+"ext.widget.sources.indexed"               = "indexed";
+
+"ext.widget.wrapped.displayName"           = "Year in Review";
+"ext.widget.wrapped.description"           = "Your year of listening, summed up.";
+"ext.widget.wrapped.headline"             = "Your %@\nlistened for %d hours";
+"ext.widget.wrapped.topArtist"             = "Top artist · %@";
+"ext.widget.wrapped.viewReport"            = "View your year in review";
+"ext.widget.wrapped.empty.title"           = "Building your year";
+"ext.widget.wrapped.empty.subtitle"        = "Listen to more songs to unlock your year in review";
+
+"ext.widget.recent.displayName"            = "Recently Played";
+"ext.widget.recent.description"            = "Put your recently played albums right on your Home Screen.";
+"ext.widget.recent.eyebrow"                = "Recently Played";
+"ext.widget.recent.empty.title"            = "Nothing Recent";
+"ext.widget.recent.empty.short"            = "Appears once you start playing";
+"ext.widget.recent.empty.medium"           = "Your recent albums will show up here once you start playing";
+"ext.widget.recent.empty.large"            = "Albums you've recently played sync to your Home Screen automatically";
+
+"ext.control.play"                         = "Play";
+"ext.control.pause"                        = "Pause";
+"ext.control.shuffle"                      = "Shuffle";
+"ext.control.next"                         = "Next";
+"ext.control.previous"                     = "Previous";
+"ext.control.playPause.displayName"        = "Primuse Play / Pause";
+"ext.control.playPause.description"        = "Control Primuse playback with one tap.";
+"ext.control.shuffle.displayName"          = "Primuse Shuffle";
+"ext.control.shuffle.description"          = "Shuffle your whole library and start playing.";
+"ext.control.next.displayName"             = "Primuse Next";
+"ext.control.next.description"             = "Skip to the next track.";
+"ext.control.previous.displayName"         = "Primuse Previous";
+"ext.control.previous.description"         = "Go back to the previous track.";
+
+// watchOS app & complication
+"ext.watch.appName"                        = "Primuse";
+"ext.watch.complication.description"       = "Glance at what's playing now.";
+"ext.watch.demo.track"                     = "Track Name";
+"ext.watch.demo.artist"                    = "Artist";
+"ext.watch.nowPlaying.none"                = "Nothing playing";
+"ext.watch.nowPlaying.empty.title"         = "Nothing playing yet";
+"ext.watch.nowPlaying.empty.reachable"     = "Pick a song on your iPhone to start playing";
+"ext.watch.nowPlaying.empty.unreachable"   = "Make sure your iPhone is unlocked with Primuse open";
+"ext.watch.queue.title"                    = "Up Next";
+"ext.watch.queue.empty.title"              = "Queue is empty";
+"ext.watch.queue.empty.subtitle"           = "Play a song on your iPhone and the queue shows up here";
+"ext.watch.queue.truncationNotice"         = "Showing first %d of %d songs";
+
+// tvOS app
+"ext.tv.unknownArtist"                     = "Unknown Artist";
+"ext.tv.nav.home"                          = "Home";
+"ext.tv.nav.library"                       = "Library";
+"ext.tv.nav.playlists"                     = "Playlists";
+"ext.tv.nav.sources"                       = "Sources";
+"ext.tv.nav.search"                        = "Search";
+"ext.tv.songsCount"                        = "%d songs";
+"ext.tv.minCount"                          = "%d min";
+"ext.tv.countOnly"                         = "%d";
+
+// tvOS — Home
+"ext.tv.home.empty"                        = "No music library yet";
+"ext.tv.home.recentlyPlayed"               = "Recently Played";
+"ext.tv.home.recentlyAdded"                = "Recently Added";
+"ext.tv.home.madeForYou"                   = "Made for You";
+"ext.tv.home.tonightsPick"                 = "Tonight's Pick";
+"ext.tv.home.playAll"                      = "Play All";
+"ext.tv.home.shuffle"                      = "Shuffle";
+"ext.tv.home.love"                         = "Love";
+
+// tvOS — Library
+"ext.tv.library.eyebrow"                   = "Library";
+"ext.tv.library.filter.all"                = "All";
+"ext.tv.library.filter.artists"            = "Artists";
+"ext.tv.library.filter.songs"              = "Songs";
+"ext.tv.library.filter.playlists"          = "Playlists";
+"ext.tv.library.filter.smart"              = "Smart Playlists";
+"ext.tv.library.title.albums"              = "Albums · %d";
+"ext.tv.library.title.artists"             = "Artists · %d";
+"ext.tv.library.title.songs"               = "Songs · %@";
+"ext.tv.library.title.playlists"           = "Playlists · %d";
+"ext.tv.library.title.smart"               = "Smart Playlists · %d";
+
+// tvOS — Playlists
+"ext.tv.playlists.eyebrow"                 = "Playlists";
+"ext.tv.playlists.title"                   = "Your Playlists · %d";
+"ext.tv.playlists.smart"                   = "Smart";
+
+// tvOS — Search
+"ext.tv.search.eyebrow"                    = "Search";
+"ext.tv.search.placeholder"                = "Search songs, albums, artists";
+"ext.tv.search.hint"                       = "Select the search field to open the keyboard, or use voice dictation";
+"ext.tv.search.suggestions"                = "Suggestions";
+"ext.tv.search.topResult"                  = "Top Result";
+"ext.tv.search.artistMeta"                 = "Artist · %d songs";
+"ext.tv.search.typeToSearch"               = "Type to search your library";
+"ext.tv.search.songs"                      = "Songs";
+"ext.tv.search.noMatch"                    = "No matching songs";
+
+// tvOS — Now Playing
+"ext.tv.nowPlaying.notPlaying"             = "Not Playing";
+"ext.tv.nowPlaying.pickASong"              = "Pick a song from your library to start";
+"ext.tv.nowPlaying.eyebrow"                = "Now Playing";
+"ext.tv.nowPlaying.noLyrics"               = "No Lyrics";
+
+// tvOS — Queue
+"ext.tv.queue.nowPlaying"                  = "Now Playing";
+"ext.tv.queue.upNext"                      = "Up Next · %d songs";
+
+// tvOS — Options
+"ext.tv.options.eyebrow"                   = "Options";
+"ext.tv.options.loved"                     = "Loved";
+"ext.tv.options.love"                      = "Love";
+"ext.tv.options.sleepActive"               = "Sleep %d min";
+"ext.tv.options.sleepTimer"                = "Sleep Timer";
+
+// tvOS — Settings
+"ext.tv.settings.notSynced"                = "Not synced yet";
+"ext.tv.settings.libraryStat"              = "%1$@ songs · %2$d albums · %3$d artists";
+"ext.tv.settings.syncing"                  = "Syncing from iCloud…";
+"ext.tv.settings.tapToPull"                = "Tap to pull latest library";
+"ext.tv.settings.eyebrow"                  = "Settings";
+"ext.tv.settings.general"                  = "General";
+"ext.tv.settings.icloudSync"               = "iCloud Sync";
+"ext.tv.settings.autoSync"                 = "Auto sync on launch";
+"ext.tv.settings.library"                  = "Library";
+"ext.tv.settings.playlists"                = "Playlists";
+"ext.tv.settings.sources"                  = "Sources";
+"ext.tv.settings.about"                    = "About Primuse";
+"ext.tv.settings.remoteTips"               = "Remote Tips";
+"ext.tv.settings.tip.touch.title"          = "Touch surface";
+"ext.tv.settings.tip.touch.body"           = "Swipe up / down / left / right · press to select";
+"ext.tv.settings.tip.menu.title"           = "Menu / Back";
+"ext.tv.settings.tip.menu.body"            = "Go back one level";
+"ext.tv.settings.tip.tv.title"             = "TV button";
+"ext.tv.settings.tip.tv.body"              = "Return to Apple TV Home";
+"ext.tv.settings.tip.search.title"         = "Search field";
+"ext.tv.settings.tip.search.body"          = "Brings up the keyboard · voice dictation supported";
+"ext.tv.settings.noSnapshot"               = "No library snapshot found";
+"ext.tv.settings.synced"                   = "Synced · %@ songs";
+
+// tvOS — Sources
+"ext.tv.sources.eyebrow"                   = "Music Sources";
+"ext.tv.sources.title"                     = "Music Sources · %d";
+"ext.tv.sources.emptyTitle"                = "No Music Sources Yet";
+"ext.tv.sources.emptyBody"                 = "Scan the QR code on the right to add one from your phone, or add it on iPhone / Mac and it syncs over via iCloud.";
+"ext.tv.sources.addSource"                 = "Add a Source";
+"ext.tv.sources.removeTitle"               = "Remove Source?";
+"ext.tv.sources.remove"                    = "Remove";
+"ext.tv.sources.cancel"                    = "Cancel";
+"ext.tv.sources.removeBody"                = "“%@” will be removed from Apple TV. It remains authoritative on iPhone / Mac — delete it there to remove it completely.";
+"ext.tv.sources.testConnection"            = "Test Connection";
+"ext.tv.sources.ok"                        = "OK";
+"ext.tv.sources.scanTitle"                 = "Scan to Add on Phone";
+"ext.tv.sources.scanBody1"                 = "Scan this code with your iPhone camera to open Primuse at “Add a Source,” where you can add NAS, cloud drives, Subsonic, and more.";
+"ext.tv.sources.scanBody2"                 = "Once added, it syncs to Apple TV automatically via iCloud. You can also add it directly on iPhone / Mac.";
+"ext.tv.sources.typeSongs"                 = "%1$@ · %2$@ songs";
+"ext.tv.sources.enable"                    = "Enable";
+"ext.tv.sources.disable"                   = "Disable";
+"ext.tv.sources.enterCredentials"          = "Enter Credentials";
+"ext.tv.sources.removeFromTV"              = "Remove from Apple TV";
+"ext.tv.sources.tag.noCredentials"         = "No Credentials";
+"ext.tv.sources.tag.needsRelay"            = "Needs iPhone Relay";
+"ext.tv.sources.tag.notOnTV"               = "Not on TV";
+"ext.tv.sources.status.enabled"            = "Enabled";
+"ext.tv.sources.status.scanning"           = "Scanning";
+"ext.tv.sources.status.authFailed"         = "Auth Failed";
+"ext.tv.sources.status.disabled"           = "Disabled";
+"ext.tv.sources.cred.intro"                = "Sign in to this source directly on Apple TV. Credentials are stored only on this device (never uploaded or synced) and take priority over those synced from your phone — handy when sessions don’t carry across devices.";
+"ext.tv.sources.cred.username"             = "Username";
+"ext.tv.sources.cred.password"             = "Password";
+"ext.tv.sources.cred.saveEnable"           = "Save & Enable";
+"ext.tv.sources.cred.clearLocal"           = "Clear Local Credentials";
+
+// tvOS — Components
+"ext.tv.components.emptySubtitle"          = "Sync your library from iPhone or Mac to see your music here";
+
+// tvOS — Playback / connection messages
+"ext.tv.playback.unsupported"              = "“%@” can’t play directly on Apple TV yet (phone / computer only)";
+"ext.tv.playback.missingCredential"        = "Missing credentials for “%@” — sign in on your phone with iCloud Keychain on";
+"ext.tv.playback.songNotFound"             = "Song not found in the library";
+"ext.tv.playback.authFailed"               = "Authentication failed — re-sign in to this source on your phone";
+"ext.tv.playback.httpError"                = "Server returned HTTP %d";
+"ext.tv.playback.cannotBuildURL"           = "Couldn’t build a playback URL";
+"ext.tv.playback.relayUnavailable"         = "This source needs iPhone relay — keep Primuse open on your phone, on the same Wi-Fi as the Apple TV";
+"ext.tv.playback.failed"                   = "Playback failed";
+
+// tvOS — Test connection results
+"ext.tv.test.sourceNotFound"               = "Source not found";
+"ext.tv.test.noSongs"                      = "This source has no songs in the library to test";
+"ext.tv.test.connectedPrefix"             = "Connected · ";
+"ext.tv.test.resolved"                     = "resolved";
+"ext.tv.test.unsupported"                  = "“%@” can’t be played directly on Apple TV";
+"ext.tv.test.missingCredential"            = "Missing credentials — enter your account and password here";
+"ext.tv.test.authFailed"                   = "Authentication failed — wrong account or password";
+"ext.tv.test.relayUnavailable"             = "Needs iPhone relay — keep Primuse open on your phone, on the same Wi-Fi as the TV";
+"ext.tv.test.failedPrefix"                 = "Connection failed · ";
+
+// tvOS — Top Shelf
+"ext.tv.topShelf.recent"                   = "Recently Played";
+"ext.tv.topShelf.library"                  = "Library";
+"ext.tv.test.resultBody"                   = "“%1$@”\n%2$@";

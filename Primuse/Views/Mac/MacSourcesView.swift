@@ -568,7 +568,7 @@ struct MacSourcesView: View {
 
     private func setEnabled(_ source: MusicSource, _ enabled: Bool) {
         if !enabled {
-            stopBackgroundWork(for: source.id)
+            pauseBackgroundWork(for: source.id)
         }
         // Disable only removes the source from active views/scans. Deleting
         // source library rows and caches belongs to deleteSource(_:).
@@ -576,6 +576,8 @@ struct MacSourcesView: View {
         library.updateDisabledSourceIDs(disabledSourceIDs)
         if enabled {
             backfill.start()
+        } else {
+            backfill.sourceAvailabilityChanged()
         }
     }
 
@@ -618,6 +620,10 @@ struct MacSourcesView: View {
         scanService.cancelScan(for: sourceID)
         scanService.removeCheckpoint(for: sourceID)
         backfill.discardWork(forSourceID: sourceID)
+    }
+
+    private func pauseBackgroundWork(for sourceID: String) {
+        scanService.cancelScan(for: sourceID)
     }
 
     private func runScan(_ source: MusicSource) {

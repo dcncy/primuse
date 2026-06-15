@@ -747,10 +747,11 @@ final class ScanService {
     }
 
     private func checkSourceStillEnabled(_ sourceID: String, sourceStore: SourcesStore) throws {
-        guard sourceCanContinue(sourceID, sourceStore: sourceStore) else {
+        guard let live = sourceStore.source(id: sourceID), !live.isDeleted else {
             removeCheckpoint(for: sourceID)
             throw CancellationError()
         }
+        guard live.isEnabled else { throw CancellationError() }
     }
 
 }

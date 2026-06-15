@@ -475,6 +475,21 @@ struct MacHomeView: View {
                         progress: scraperService.progress,
                         indeterminate: scraperService.totalCount == 0
                     )
+                } else if backfill.failedCount > 0 {
+                    // 没有进行中的任务, 但有读取失败 / 多次超时被挂起的歌 ——
+                    // 给个手动重试入口 (源恢复后再试一次)。
+                    Button {
+                        backfill.retryFailed()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundStyle(PMColor.bad)
+                            Text(String(format: String(localized: "backfill_retry_failed"), backfill.failedCount))
+                                .font(.system(size: 12))
+                                .foregroundStyle(PMColor.textMuted)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 } else {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")

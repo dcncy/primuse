@@ -318,6 +318,7 @@
 "new_songs_added" = "%d new songs";
 "no_new_songs" = "No new songs";
 "backfill_remaining" = "%d remaining";
+"backfill_retry_failed" = "Retry %d failed song(s)";
 "song_details_loading" = "Reading track info";
 "song_details_loading_message" = "Downloading this song's tag header (~256 KB) from the cloud to extract duration, cover and artist. Once done it can be added to the play queue.";
 "song_details_unavailable" = "Song details unavailable";

@@ -443,6 +443,7 @@
 "new_songs_added" = "%d neue Titel";
 "no_new_songs" = "Keine neuen Titel";
 "backfill_remaining" = "Noch %d";
+"backfill_retry_failed" = "%d fehlgeschlagene erneut versuchen";
 "song_details_loading" = "Titelinformationen werden gelesen";
 "song_details_loading_message" = "Der Tag-Header dieses Titels (~256 KB) wird aus der Cloud geladen, um Dauer, Cover und Künstler zu ermitteln. Danach kann der Titel zur Wiedergabeliste hinzugefügt werden.";
 "song_details_unavailable" = "Titeldetails nicht verfügbar";

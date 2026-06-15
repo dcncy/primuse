@@ -42,6 +42,18 @@ final class MetadataBackfillService {
     /// every app launch.
     private var failedSongIDs: Set<String> = []
 
+    /// Consecutive *transient* failure count per song ID, this session only.
+    /// Reset to 0 on a successful backfill. Not persisted — a throttle blip
+    /// today must not disqualify the song on future launches.
+    private var transientFailureCounts: [String: Int] = [:]
+    /// Songs parked this session after `maxTransientRetries` consecutive
+    /// transient failures (timeout / network / rate-limit). Treated like
+    /// `failedSongIDs` for queueing and UI (skipped from the queue, the row
+    /// spinner stops) but deliberately NOT written to disk: a transient
+    /// throttle shouldn't permanently mark the song unreadable, so the next
+    /// launch starts it fresh when the source is healthy again.
+    private var sessionGivenUpIDs: Set<String> = []
+
     /// UserDefaults key for "only run backfill on Wi-Fi". Default true.
     /// User-facing toggle lives in CloudSyncSettingsView.
     static let wifiOnlyDefaultsKey = "primuse.cloudScanWifiOnly"
@@ -246,6 +258,8 @@ final class MetadataBackfillService {
             MainActor.assumeIsolated {
                 let ids = Set(songs.map(\.id))
                 self.failedSongIDs.subtract(ids)
+                self.sessionGivenUpIDs.subtract(ids)
+                for id in ids { self.transientFailureCounts[id] = nil }
                 self.saveFailed()
                 self.start()
             }
@@ -392,13 +406,24 @@ final class MetadataBackfillService {
         endBackgroundTaskIfHeld()
     }
 
-    /// Drop queued work for a source that was disabled or removed. The
+    /// Re-evaluate active work after a source was enabled or disabled.
+    /// This cancels the current snapshot so disabled sources stop burning
+    /// network, but deliberately keeps failedSongIDs intact so the next
+    /// launch does not retry files already classified as unparseable.
+    func sourceAvailabilityChanged() {
+        stop()
+        refreshQueue()
+    }
+
+    /// Drop queued work for a source that was removed. The
     /// worker processes fixed snapshots, so without stopping it a deleted
     /// 10K-song source can keep burning through stale rows until relaunch.
     func discardWork(forSourceID sourceID: String) {
         let ids = Set(library.songs.lazy.filter { $0.sourceID == sourceID }.map(\.id))
         if !ids.isEmpty {
             failedSongIDs.subtract(ids)
+            sessionGivenUpIDs.subtract(ids)
+            for id in ids { transientFailureCounts[id] = nil }
             saveFailed()
         }
         stop()
@@ -447,6 +472,7 @@ final class MetadataBackfillService {
         let sourceIDs = backfillableSourceIDs()
         return library.songs.contains { song in
             !failedSongIDs.contains(song.id)
+                && !sessionGivenUpIDs.contains(song.id)
                 && sourceIDs.contains(song.sourceID)
                 && Self.needsBackfill(song)
         }
@@ -466,7 +492,9 @@ final class MetadataBackfillService {
     /// unavailable" hint so the user isn't stuck staring at a forever-
     /// loading row.
     func didFail(songID: String) -> Bool {
-        failedSongIDs.contains(songID)
+        // Includes session-parked songs (repeated transient failures) so the
+        // row swaps its forever-spinner for the "details unavailable" hint.
+        failedSongIDs.contains(songID) || sessionGivenUpIDs.contains(songID)
     }
 
     /// Per-source variant — used by the source card so its "remaining"
@@ -476,10 +504,40 @@ final class MetadataBackfillService {
         let sourceIDs = backfillableSourceIDs()
         return library.songs.lazy.filter { song in
             !self.failedSongIDs.contains(song.id) &&
+                !self.sessionGivenUpIDs.contains(song.id) &&
                 sourceIDs.contains(song.sourceID) &&
                 Self.needsBackfill(song) &&
                 (sourceID == nil || song.sourceID == sourceID)
         }.count
+    }
+
+    /// Number of songs backfill has given up on — persisted permanent
+    /// failures plus this-session transient parks — that are still in the
+    /// library, still duration-less, and from an active source. Drives the
+    /// "retry failed" button: 0 ⇒ nothing to retry.
+    var failedCount: Int {
+        let sourceIDs = backfillableSourceIDs()
+        return library.songs.lazy.filter { song in
+            (self.failedSongIDs.contains(song.id) || self.sessionGivenUpIDs.contains(song.id))
+                && sourceIDs.contains(song.sourceID)
+                && Self.isBareSong(song)
+        }.count
+    }
+
+    /// Clear failure marks for every duration-less song (persisted + session
+    /// parks) and restart backfill so the user can re-attempt reads that
+    /// previously failed — e.g. after a flaky source recovered. Scoped to bare
+    /// songs so pressing it doesn't trigger a mass artwork re-fetch for MP3s
+    /// that merely lack an embedded cover. Bound to the retry button.
+    func retryFailed() {
+        let bareIDs = Set(library.songs.lazy.filter { Self.isBareSong($0) }.map(\.id))
+        guard !bareIDs.isEmpty else { return }
+        failedSongIDs.subtract(bareIDs)
+        sessionGivenUpIDs.subtract(bareIDs)
+        for id in bareIDs { transientFailureCounts[id] = nil }
+        saveFailed()
+        plog("📥 Backfill: retryFailed cleared \(bareIDs.count) bare-song marks, restarting")
+        start()
     }
 
     // MARK: - Worker
@@ -501,6 +559,13 @@ final class MetadataBackfillService {
     /// leave a READ or AVFoundation metadata load suspended indefinitely for a
     /// damaged or locked file. Let that file go and keep the queue moving.
     private static let perSongTimeout: TimeInterval = 45
+    /// Max consecutive *transient* failures tolerated for one song within a
+    /// session before we stop retrying it. Without this cap, a file that the
+    /// source (e.g. 百度网盘) keeps throttling past the connector's request
+    /// timeout fails transiently → never marked failed → re-picked every pass
+    /// → its "读取标签中…" spinner spins forever. The cap parks such a song for
+    /// the session; a future launch retries it fresh.
+    private static let maxTransientRetries = 5
 
     private func runWorker() async {
         // Outer loop: take a snapshot of bare songs, process the snapshot
@@ -582,11 +647,27 @@ final class MetadataBackfillService {
                 if Task.isCancelled { break }
 
                 processedCount += 1
+                let songID = result.song.id
                 if result.outcome.markFailed, isStillEligible(result.song) {
-                    failedSongIDs.insert(result.song.id)
+                    failedSongIDs.insert(songID)
                     saveFailed()
                 }
+                if result.outcome.transientFailure, isStillEligible(result.song) {
+                    // Cap consecutive transient failures so a chronically
+                    // throttled file (timeout every pass) can't loop forever —
+                    // park it for the session instead, which stops the row
+                    // spinner without persisting a false "permanent" failure.
+                    let count = (transientFailureCounts[songID] ?? 0) + 1
+                    if count >= Self.maxTransientRetries {
+                        sessionGivenUpIDs.insert(songID)
+                        transientFailureCounts[songID] = nil
+                        plog("⚠️ Backfill: '\(result.song.title)' parked for session after \(count) transient failures (retries next launch)")
+                    } else {
+                        transientFailureCounts[songID] = count
+                    }
+                }
                 if let updated = result.outcome.song {
+                    transientFailureCounts[songID] = nil  // success → reset streak
                     pendingFlush.append(updated)
                 }
 
@@ -687,6 +768,10 @@ final class MetadataBackfillService {
     struct BackfillOutcome: Sendable {
         var song: Song?
         var markFailed: Bool
+        /// Set when the attempt failed with a *transient* error (timeout /
+        /// network / throttle). The caller bumps a per-song retry counter and
+        /// parks the song after `maxTransientRetries` so it stops re-queuing.
+        var transientFailure: Bool = false
     }
 
     private struct BackfillHardTimeoutError: LocalizedError, Sendable {
@@ -805,7 +890,7 @@ final class MetadataBackfillService {
             plog(String(format: "⚠️ Backfill failed for '%@' after %.2fs: %@ (%@)",
                         song.title, elapsed, error.localizedDescription,
                         transient ? "transient — will retry" : "permanent — marking failed"))
-            return BackfillOutcome(song: nil, markFailed: !transient)
+            return BackfillOutcome(song: nil, markFailed: !transient, transientFailure: transient)
         }
     }
 
@@ -1064,6 +1149,7 @@ final class MetadataBackfillService {
         let sourceIDs = backfillableSourceIDs()
         let candidates = library.songs.lazy.filter { song in
             guard !self.failedSongIDs.contains(song.id) else { return false }
+            guard !self.sessionGivenUpIDs.contains(song.id) else { return false }
             guard !self.library.disabledSourceIDs.contains(song.sourceID) else { return false }
             guard sourceIDs.contains(song.sourceID) else { return false }
             return Self.needsBackfill(song)
@@ -1073,6 +1159,7 @@ final class MetadataBackfillService {
 
     private func isStillEligible(_ song: Song) -> Bool {
         guard !failedSongIDs.contains(song.id) else { return false }
+        guard !sessionGivenUpIDs.contains(song.id) else { return false }
         guard !library.disabledSourceIDs.contains(song.sourceID) else { return false }
         guard backfillableSourceIDs().contains(song.sourceID) else { return false }
         guard let live = library.song(id: song.id), live.sourceID == song.sourceID else { return false }

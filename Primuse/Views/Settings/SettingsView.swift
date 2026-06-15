@@ -978,6 +978,16 @@ struct StorageManagementView: View {
                             .monospacedDigit()
                     }
                 }
+                if backfill.failedCount > 0 {
+                    Button {
+                        backfill.retryFailed()
+                    } label: {
+                        Label(
+                            String(format: String(localized: "backfill_retry_failed"), backfill.failedCount),
+                            systemImage: "arrow.clockwise"
+                        )
+                    }
+                }
             } header: {
                 Text("network")
             } footer: {

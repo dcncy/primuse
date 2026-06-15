@@ -835,12 +835,14 @@ struct SourcesView: View {
         let current = currentSource(for: source)
         let enabled = !current.isEnabled
         if !enabled {
-            stopBackgroundWork(for: current.id)
+            pauseBackgroundWork(for: current.id)
         }
         updateSource(current.id) { $0.isEnabled = enabled }
         library.updateDisabledSourceIDs(disabledSourceIDs)
         if enabled {
             backfill.start()
+        } else {
+            backfill.sourceAvailabilityChanged()
         }
     }
 
@@ -876,6 +878,10 @@ struct SourcesView: View {
         scanService.cancelScan(for: sourceID)
         scanService.removeCheckpoint(for: sourceID)
         backfill.discardWork(forSourceID: sourceID)
+    }
+
+    private func pauseBackgroundWork(for sourceID: String) {
+        scanService.cancelScan(for: sourceID)
     }
 
     private func currentSource(for source: MusicSource) -> MusicSource {

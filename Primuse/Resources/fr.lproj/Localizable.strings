@@ -443,6 +443,7 @@
 "new_songs_added" = "%d nouveaux morceaux";
 "no_new_songs" = "Aucun nouveau morceau";
 "backfill_remaining" = "%d restants";
+"backfill_retry_failed" = "Réessayer %d morceau(x) en échec";
 "song_details_loading" = "Lecture des infos du morceau";
 "song_details_loading_message" = "Téléchargement de l'en-tête de tags de ce morceau (~256 Ko) depuis le cloud pour en extraire la durée, la pochette et l'artiste. Une fois terminé, il peut être ajouté à la file de lecture.";
 "song_details_unavailable" = "Informations du morceau indisponibles";

@@ -80,7 +80,7 @@ final class AppServices {
         self.themeService = theme
         self.scanService = ScanService()
         self.metadataBackfill = MetadataBackfillService(library: library, sourceManager: manager) {
-            Set(store.sources.filter(\.supportsRangeStreaming).map(\.id))
+            Set(store.sources.filter { $0.isEnabled && $0.supportsRangeStreaming }.map(\.id))
         }
         self.lyricsTextBackfill = LyricsTextBackfillService(library: library)
         self.similarTracks = SimilarTracksService()

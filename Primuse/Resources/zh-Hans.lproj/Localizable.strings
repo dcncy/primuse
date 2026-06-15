@@ -318,6 +318,7 @@
 "new_songs_added" = "新增 %d 首";
 "no_new_songs" = "暂无新歌";
 "backfill_remaining" = "剩余 %d 首";
+"backfill_retry_failed" = "重试 %d 首读取失败的歌曲";
 "song_details_loading" = "正在读取曲目信息";
 "song_details_loading_message" = "正在从云盘下载这首歌的标签头（约 256 KB），用来解析时长、封面和艺术家。读完后即可加入播放队列。";
 "song_details_unavailable" = "无法读取歌曲详情";

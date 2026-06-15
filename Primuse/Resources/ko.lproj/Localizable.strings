@@ -443,6 +443,7 @@
 "new_songs_added" = "새 곡 %d개";
 "no_new_songs" = "새 곡 없음";
 "backfill_remaining" = "%d개 남음";
+"backfill_retry_failed" = "읽기 실패한 %d곡 다시 시도";
 "song_details_loading" = "트랙 정보 읽는 중";
 "song_details_loading_message" = "클라우드에서 이 곡의 태그 헤더(약 256KB)를 다운로드하여 길이, 커버, 아티스트를 추출하는 중입니다. 완료되면 재생 대기열에 추가할 수 있습니다.";
 "song_details_unavailable" = "곡 세부 정보를 사용할 수 없음";

@@ -303,6 +303,7 @@
 "new_songs_added" = "新增 %d 首";
 "no_new_songs" = "暫無新歌";
 "backfill_remaining" = "剩餘 %d 首";
+"backfill_retry_failed" = "重試 %d 首讀取失敗的歌曲";
 "song_details_loading" = "正在讀取曲目資訊";
 "song_details_loading_message" = "正在從雲端硬碟下載這首歌的標籤頭（約 256 KB），用來解析時長、封面和演出者。讀完後即可加入播放佇列。";
 "song_details_unavailable" = "無法讀取歌曲詳情";

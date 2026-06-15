@@ -227,16 +227,9 @@ struct ConnectorDirectoryBrowserView: View {
         let requestPath = currentPath
         loadTask = Task {
             do {
-                try await connector.connect()
-                let loaded = try await connector.listFiles(at: requestPath)
+                let loaded = try await loadItems(at: requestPath)
                 guard !Task.isCancelled, requestPath == currentPath else { return }
-                items = loaded
-                if source.type.isCloudDrive {
-                    CloudDirectoryNameStore.save(items, for: source.id)
-                    if let current = pathStack.last {
-                        CloudDirectoryNameStore.saveName(current.title, for: current.path, sourceID: source.id)
-                    }
-                }
+                applyLoadedItems(loaded)
                 isLoading = false
             } catch {
                 guard !Task.isCancelled, requestPath == currentPath else { return }
@@ -244,16 +237,9 @@ struct ConnectorDirectoryBrowserView: View {
                 guard !Task.isCancelled, requestPath == currentPath else { return }
                 if trusted {
                     do {
-                        try await connector.connect()
-                        let loaded = try await connector.listFiles(at: requestPath)
+                        let loaded = try await loadItems(at: requestPath)
                         guard !Task.isCancelled, requestPath == currentPath else { return }
-                        items = loaded
-                        if source.type.isCloudDrive {
-                            CloudDirectoryNameStore.save(items, for: source.id)
-                            if let current = pathStack.last {
-                                CloudDirectoryNameStore.saveName(current.title, for: current.path, sourceID: source.id)
-                            }
-                        }
+                        applyLoadedItems(loaded)
                     } catch {
                         guard !Task.isCancelled, requestPath == currentPath else { return }
                         errorMessage = error.localizedDescription
@@ -262,6 +248,23 @@ struct ConnectorDirectoryBrowserView: View {
                     errorMessage = error.localizedDescription
                 }
                 isLoading = false
+            }
+        }
+    }
+
+    private func loadItems(at path: String) async throws -> [RemoteFileItem] {
+        try await DirectoryBrowserNetworkRetry.loadWithLocalNetworkAuthorizationGrace {
+            try await connector.connect()
+            return try await connector.listFiles(at: path)
+        }
+    }
+
+    private func applyLoadedItems(_ loaded: [RemoteFileItem]) {
+        items = loaded
+        if source.type.isCloudDrive {
+            CloudDirectoryNameStore.save(items, for: source.id)
+            if let current = pathStack.last {
+                CloudDirectoryNameStore.saveName(current.title, for: current.path, sourceID: source.id)
             }
         }
     }

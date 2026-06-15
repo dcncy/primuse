@@ -172,15 +172,25 @@ private struct UPnPDirectoryBrowserView: View {
         isLoading = true
         errorMessage = nil
 
+        let requestPath = currentPath
         Task {
             do {
-                try await connector.connect()
-                items = try await connector.listFiles(at: currentPath)
+                let loaded = try await loadItems(at: requestPath)
+                guard requestPath == currentPath else { return }
+                items = loaded
                 isLoading = false
             } catch {
+                guard requestPath == currentPath else { return }
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
+        }
+    }
+
+    private func loadItems(at path: String) async throws -> [RemoteFileItem] {
+        try await DirectoryBrowserNetworkRetry.loadWithLocalNetworkAuthorizationGrace {
+            try await connector.connect()
+            return try await connector.listFiles(at: path)
         }
     }
 

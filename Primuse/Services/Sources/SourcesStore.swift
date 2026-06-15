@@ -191,6 +191,11 @@ final class SourcesStore {
         allSources.removeAll { $0.id == id }
         persist()
         notifyChanged([id])
+        NotificationCenter.default.post(
+            name: .primuseSourceDidDelete,
+            object: nil,
+            userInfo: ["id": id]
+        )
     }
 
     /// Apply a source pulled from CloudKit. Preserves device-local fields

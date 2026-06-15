@@ -29,6 +29,101 @@ extension View {
     }
 }
 
+@MainActor
+enum DirectoryBrowserNetworkRetry {
+    /// The first real TCP/SMB/WebDAV connection can be the moment macOS/iOS/tvOS
+    /// shows the Local Network permission alert. Some lower-level libraries
+    /// surface that in-flight authorization as an immediate connection failure
+    /// before the user has clicked Allow. Keep the browser in loading state
+    /// briefly and retry so the successful permission decision is picked up
+    /// without a manual Retry click.
+    private static let localNetworkAuthorizationRetryDelays: [UInt64] = [
+        700_000_000,
+        1_300_000_000,
+        2_500_000_000,
+        4_000_000_000
+    ]
+
+    static func loadWithLocalNetworkAuthorizationGrace<Value>(
+        _ operation: () async throws -> Value
+    ) async throws -> Value {
+        do {
+            return try await operation()
+        } catch {
+            guard shouldRetryAfterLocalNetworkAuthorization(error) else {
+                throw error
+            }
+
+            var lastError = error
+            for delay in localNetworkAuthorizationRetryDelays {
+                try Task.checkCancellation()
+                try await Task.sleep(nanoseconds: delay)
+                do {
+                    return try await operation()
+                } catch {
+                    lastError = error
+                    if shouldRetryAfterLocalNetworkAuthorization(error) == false {
+                        throw error
+                    }
+                }
+            }
+            throw lastError
+        }
+    }
+
+    static func shouldRetryAfterLocalNetworkAuthorization(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        if SSLTrustStore.sslErrorDomain(from: error) != nil { return false }
+
+        switch error {
+        case SourceError.connectionFailed, SourceError.timeout:
+            return true
+        case SourceError.pathNotFound, SourceError.fileNotFound, SourceError.authenticationFailed:
+            return false
+        default:
+            break
+        }
+
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            return [
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorCannotFindHost,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorDNSLookupFailed,
+                NSURLErrorDataNotAllowed,
+                NSURLErrorTimedOut
+            ].contains(ns.code)
+        }
+
+        if ns.domain == NSPOSIXErrorDomain {
+            return [
+                Int(EACCES), Int(EPERM),
+                Int(ECONNREFUSED), Int(EHOSTUNREACH), Int(ENETUNREACH),
+                Int(ENOTCONN), Int(ECONNRESET), Int(ENETRESET),
+                Int(ETIMEDOUT)
+            ].contains(ns.code)
+        }
+
+        let message = error.localizedDescription.lowercased()
+        return message.contains("network")
+            || message.contains("connection")
+            || message.contains("timed out")
+            || message.contains("timeout")
+            || message.contains("not permitted")
+            || message.contains("operation not permitted")
+            || message.contains("unreachable")
+            || message.contains("refused")
+            || message.contains("网络")
+            || message.contains("联网")
+            || message.contains("连接")
+            || message.contains("权限")
+            || message.contains("不可达")
+            || message.contains("超时")
+    }
+}
+
 // MARK: - Breadcrumb
 
 struct DirectoryBreadcrumb: View {
@@ -717,13 +812,17 @@ struct MacDirTreeBrowser: View {
     private func listing(_ path: String) async throws -> [RemoteFileItem] {
         if let cached = cache[path] { return cached }
         do {
-            let items = try await load(path)
+            let items = try await DirectoryBrowserNetworkRetry.loadWithLocalNetworkAuthorizationGrace {
+                try await load(path)
+            }
             cache[path] = items
             return items
         } catch {
             let trusted = await promptSSLTrust(for: error)
             guard trusted else { throw error }
-            let items = try await load(path)
+            let items = try await DirectoryBrowserNetworkRetry.loadWithLocalNetworkAuthorizationGrace {
+                try await load(path)
+            }
             cache[path] = items
             return items
         }

@@ -497,6 +497,10 @@ final class MetadataBackfillService {
     /// 服务端限流。其他 connector (Synology / WebDAV) 也用同一个并发数,
     /// 它们没限速但 3 路并发也比串行快。
     private static let workerConcurrency = 3
+    /// Hard cap for a single song's metadata backfill. Some SMB/NAS stacks can
+    /// leave a READ or AVFoundation metadata load suspended indefinitely for a
+    /// damaged or locked file. Let that file go and keep the queue moving.
+    private static let perSongTimeout: TimeInterval = 45
 
     private func runWorker() async {
         // Outer loop: take a snapshot of bare songs, process the snapshot
@@ -653,6 +657,7 @@ final class MetadataBackfillService {
     /// 而非「永久」错误(文件已不存在、4xx 客户端错误)。瞬时错误不标 failed,
     /// 下一轮自动重试,避免重装/启动初期源未就绪时把歌永久钉成「无法读取」。
     static func isTransientBackfillError(_ error: Error) -> Bool {
+        if error is BackfillHardTimeoutError { return false }
         if error is URLError { return true }
         if error is CancellationError { return true }
         switch error {
@@ -679,9 +684,101 @@ final class MetadataBackfillService {
     /// `markFailed` tells the caller to add the original ID to
     /// `failedSongIDs` so backfill stops retrying — set even on partial
     /// merges so a duration-less file isn't picked up next pass.
-    struct BackfillOutcome {
+    struct BackfillOutcome: Sendable {
         var song: Song?
         var markFailed: Bool
+    }
+
+    private struct BackfillHardTimeoutError: LocalizedError, Sendable {
+        let seconds: TimeInterval
+
+        var errorDescription: String? {
+            "Timed out reading tags after \(Int(seconds))s"
+        }
+    }
+
+    private final class AsyncTimeoutBox<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private let continuation: CheckedContinuation<T, Error>
+        private var didFinish = false
+        private var workTask: Task<Void, Never>?
+        private var timeoutTask: Task<Void, Never>?
+
+        init(_ continuation: CheckedContinuation<T, Error>) {
+            self.continuation = continuation
+        }
+
+        func setTasks(workTask: Task<Void, Never>, timeoutTask: Task<Void, Never>) {
+            lock.lock()
+            if didFinish {
+                lock.unlock()
+                workTask.cancel()
+                timeoutTask.cancel()
+                return
+            }
+            self.workTask = workTask
+            self.timeoutTask = timeoutTask
+            lock.unlock()
+        }
+
+        func succeed(_ value: T) {
+            finish(.success(value))
+        }
+
+        func fail(_ error: Error) {
+            finish(.failure(error))
+        }
+
+        private func finish(_ result: Result<T, Error>) {
+            let tasks: (work: Task<Void, Never>?, timeout: Task<Void, Never>?)
+            lock.lock()
+            if didFinish {
+                lock.unlock()
+                return
+            }
+            didFinish = true
+            tasks = (workTask, timeoutTask)
+            lock.unlock()
+
+            tasks.work?.cancel()
+            tasks.timeout?.cancel()
+
+            switch result {
+            case .success(let value):
+                continuation.resume(returning: value)
+            case .failure(let error):
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
+    private nonisolated static func withHardTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            let box = AsyncTimeoutBox<T>(continuation)
+            let timeoutNanoseconds = UInt64(max(0.1, seconds) * 1_000_000_000)
+
+            let workTask = Task {
+                do {
+                    box.succeed(try await operation())
+                } catch {
+                    box.fail(error)
+                }
+            }
+
+            let timeoutTask = Task {
+                do {
+                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    box.fail(BackfillHardTimeoutError(seconds: seconds))
+                } catch {
+                    // The timeout task is cancelled when work finishes first.
+                }
+            }
+
+            box.setTasks(workTask: workTask, timeoutTask: timeoutTask)
+        }
     }
 
     /// Run one backfill against `song`. Returns a merged Song to flush
@@ -692,116 +789,9 @@ final class MetadataBackfillService {
     private func processOne(_ song: Song) async -> BackfillOutcome {
         let started = Date()
         do {
-            guard isStillEligible(song) else {
-                return BackfillOutcome(song: nil, markFailed: false)
+            return try await Self.withHardTimeout(seconds: Self.perSongTimeout) { [self] in
+                try await self.processOneCore(song, started: started)
             }
-            // Use the SHARED connector (not auxiliary). Backfill is sequential
-            // and benefits massively from accumulated state on the single
-            // BaiduPanSource actor: throttle clock, dlink cache, dir-listing
-            // cache. Auxiliary instances reset all of that per song, which is
-            // what made backfill 10× slower than it needed to be — every song
-            // re-paid the list+filemetas dlink cost AND was prone to 31034
-            // rate-limit storms because the throttle state didn't carry over.
-            let connector = try await sourceManager.connectorForSong(song)
-
-            let fetchStarted = Date()
-            let headData = try await connector.fetchRange(
-                path: song.filePath,
-                offset: 0,
-                length: Self.headBytes
-            )
-            let fetchElapsed = Date().timeIntervalSince(fetchStarted)
-
-            // Reuse the head bytes we just paid for to prewarm the cloud
-            // playback cache. CloudPlaybackSource will pick up `.partial`
-            // on the first SFB read, so the user's first-buffer latency for
-            // this song drops from "1 chunk + CDN HEAD" to "disk hit".
-            // Only worthwhile for cloud-stream sources — local/file paths
-            // never go through CloudPlaybackSource.
-            if song.fileSize >= Int64(Self.headBytes),
-               await sourceManager.songSupportsRangeStreaming(song) {
-                sourceManager.seedPrewarmCache(song: song, head: headData)
-            }
-
-            var metadata = await extractMetadata(
-                from: headData,
-                song: song,
-                cacheKey: song.id
-            )
-            if Self.needsEmbeddedArtworkBackfill(song),
-               metadata.coverArtFileName == nil,
-               let id3ByteCount = FileMetadataReader.id3TagByteCount(in: headData),
-               id3ByteCount > headData.count {
-                let expandedByteCount = min(id3ByteCount, Self.maxID3ArtworkHeadBytes)
-                if expandedByteCount > headData.count,
-                   let expandedHead = try? await connector.fetchRange(
-                    path: song.filePath,
-                    offset: 0,
-                    length: Int64(expandedByteCount)
-                   ) {
-                    metadata = await extractMetadata(
-                        from: expandedHead,
-                        song: song,
-                        cacheKey: song.id
-                    )
-                }
-            }
-            if metadataLooksMissing(metadata) {
-                if let tailData = try? await connector.fetchRange(
-                    path: song.filePath,
-                    offset: -Self.tailBytes,
-                    length: Self.tailBytes
-                ) {
-                    let combined = headData + tailData
-                    metadata = await extractMetadata(from: combined, song: song, cacheKey: song.id)
-                }
-            }
-
-            // Nothing parseable at all → no merge, mark failed so we
-            // don't burn quota retrying.
-            if metadataLooksMissing(metadata) {
-                plog("⚠️ Backfill: '\(song.title)' has no parseable metadata after head+tail; marking failed")
-                return BackfillOutcome(song: nil, markFailed: true)
-            }
-
-            // After tightening `metadataLooksMissing` to require
-            // duration > 0, reaching this point means head+tail
-            // produced a usable duration. The old "merged.duration<=0
-            // → markFailed" guard was firing on songs that just hadn't
-            // had tail tried yet — removed.
-            // Only reverse-compute for raw MP3. M4A/MP4/M4B carry
-            // authoritative duration inside `moov.mvhd`; backfill's
-            // tail-fetch already gets it correctly. Applying the
-            // bytes-÷-bitrate heuristic to those formats wrongly
-            // overwrites the correct value because m4a containers
-            // often wrap data far larger than `bitRate × duration / 8`
-            // (multiple tracks, padding, sidecar metadata) — observed
-            // in the field as a 13MB / 198kbps m4a being "corrected"
-            // from the real 177s to a bogus 562s.
-            let ext = song.fileFormat.rawValue
-            if ext == "mp3" {
-                metadata.duration = correctedDuration(parsed: metadata.duration, bitRateKbps: metadata.bitRate, fileSize: song.fileSize, title: song.title)
-            } else if ext == "flac",
-                      (metadata.bitRate ?? 0) <= 0,
-                      metadata.duration > 0,
-                      song.fileSize > 0 {
-                metadata.bitRate = Int((Double(song.fileSize) * 8.0 / metadata.duration / 1000.0).rounded())
-            }
-            let merged = mergeSong(bare: song, metadata: metadata)
-            let artworkStillMissing = Self.needsEmbeddedArtworkBackfill(song)
-                && (merged.coverArtFileName?.isEmpty ?? true)
-            let totalElapsed = Date().timeIntervalSince(started)
-            // Include the parsed duration in the log line so an
-            // infinite-loop case (pickNextBatch repeatedly handing back
-            // the same songs) can be diagnosed without re-instrumenting:
-            // duration=0 in the log means mergeSong didn't actually
-            // capture a usable duration despite metadataLooksMissing
-            // returning false → bug in the parser or the gate.
-            plog(String(format: "📥 Backfill: '%@' done in %.2fs (fetch %.2fs) duration=%.1fs", song.title, totalElapsed, fetchElapsed, merged.duration))
-            if artworkStillMissing {
-                plog("📥 Backfill: '\(song.title)' has no parseable MP3 artwork; skipping future artwork-only retries")
-            }
-            return BackfillOutcome(song: merged, markFailed: artworkStillMissing)
         } catch {
             let elapsed = Date().timeIntervalSince(started)
             if !isStillEligible(song) {
@@ -817,6 +807,119 @@ final class MetadataBackfillService {
                         transient ? "transient — will retry" : "permanent — marking failed"))
             return BackfillOutcome(song: nil, markFailed: !transient)
         }
+    }
+
+    private func processOneCore(_ song: Song, started: Date) async throws -> BackfillOutcome {
+        guard isStillEligible(song) else {
+            return BackfillOutcome(song: nil, markFailed: false)
+        }
+        // Use the SHARED connector (not auxiliary). Backfill is sequential
+        // and benefits massively from accumulated state on the single
+        // BaiduPanSource actor: throttle clock, dlink cache, dir-listing
+        // cache. Auxiliary instances reset all of that per song, which is
+        // what made backfill 10x slower than it needed to be — every song
+        // re-paid the list+filemetas dlink cost AND was prone to 31034
+        // rate-limit storms because the throttle state didn't carry over.
+        let connector = try await sourceManager.connectorForSong(song)
+
+        let fetchStarted = Date()
+        let headData = try await connector.fetchRange(
+            path: song.filePath,
+            offset: 0,
+            length: Self.headBytes
+        )
+        let fetchElapsed = Date().timeIntervalSince(fetchStarted)
+
+        // Reuse the head bytes we just paid for to prewarm the cloud
+        // playback cache. CloudPlaybackSource will pick up `.partial`
+        // on the first SFB read, so the user's first-buffer latency for
+        // this song drops from "1 chunk + CDN HEAD" to "disk hit".
+        // Only worthwhile for cloud-stream sources — local/file paths
+        // never go through CloudPlaybackSource.
+        if song.fileSize >= Int64(Self.headBytes),
+           await sourceManager.songSupportsRangeStreaming(song) {
+            sourceManager.seedPrewarmCache(song: song, head: headData)
+        }
+
+        var metadata = await extractMetadata(
+            from: headData,
+            song: song,
+            cacheKey: song.id
+        )
+        if Self.needsEmbeddedArtworkBackfill(song),
+           metadata.coverArtFileName == nil,
+           let id3ByteCount = FileMetadataReader.id3TagByteCount(in: headData),
+           id3ByteCount > headData.count {
+            let expandedByteCount = min(id3ByteCount, Self.maxID3ArtworkHeadBytes)
+            if expandedByteCount > headData.count,
+               let expandedHead = try? await connector.fetchRange(
+                path: song.filePath,
+                offset: 0,
+                length: Int64(expandedByteCount)
+               ) {
+                metadata = await extractMetadata(
+                    from: expandedHead,
+                    song: song,
+                    cacheKey: song.id
+                )
+            }
+        }
+        if metadataLooksMissing(metadata) {
+            if let tailData = try? await connector.fetchRange(
+                path: song.filePath,
+                offset: -Self.tailBytes,
+                length: Self.tailBytes
+            ) {
+                let combined = headData + tailData
+                metadata = await extractMetadata(from: combined, song: song, cacheKey: song.id)
+            }
+        }
+
+        // Nothing parseable at all → no merge, mark failed so we
+        // don't burn quota retrying.
+        if metadataLooksMissing(metadata) {
+            plog("⚠️ Backfill: '\(song.title)' has no parseable metadata after head+tail; marking failed")
+            return BackfillOutcome(song: nil, markFailed: true)
+        }
+
+        // After tightening `metadataLooksMissing` to require
+        // duration > 0, reaching this point means head+tail
+        // produced a usable duration. The old "merged.duration<=0
+        // → markFailed" guard was firing on songs that just hadn't
+        // had tail tried yet — removed.
+        // Only reverse-compute for raw MP3. M4A/MP4/M4B carry
+        // authoritative duration inside `moov.mvhd`; backfill's
+        // tail-fetch already gets it correctly. Applying the
+        // bytes-÷-bitrate heuristic to those formats wrongly
+        // overwrites the correct value because m4a containers
+        // often wrap data far larger than `bitRate × duration / 8`
+        // (multiple tracks, padding, sidecar metadata) — observed
+        // in the field as a 13MB / 198kbps m4a being "corrected"
+        // from the real 177s to a bogus 562s.
+        let ext = song.fileFormat.rawValue
+        if ext == "mp3" {
+            metadata.duration = correctedDuration(parsed: metadata.duration, bitRateKbps: metadata.bitRate, fileSize: song.fileSize, title: song.title)
+        } else if ext == "flac",
+                  (metadata.bitRate ?? 0) <= 0,
+                  metadata.duration > 0,
+                  song.fileSize > 0 {
+            metadata.bitRate = Int((Double(song.fileSize) * 8.0 / metadata.duration / 1000.0).rounded())
+        }
+        let merged = mergeSong(bare: song, metadata: metadata)
+        let artworkStillMissing = Self.needsEmbeddedArtworkBackfill(song)
+            && (merged.coverArtFileName?.isEmpty ?? true)
+        let totalElapsed = Date().timeIntervalSince(started)
+        // Include the parsed duration in the log line so an
+        // infinite-loop case (pickNextBatch repeatedly handing back
+        // the same songs) can be diagnosed without re-instrumenting:
+        // duration=0 in the log means mergeSong didn't actually
+        // capture a usable duration despite metadataLooksMissing
+        // returning false → bug in the parser or the gate.
+        plog(String(format: "📥 Backfill: '%@' done in %.2fs (fetch %.2fs) duration=%.1fs", song.title, totalElapsed, fetchElapsed, merged.duration))
+        if artworkStillMissing {
+            plog("📥 Backfill: '\(song.title)' has no parseable MP3 artwork; skipping future artwork-only retries")
+        }
+        return BackfillOutcome(song: merged, markFailed: artworkStillMissing)
     }
 
     /// Write the partial bytes to a temp file and run the standard metadata

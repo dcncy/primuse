@@ -59,10 +59,9 @@ struct MacSourcesView: View {
         .onReceive(NotificationCenter.default.publisher(for: CloudDirectoryNameStore.didChangeNotification)) { _ in
             cloudDirectoryNameRefreshID = UUID()
         }
-        // 不可逆清理(歌曲记录/Keychain 凭据/云盘 token/书签/缓存)推迟到源被
-        // *彻底*删除时才执行 —— permanentlyDelete 在手动彻底删除与 30 天 prune
-        // 两条路径都会发这个通知。软删除阶段(remove(id:))只取消扫描/后台任务,
-        // 这样从「最近删除」还原后凭据仍在,源可继续扫描。
+        // 不可逆清理(Keychain 凭据/云盘 token/书签/缓存)推迟到源被
+        // *彻底*删除时才执行。歌曲记录在软删除时已经移出资料库,防止隐藏源
+        // 继续贡献侧边栏数量;从「最近删除」还原后重新扫描即可恢复歌曲。
         .onReceive(NotificationCenter.default.publisher(for: .primuseSourceDidDelete)) { note in
             guard let id = note.userInfo?["id"] as? String else { return }
             purgeSourceData(id: id)
@@ -587,22 +586,19 @@ struct MacSourcesView: View {
         Set(sourceStore.sources.filter { !$0.isEnabled }.map(\.id))
     }
 
-    /// 软删除:把源移入「最近删除」,只停掉扫描/后台任务与内存态连接器。
-    /// **不**碰歌曲记录、Keychain 凭据、云盘 token、书签 —— 这些留到源被
-    /// 彻底删除(permanentlyDelete → .primuseSourceDidDelete)时才清,否则从
-    /// 回收站还原后源会因凭据丢失而不可用,与「包含连接凭据」的承诺矛盾。
+    /// 软删除:把源移入「最近删除」,同时立即从资料库移除该源歌曲。
+    /// 凭据、云盘 token、书签仍保留到彻底删除,便于从回收站还原后重新扫描。
     private func deleteSource(_ source: MusicSource) {
         stopBackgroundWork(for: source.id)
+        library.removeSongsForSource(source.id)
         scanService.removeSynologyAPI(for: source.id)
         sourceStore.remove(id: source.id)
         Task { await sourceManager.removeConnector(for: source.id) }
     }
 
-    /// 不可逆清理:歌曲记录、Keychain 凭据、云盘 token / app 凭据 / 目录名、
-    /// 安全书签、派生缓存。仅在源被*彻底*删除时调用(手动彻底删除或 30 天
-    /// prune,均经由 permanentlyDelete 发 .primuseSourceDidDelete)。此刻
-    /// sourceStore 里已无该行,故云盘清理按 sourceID 无条件执行 —— 这些方法
-    /// 对非云盘源是 no-op,安全。
+    /// 彻底删除兜底清理:软删除阶段已经移除歌曲记录,这里重复调用保持幂等;
+    /// Keychain 凭据、云盘 token / app 凭据、目录名、安全书签和派生缓存只在
+    /// permanentlyDelete / 30 天 prune 后清掉。
     private func purgeSourceData(id: String) {
         library.removeSongsForSource(id)
         sourceManager.deleteSourceCaches(sourceID: id)

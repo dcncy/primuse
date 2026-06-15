@@ -177,15 +177,13 @@ private struct MediaServerLibraryBrowserView: View {
 
         Task {
             do {
-                try await connector.connect()
-                libraries = try await connector.listFiles(at: "/")
+                libraries = try await loadLibrariesWithAuthorizationGrace()
                 isLoading = false
             } catch {
                 let trusted = await promptSSLTrust(for: error)
                 if trusted {
                     do {
-                        try await connector.connect()
-                        libraries = try await connector.listFiles(at: "/")
+                        libraries = try await loadLibrariesWithAuthorizationGrace()
                     } catch {
                         errorMessage = error.localizedDescription
                     }
@@ -194,6 +192,13 @@ private struct MediaServerLibraryBrowserView: View {
                 }
                 isLoading = false
             }
+        }
+    }
+
+    private func loadLibrariesWithAuthorizationGrace() async throws -> [RemoteFileItem] {
+        try await DirectoryBrowserNetworkRetry.loadWithLocalNetworkAuthorizationGrace {
+            try await connector.connect()
+            return try await connector.listFiles(at: "/")
         }
     }
 }

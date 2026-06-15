@@ -28,6 +28,7 @@ final class AppServices {
     let crashDiagnostics: CrashDiagnosticsService
     let duplicateCleanup: DuplicateCleanupService
 
+    private var sourceLifecycleObserverTokens: [NSObjectProtocol] = []
 
     private init() {
         // Class is @MainActor so this initializer is too — but the static
@@ -135,10 +136,13 @@ final class AppServices {
             store?.allSources.first(where: { $0.id == sourceID })?.cloudAccountID
         }
 
+        observeSourceLifecycle()
+
         let pruneThreshold = Date(timeIntervalSinceNow: -7 * 24 * 60 * 60)
         library.prunePlaylists(deletedBefore: pruneThreshold)
         store.pruneSources(deletedBefore: pruneThreshold)
         ScraperConfigStore.shared.pruneConfigs(deletedBefore: pruneThreshold)
+        reconcileDeletedSourceSongs()
 
         CloudKVSSync.shared.register(key: CloudKVSKey.lyricsFontScale) { }
         CloudKVSSync.shared.register(key: CloudKVSKey.recentSearches) { }
@@ -152,6 +156,65 @@ final class AppServices {
         // 注意: 不在这里接线 Live Activity。PrimuseActivityExtension 的灵动岛 /
         // 锁屏布局仍是半成品(切歌不更新、杀进程后不消失),激活它比留作未启用
         // 更糟。Live Activity 作为完整功能另行实现后再接线。
+    }
+
+    private func observeSourceLifecycle() {
+        let nc = NotificationCenter.default
+
+        sourceLifecycleObserverTokens.append(
+            nc.addObserver(forName: .primuseSourceDidSoftDelete, object: nil, queue: .main) { [weak self] note in
+                guard let self, let id = note.userInfo?["id"] as? String else { return }
+                Task { @MainActor in
+                    self.removeSourceLibraryData(id: id, purgePersistentCaches: false)
+                }
+            }
+        )
+
+        sourceLifecycleObserverTokens.append(
+            nc.addObserver(forName: .primuseSourceDidDelete, object: nil, queue: .main) { [weak self] note in
+                guard let self, let id = note.userInfo?["id"] as? String else { return }
+                Task { @MainActor in
+                    self.removeSourceLibraryData(id: id, purgePersistentCaches: true)
+                }
+            }
+        )
+    }
+
+    private func removeSourceLibraryData(id: String, purgePersistentCaches: Bool) {
+        scanService.cancelScan(for: id)
+        scanService.removeCheckpoint(for: id)
+        scanService.removeSynologyAPI(for: id)
+        metadataBackfill.discardWork(forSourceID: id)
+        musicLibrary.removeSongsForSource(id)
+        sourcesStore.updateLocal(id) {
+            $0.songCount = 0
+            $0.lastScannedAt = nil
+        }
+
+        if purgePersistentCaches {
+            sourceManager.deleteSourceCaches(sourceID: id)
+        }
+
+        Task { @MainActor in
+            await sourceManager.removeConnector(for: id)
+        }
+    }
+
+    private func reconcileDeletedSourceSongs() {
+        let knownSourceIDs = Set(sourcesStore.allSources.map(\.id))
+        let deletedSourceIDs = Set(sourcesStore.allSources.lazy.filter(\.isDeleted).map(\.id))
+        let sourceSongCounts = Dictionary(grouping: musicLibrary.songs, by: \.sourceID)
+            .mapValues(\.count)
+        let missingSourceIDs = Set(sourceSongCounts.keys).subtracting(knownSourceIDs)
+        let staleSourceIDs = deletedSourceIDs.union(missingSourceIDs)
+        let staleSourceIDsWithSongs = staleSourceIDs.filter { (sourceSongCounts[$0] ?? 0) > 0 }
+
+        guard !staleSourceIDsWithSongs.isEmpty else { return }
+        let removedCount = staleSourceIDsWithSongs.reduce(0) { $0 + (sourceSongCounts[$1] ?? 0) }
+        plog("📚 removing \(removedCount) song(s) from deleted/missing source(s): \(staleSourceIDsWithSongs)")
+        for id in staleSourceIDsWithSongs {
+            removeSourceLibraryData(id: id, purgePersistentCaches: false)
+        }
     }
 
     /// Spotlight 重建索引 ── 启动时跑一次, 之后只要 library 的

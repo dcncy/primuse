@@ -184,15 +184,35 @@ final class SourcesStore {
         }
     }
 
-    /// Remove a source in response to a remote permanent-delete event.
-    /// The notification keeps local UI caches in sync; CloudKit suppresses
-    /// echo saves while applying remote changes.
+    /// Apply a remote delete event as a tombstone. The notification keeps
+    /// local UI caches in sync; CloudKit suppresses echo saves while applying
+    /// remote changes.
     func removeFromRemote(id: String) {
-        allSources.removeAll { $0.id == id }
+        markDeletedFromRemote(id: id)
+    }
+
+    /// Preserve a remote delete as a local tombstone instead of physically
+    /// dropping the row. Snapshot sync can arrive later with an older
+    /// `sources.json`; without the tombstone there is no evidence that the
+    /// source was deleted, so the stale active row can come back.
+    func markDeletedFromRemote(id: String, at deletedAt: Date = Date()) {
+        guard let index = allSources.firstIndex(where: { $0.id == id }) else { return }
+        if allSources[index].isDeleted {
+            if (allSources[index].deletedAt ?? .distantPast) < deletedAt {
+                allSources[index].deletedAt = deletedAt
+                allSources[index].modifiedAt = max(allSources[index].modifiedAt, deletedAt)
+                persist()
+                notifyChanged([id])
+            }
+            return
+        }
+        allSources[index].isDeleted = true
+        allSources[index].deletedAt = deletedAt
+        allSources[index].modifiedAt = max(allSources[index].modifiedAt, deletedAt)
         persist()
         notifyChanged([id])
         NotificationCenter.default.post(
-            name: .primuseSourceDidDelete,
+            name: .primuseSourceDidSoftDelete,
             object: nil,
             userInfo: ["id": id]
         )
@@ -211,29 +231,24 @@ final class SourcesStore {
     /// on the conflict path); the fetch path was the missing half.
     func upsertFromRemote(_ remote: MusicSource) {
         if let existing = allSources.first(where: { $0.id == remote.id }) {
-            // 墓碑胜出 (tombstone wins) —— 一旦本地把源删了,就当作用户
-            // 的明确意图,远端任何「alive」更新都不能让它复活。
-            // 之前用 modifiedAt 比,但 iOS 端如果还在用这个源（扫描时
-            // 更新 songCount 就会 bump modifiedAt),它的更新永远比
-            // Mac 上的删除时刻新,导致每次 fetch 都把删的源拉回来。
-            //
-            // 标准做法 (Apple Notes / Reminders): 软删除的 7 天恢复
-            // 窗口内,墓碑无条件胜出。用户真的想再加同一个源,会通过
-            // AddSource 流程产生一条新 record(新 id),不靠"复用旧 id"。
             if existing.isDeleted && !remote.isDeleted {
-                return
+                if Self.sourceClock(existing) >= Self.sourceClock(remote) {
+                    return
+                }
+                // A later active payload is an explicit restore/edit from
+                // another device, so let it revive this source.
             }
             // 远端也是墓碑 → 用更新的那个时间戳合并 deletedAt,确保
             // 7 天窗口在所有设备上一致。
             if existing.isDeleted && remote.isDeleted {
-                if remote.modifiedAt > existing.modifiedAt,
+                if Self.sourceClock(remote) > Self.sourceClock(existing),
                    let index = allSources.firstIndex(where: { $0.id == remote.id }) {
                     allSources[index] = remote
                     persist()
                 }
                 return
             }
-            if existing.modifiedAt > remote.modifiedAt {
+            if Self.sourceClock(existing) > Self.sourceClock(remote) {
                 // Local has unsent edits that are newer — keep them.
                 // CloudKit will push them on the next sendChanges.
                 return
@@ -262,6 +277,10 @@ final class SourcesStore {
             object: nil,
             userInfo: ["ids": ids]
         )
+    }
+
+    private static func sourceClock(_ source: MusicSource) -> Date {
+        max(source.modifiedAt, source.deletedAt ?? .distantPast)
     }
 
     private func load() {

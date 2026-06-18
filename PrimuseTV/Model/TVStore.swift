@@ -672,7 +672,7 @@ final class TVStore {
     /// 在 Apple TV 上启用 / 停用音乐源。停用源的歌曲在资料库里是隐藏的,启用后即可
     /// 浏览 / 播放(快照含全量歌曲,显隐由各源的 enabled 状态决定)。
     func setSourceEnabled(_ id: String, _ enabled: Bool) {
-        sourcesStore.updateLocal(id) { $0.isEnabled = enabled }
+        sourcesStore.update(id) { $0.isEnabled = enabled }
         refreshVisibility()
         sourcesRevision += 1
         let fromThis = library.songs.filter { $0.sourceID == id }.count
@@ -756,7 +756,16 @@ final class TVStore {
         sourcesStore.updateLocal(source.id) {
             $0.songCount = songs.count
             $0.lastScannedAt = Date()
-            $0.extraConfig = MusicSource.encodeScannedDirectories(dirs, into: $0.extraConfig, type: $0.type)
+        }
+        let scannedConfig = MusicSource.encodeScannedDirectories(
+            dirs,
+            into: source.extraConfig,
+            type: source.type
+        )
+        if scannedConfig != source.extraConfig {
+            sourcesStore.update(source.id) {
+                $0.extraConfig = scannedConfig
+            }
         }
         refreshVisibility()
         sourcesRevision += 1

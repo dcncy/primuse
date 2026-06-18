@@ -626,7 +626,7 @@ final class CloudKitSyncService {
             return true
         case .unknownItem:
             if let recordType = recordMetadata(for: recordID)?.recordType {
-                applyRemoteDeletion(recordID: recordID, recordType: recordType)
+                applyRemoteDeletion(recordID: recordID, recordType: recordType, allowLocalRestore: true)
             } else {
                 dropPendingRecordZoneChanges(for: recordID, syncEngine: syncEngine)
             }
@@ -1266,7 +1266,11 @@ final class CloudKitSyncService {
         }
     }
 
-    fileprivate func applyRemoteDeletion(recordID: CKRecord.ID, recordType: String) {
+    fileprivate func applyRemoteDeletion(
+        recordID: CKRecord.ID,
+        recordType: String,
+        allowLocalRestore: Bool = false
+    ) {
         // record 已经从 server 移除,缓存里的 changeTag 也没用了。
         removeSystemFields(for: recordID)
 
@@ -1281,11 +1285,11 @@ final class CloudKitSyncService {
             return
         }
 
-        // Recycle-bin recovery race: if the local copy has been restored
-        // (isDeleted == false) since the remote prune was scheduled, treat
-        // the remote deletion as stale and re-push our restored state instead
-        // of wiping it.
-        if isLocallyRestored(recordType: recordType, id: id) {
+        // Only protect a local restore while resolving a save failure. A
+        // fetched CloudKit deletion is authoritative remote state; treating
+        // every active local row as "restored" re-pushes stale sources and
+        // makes deletions appear to come back.
+        if allowLocalRestore, isLocallyRestored(recordType: recordType, id: id) {
             if let engine {
                 addCoalescedRecordZoneChanges([.saveRecord(recordID)], to: engine)
             }
@@ -1578,7 +1582,11 @@ extension CloudKitSyncService: CKSyncEngineDelegate {
             }
             for deletion in event.deletions {
                 await MainActor.run {
-                    self.applyRemoteDeletion(recordID: deletion.recordID, recordType: deletion.recordType)
+                    self.applyRemoteDeletion(
+                        recordID: deletion.recordID,
+                        recordType: deletion.recordType,
+                        allowLocalRestore: false
+                    )
                 }
             }
         case .fetchedDatabaseChanges(let event):
@@ -1673,7 +1681,7 @@ extension CloudKitSyncService: CKSyncEngineDelegate {
         case .unknownItem:
             // Server-side record went away (deleted on another device). Mirror
             // that locally so the two sides line up.
-            applyRemoteDeletion(recordID: recordID, recordType: failed.record.recordType)
+            applyRemoteDeletion(recordID: recordID, recordType: failed.record.recordType, allowLocalRestore: true)
         case .networkUnavailable, .networkFailure, .serviceUnavailable, .requestRateLimited, .zoneBusy:
             // Engine retries automatically; honor any explicit retry-after.
             if let retry = ckError.retryAfterSeconds {

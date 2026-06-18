@@ -119,6 +119,13 @@ final class LibrarySnapshotSync: Sendable {
             plog("LibrarySnapshotSync: no existing snapshot for sources-only — creating sources-only record (\(error))")
             record = CKRecord(recordType: recordType, recordID: recordID)
         }
+        // 先把服务器上现有 sources 与本地 sources 做逐源合并,避免 TV 用启动时
+        // 下载到的旧文件把手机/电脑上刚做的删除或编辑整包覆盖掉。
+        if let merged = mergeSourcesForUpload(with: record, fm: fm) {
+            try? merged.data.write(to: sourcesURL, options: .atomic)
+            plog("LibrarySnapshotSync: merged sources before upload local=\(merged.localCount) remote=\(merged.incomingCount) total=\(merged.totalCount)")
+        }
+
         // 先清掉两种旧的 sources 表示,再按当前文件大小择一写入,避免内联/资产并存。
         record["sourcesGz"] = nil
         record["sources"] = nil
@@ -160,7 +167,7 @@ final class LibrarySnapshotSync: Sendable {
             if extractSnapshot(record, gzKey: "libraryGz", assetKey: "library", to: libraryCacheURL, fm: fm) {
                 changed = true
             }
-            _ = extractSnapshot(record, gzKey: "sourcesGz", assetKey: "sources", to: sourcesURL, fm: fm)
+            _ = extractSourcesSnapshot(record, to: sourcesURL, fm: fm)
             Self.restoreLyrics(from: record, fm: fm)
             plog("LibrarySnapshotSync: downloaded snapshot (library=\(changed))")
             return changed
@@ -386,8 +393,7 @@ final class LibrarySnapshotSync: Sendable {
         if let gzField = record[gzKey] as? Data {
             // CloudKit 返回的 Data 可能是非连续/特殊 backing,先强制连续拷贝再解压。
             let gz = Data(gzField)
-            let maxOutput = gzKey == "sourcesGz" ? Self.maxSourcesRawBytes : Self.maxLibraryRawBytes
-            guard let bytes = Self.gunzipToFile(gz, maxOutputBytes: maxOutput, destination: dest, fm: fm) else {
+            guard let bytes = Self.gunzipToFile(gz, maxOutputBytes: Self.maxLibraryRawBytes, destination: dest, fm: fm) else {
                 plog("LibrarySnapshotSync: extract \(gzKey) DECOMPRESS failed (\(gz.count)B)")
                 return false
             }
@@ -400,6 +406,137 @@ final class LibrarySnapshotSync: Sendable {
             do { try fm.copyItem(at: url, to: dest); return true } catch { return false }
         }
         return false
+    }
+
+    /// Sources are mutable user configuration, so snapshot restore must merge
+    /// per source instead of overwriting the whole file.
+    private func extractSourcesSnapshot(_ record: CKRecord, to dest: URL, fm: FileManager) -> Bool {
+        guard let incoming = sourcesSnapshotData(from: record, fm: fm) else { return false }
+        let local = try? Data(contentsOf: dest)
+        guard let merged = Self.mergeSourcesJSON(localData: local, incomingData: incoming) else {
+            plog("LibrarySnapshotSync: sources merge failed; keeping local sources.json")
+            return false
+        }
+        do {
+            try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try merged.data.write(to: dest, options: .atomic)
+            plog("LibrarySnapshotSync: merged sources snapshot local=\(merged.localCount) incoming=\(merged.incomingCount) total=\(merged.totalCount) at \(dest.path)")
+            return true
+        } catch {
+            plog("LibrarySnapshotSync: write merged sources failed — \(error)")
+            return false
+        }
+    }
+
+    private func mergeSourcesForUpload(with record: CKRecord, fm: FileManager) -> SourcesMergeResult? {
+        guard let local = try? Data(contentsOf: sourcesURL),
+              let incoming = sourcesSnapshotData(from: record, fm: fm) else {
+            return nil
+        }
+        return Self.mergeSourcesJSON(localData: local, incomingData: incoming)
+    }
+
+    private func sourcesSnapshotData(from record: CKRecord, fm: FileManager) -> Data? {
+        if let gzField = record["sourcesGz"] as? Data {
+            let gz = Data(gzField)
+            guard let raw = Self.gunzip(gz, maxOutputBytes: Self.maxSourcesRawBytes) else {
+                plog("LibrarySnapshotSync: extract sourcesGz DECOMPRESS failed (\(gz.count)B)")
+                return nil
+            }
+            return raw
+        }
+        if let asset = record["sources"] as? CKAsset,
+           let url = asset.fileURL,
+           fm.fileExists(atPath: url.path) {
+            if let attrs = try? fm.attributesOfItem(atPath: url.path),
+               let size = attrs[.size] as? NSNumber,
+               size.intValue > Self.maxSourcesRawBytes {
+                plog("LibrarySnapshotSync: sources asset too large (\(size.intValue)B)")
+                return nil
+            }
+            return try? Data(contentsOf: url)
+        }
+        return nil
+    }
+
+    private struct SourcesMergeResult {
+        let data: Data
+        let localCount: Int
+        let incomingCount: Int
+        let totalCount: Int
+    }
+
+    private static func mergeSourcesJSON(localData: Data?, incomingData: Data) -> SourcesMergeResult? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let incoming = try? decoder.decode([MusicSource].self, from: incomingData) else {
+            return nil
+        }
+        let local = localData.flatMap { try? decoder.decode([MusicSource].self, from: $0) } ?? []
+
+        var merged = normalizeSources(incoming)
+        for source in local {
+            if let current = merged[source.id] {
+                merged[source.id] = mergeSource(local: source, incoming: current)
+            } else {
+                merged[source.id] = source
+            }
+        }
+
+        let sources = merged.values.sorted {
+            $0.name.localizedCompare($1.name) == .orderedAscending
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(sources) else { return nil }
+        return SourcesMergeResult(
+            data: data,
+            localCount: local.count,
+            incomingCount: incoming.count,
+            totalCount: sources.count
+        )
+    }
+
+    private static func normalizeSources(_ sources: [MusicSource]) -> [String: MusicSource] {
+        var result: [String: MusicSource] = [:]
+        for source in sources {
+            if let existing = result[source.id] {
+                result[source.id] = mergeSource(local: existing, incoming: source)
+            } else {
+                result[source.id] = source
+            }
+        }
+        return result
+    }
+
+    private static func mergeSource(local: MusicSource, incoming: MusicSource) -> MusicSource {
+        let localClock = sourceClock(local)
+        let incomingClock = sourceClock(incoming)
+        var winner: MusicSource
+        if localClock > incomingClock {
+            winner = local
+        } else if incomingClock > localClock {
+            winner = incoming
+        } else if local.isDeleted != incoming.isDeleted {
+            winner = local.isDeleted ? local : incoming
+        } else {
+            winner = incoming
+        }
+
+        if !winner.isDeleted {
+            if winner.lastScannedAt == nil {
+                winner.lastScannedAt = local.lastScannedAt
+            }
+            if winner.songCount == 0, local.songCount > 0 {
+                winner.songCount = local.songCount
+            }
+        }
+        return winner
+    }
+
+    private static func sourceClock(_ source: MusicSource) -> Date {
+        max(source.modifiedAt, source.deletedAt ?? .distantPast)
     }
 
     // MARK: 凭据(CloudKit encryptedValues 端到端加密;密钥由系统 iCloud 钥匙串托管)
@@ -522,8 +659,12 @@ final class LibrarySnapshotSync: Sendable {
            Self.gunzipToFile(gz, maxOutputBytes: Self.maxLibraryRawBytes, destination: libraryCacheURL, fm: fm) != nil {
             libraryChanged = true
         }
-        if let gz = payload.sourcesGz {
-            _ = Self.gunzipToFile(gz, maxOutputBytes: Self.maxSourcesRawBytes, destination: sourcesURL, fm: fm)
+        if let gz = payload.sourcesGz,
+           let incoming = Self.gunzip(gz, maxOutputBytes: Self.maxSourcesRawBytes),
+           let merged = Self.mergeSourcesJSON(localData: try? Data(contentsOf: sourcesURL), incomingData: incoming) {
+            try? fm.createDirectory(at: sourcesURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? merged.data.write(to: sourcesURL, options: .atomic)
+            plog("LibrarySnapshotSync: merged LAN sources local=\(merged.localCount) incoming=\(merged.incomingCount) total=\(merged.totalCount)")
         }
         if let gz = payload.lyricsGz, let raw = Self.gunzip(gz, maxOutputBytes: Self.maxLyricsBlobRawBytes) {
             Self.writeLyrics(blob: raw, fm: fm)

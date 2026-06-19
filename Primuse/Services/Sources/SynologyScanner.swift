@@ -46,8 +46,11 @@ actor SynologyScanner {
 
                     // Phase 2: Scan and extract metadata
                     var allSongs = existingSongs
+                    // path → allSongs 下标。existing 条目下标全程稳定(替换原地、新增追加到
+                    // 末尾), 用于 O(1) 比对/回填/替换, 避免 firstIndex 的 O(n²)。
                     let existingByPath = Dictionary(
-                        existingSongs.map { ($0.filePath, $0) }, uniquingKeysWith: { first, _ in first }
+                        existingSongs.enumerated().map { ($0.element.filePath, $0.offset) },
+                        uniquingKeysWith: { first, _ in first }
                     )
                     let initialCount = max(existingSongs.count, startingCount)
                     var count = totalCount > 0 ? min(initialCount, totalCount) : initialCount
@@ -119,7 +122,7 @@ actor SynologyScanner {
     private func scanDirectory(
         path: String, allSongs: inout [Song], count: inout Int,
         totalCount: Int,
-        existingByPath: [String: Song],
+        existingByPath: [String: Int],
         encounteredPaths: inout Set<String>,
         continuation: AsyncThrowingStream<ScanUpdate, Error>.Continuation
     ) async throws {
@@ -163,7 +166,8 @@ actor SynologyScanner {
                 encounteredPaths.insert(item.path)
                 // 已知文件: size + mtime 都没变才跳过。变了(远端同名覆盖)就往下重新
                 // 解析并替换旧条目, 否则覆盖文件的新标签/封面/时长/大小永远刷不出来。
-                if let existing = existingByPath[item.path] {
+                if let idx = existingByPath[item.path] {
+                    let existing = allSongs[idx]
                     let sizeSame = existing.fileSize == item.size
                     let mtimeSame: Bool
                     if let a = existing.lastModified, let b = item.modifiedTime {
@@ -172,7 +176,16 @@ actor SynologyScanner {
                         // 任一侧缺 mtime 时退化为只比 size。
                         mtimeSame = true
                     }
-                    if sizeSame && mtimeSame { continue }
+                    if sizeSame && mtimeSame {
+                        // 旧库迁移: existing 缺 mtime 而远端有 —— 廉价回填 mtime(不重新解析
+                        // 元数据 / 不下载 header)。否则这首歌永远 lastModified=nil, 跳过路径也
+                        // 走不到下方写入, 未来同名同大小覆盖永远检测不到。回填后随 addSongs
+                        // 落库, 下次扫描即可做 size+mtime 指纹比对。
+                        if existing.lastModified == nil, let remoteMtime = item.modifiedTime {
+                            allSongs[idx].lastModified = remoteMtime
+                        }
+                        continue
+                    }
                 }
 
                 // Detect sidecar files by name (no download needed)
@@ -217,14 +230,10 @@ actor SynologyScanner {
                 if let lyricsRef { song.lyricsFileName = lyricsRef }
                 // 记录 mtime 供下次重扫指纹比对; 保留原 dateAdded 不因重扫刷新排序。
                 song.lastModified = item.modifiedTime
-                if let existing = existingByPath[item.path] {
-                    song.dateAdded = existing.dateAdded
-                    // 覆盖文件 id 基于路径不变, 替换旧条目避免重复。
-                    if let idx = allSongs.firstIndex(where: { $0.id == song.id }) {
-                        allSongs[idx] = song
-                    } else {
-                        allSongs.append(song)
-                    }
+                if let idx = existingByPath[item.path] {
+                    // 覆盖文件 id 基于路径不变, 原地替换旧条目; 保留原 dateAdded 不刷新排序。
+                    song.dateAdded = allSongs[idx].dateAdded
+                    allSongs[idx] = song
                 } else {
                     allSongs.append(song)
                 }

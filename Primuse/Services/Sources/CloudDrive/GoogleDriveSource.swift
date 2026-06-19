@@ -210,38 +210,15 @@ actor GoogleDriveSource: MusicSourceConnector, OAuthCloudSource, RemoteFileDispl
         }
     }
 
-    /// In-flight token-refresh 去重 —— 见 BaiduPanSource。getToken 横跨 await,
-    /// actor 重入会让起播时并发的多路 fetchRange 各自发一次 refresh; 共享同一刷新任务,
-    /// 避免对轮换型 refresh_token 互相作废把账号踢下线。
-    private var refreshTask: Task<CloudTokenManager.Tokens, Error>?
-
     private func getToken() async throws -> String {
-        guard let tokens = await helper.tokenManager.getTokens() else { throw CloudDriveError.notAuthenticated }
-        if !tokens.isExpired {
-            return tokens.accessToken
-        }
-        return try await refreshSharedToken(currentToken: tokens).accessToken
+        // proactive 路径: 本地标记过期才刷新, 与 reactive(401)路径共享 CloudTokenManager
+        // 里的同一个 in-flight 去重任务, 避免轮换型 refresh_token 被并发刷新作废。
+        try await helper.tokenManager.refreshDeduped(.ifExpired, refresh: refreshToken).accessToken
     }
 
-    private func refreshSharedToken(currentToken: CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens {
-        if let inFlight = refreshTask {
-            return try await inFlight.value
-        }
-        let task = Task<CloudTokenManager.Tokens, Error> { [weak self] in
-            guard let self else { throw CloudDriveError.notAuthenticated }
-            if let latest = await self.helper.tokenManager.getTokens(), !latest.isExpired {
-                return latest
-            }
-            let refreshed = try await self.refreshToken(currentToken)
-            await self.helper.tokenManager.saveTokens(refreshed)
-            return refreshed
-        }
-        refreshTask = task
-        defer { refreshTask = nil }
-        return try await task.value
-    }
-
-    private func refreshToken(_ tokens: CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens {
+    // nonisolated: 只用 helper(Sendable)/静态常量/URLSession, 不碰可变 actor 状态,
+    // 这样能作为 @Sendable 闭包传给 tokenManager.refreshDeduped / withTokenRetry。
+    private nonisolated func refreshToken(_ tokens: CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens {
         guard let rt = tokens.refreshToken else { throw CloudDriveError.tokenRefreshFailed("No refresh token") }
         let creds = await helper.tokenManager.getAppCredentials()
         guard let cid = creds?.clientId else { throw CloudDriveError.tokenRefreshFailed("No client ID") }

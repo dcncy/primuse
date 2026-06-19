@@ -214,14 +214,10 @@ struct CloudDriveHelper: Sendable {
     /// it should throw (typically `CloudDriveError.tokenRefreshFailed`) so the
     /// caller can surface a re-authorization prompt.
     func forceRefreshToken(
-        refresh: (CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens
+        refresh: @Sendable @escaping (CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens
     ) async throws -> String {
-        guard let tokens = await tokenManager.getTokens() else {
-            throw CloudDriveError.notAuthenticated
-        }
-        let refreshed = try await refresh(tokens)
-        await tokenManager.saveTokens(refreshed)
-        return refreshed.accessToken
+        // 走 tokenManager 的去重刷新, 与 getToken 的 proactive 路径共享同一 in-flight 任务。
+        try await tokenManager.refreshDeduped(.force, refresh: refresh).accessToken
     }
 
     /// Run `operation`; if it fails because the server rejected the token
@@ -236,7 +232,7 @@ struct CloudDriveHelper: Sendable {
     /// on the retry.
     func withTokenRetry<T>(
         initialToken: String,
-        refresh: (CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens,
+        refresh: @Sendable @escaping (CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens,
         isTokenRejection: (Error) -> Bool = { _ in false },
         operation: (String) async throws -> T
     ) async throws -> T {
@@ -251,7 +247,9 @@ struct CloudDriveHelper: Sendable {
             }
             guard rejected else { throw error }
             plog("☁️ token rejected by server (\(error)); forcing refresh + retry sourceID=\(sourceID.prefix(8))…")
-            let fresh = try await forceRefreshToken(refresh: refresh)
+            // .ifMatches(被拒 token): 多路并发 401 共享一次刷新; 若 token 已被别的并发
+            // 刷新换过则直接用新的, 不重复刷新(避免轮换型 refresh_token invalid_grant)。
+            let fresh = try await tokenManager.refreshDeduped(.ifMatches(initialToken), refresh: refresh).accessToken
             return try await operation(fresh)
         }
     }

@@ -165,16 +165,15 @@ actor U115Source: MusicSourceConnector, OAuthCloudSource {
     }
 
     private func getToken() async throws -> String {
-        guard var tokens = await helper.tokenManager.getTokens() else { throw CloudDriveError.notAuthenticated }
-        if tokens.isExpired {
-            tokens = try await refreshToken(tokens)
-            await helper.tokenManager.saveTokens(tokens)
-        }
-        return tokens.accessToken
+        // proactive 路径: 本地标记过期才刷新, 与 reactive(401)路径共享 CloudTokenManager
+        // 里的同一个 in-flight 去重任务, 避免并发刷新把轮换型 refresh_token 作废。
+        try await helper.tokenManager.refreshDeduped(.ifExpired, refresh: refreshToken).accessToken
     }
 
     /// 115 刷新只需 refresh_token,不需要 client_secret。
-    private func refreshToken(_ tokens: CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens {
+    // nonisolated: 只用 helper(Sendable)/静态常量/URLSession, 不碰可变 actor 状态,
+    // 这样能作为 @Sendable 闭包传给 tokenManager.refreshDeduped / withTokenRetry。
+    private nonisolated func refreshToken(_ tokens: CloudTokenManager.Tokens) async throws -> CloudTokenManager.Tokens {
         guard let rt = tokens.refreshToken else { throw CloudDriveError.tokenRefreshFailed("No refresh token") }
         let body = CloudDriveHelper.formURLEncodedBody([URLQueryItem(name: "refresh_token", value: rt)])
         var request = URLRequest(url: URL(string: "\(Self.passportBase)/refreshToken")!)

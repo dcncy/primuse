@@ -58,6 +58,50 @@ actor CloudTokenManager {
         getTokens()?.accessToken
     }
 
+    // MARK: - Deduplicated refresh
+
+    /// 刷新触发条件。
+    enum RefreshTrigger: Sendable {
+        case ifExpired               // proactive: 本地标记过期才刷
+        case ifMatches(String)       // reactive(401): 仅当当前 token 仍是被拒的那个才刷
+        case force                   // 无条件刷新
+    }
+
+    private var refreshTask: Task<Tokens, Error>?
+
+    /// 并发去重的 token 刷新 —— proactive(getToken 本地过期) 与 reactive(服务端 401)
+    /// 两条路径共享同一个 in-flight 任务, 只发一次刷新。refresh_token 轮换型 provider
+    /// (阿里云/OneDrive/Google/Dropbox/115) 第一路刷新成功后旧 token 即失效, 多路并发
+    /// 各自刷新会 invalid_grant 把账号踢下线。actor 串行化保证 check-then-set 原子:
+    /// 从读 refreshTask 到写入新 task 之间(getTokens 是同步调用)无挂起点。
+    func refreshDeduped(
+        _ trigger: RefreshTrigger,
+        refresh: @Sendable @escaping (Tokens) async throws -> Tokens
+    ) async throws -> Tokens {
+        guard let current = getTokens() else { throw CloudDriveError.notAuthenticated }
+        // 是否真的需要刷新: 若别的并发刷新已把 token 换掉(reactive)或它已不过期
+        // (proactive), 直接返回最新 token —— 不刷新、也不等可能正在进行的无关刷新,
+        // 避免一个失败的并发刷新连累本来 token 还有效的调用方。
+        let needsRefresh: Bool
+        switch trigger {
+        case .ifExpired: needsRefresh = current.isExpired
+        case .ifMatches(let rejected): needsRefresh = current.accessToken == rejected
+        case .force: needsRefresh = true
+        }
+        guard needsRefresh else { return current }
+        // 需要刷新: 有 in-flight 就共享其结果, 否则新建。从这里到 refreshTask = task
+        // 之间(getTokens 同步)无挂起点, actor 串行化保证 check-then-set 原子。
+        if let inFlight = refreshTask {
+            return try await inFlight.value
+        }
+        let task = Task<Tokens, Error> { try await refresh(current) }
+        refreshTask = task
+        defer { refreshTask = nil }
+        let refreshed = try await task.value
+        saveTokens(refreshed)
+        return refreshed
+    }
+
     // MARK: - App Credentials (user-provided client_id/secret)
 
     struct AppCredentials: Codable, Sendable {
